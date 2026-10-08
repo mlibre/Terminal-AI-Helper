@@ -345,12 +345,16 @@ _tai_menu_open() {
   #    cache is a menu about nothing, and the learned word completes those
   #    moves as it always has.
   if (( globable )); then
-    if (( dir_arg )); then
+    if (( dir_arg )) ; then
       if [[ "$word" != "." && "$word" != ".." && "$word" != "-" &&
             "$word" != "./" && "$word" != "../" ]]; then
         # Unquoted, exactly like the assignment below: quoted, the pattern
         # never compiles and the loop iterates once over the literal text.
-        for c in ${~word}*(N/); do out+=( "$c" ); outq+=( 1 ); done
+        # And the slash is appended here, because zsh's `(/)` qualifier
+        # SELECTS directories without marking them — the returned names are
+        # bare, and a cd menu reads `stemroot` where every other shell
+        # writes `stemroot/`.
+        for c in ${~word}*(N/); do out+=( "$c/" ); outq+=( 1 ); done
       fi
     else
       entries=( ${~word}*(N) )

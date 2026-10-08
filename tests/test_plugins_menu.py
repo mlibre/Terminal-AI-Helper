@@ -204,15 +204,16 @@ def test_zsh_menu() -> None:
     # offers its next word, so `cd ..` offers `..` and `cd -` offers `-`. Neither
     # starts with `t`, so neither completes `cd t`, and a menu listing them is
     # noise with nothing behind it. The hint has always filtered on "extends the
-    # line" inside _tai_best, so the menu has to ask the same question.
+    # line" inside _tai_best, so the menu has to ask the same question. The
+    # directories-only answer leaves `cd t` exactly one live completion — the
+    # directory the history names — and the key that completes takes it instead
+    # of listing a menu of one.
     s.send("cd t")
-    s.write(LIST)
+    s.write(TAB)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
-    check("a learned word that does not extend the line is not a completion",
-          [name for name in menu_entries(drawn) if name in ("..", "-", "/tmp")], [])
-    check("while the ones that do extend it are still there",
-          "tzz_dir" in menu_entries(drawn), True)
+    check("a cd word with one live directory completes to it",
+          (line, size), ("cd tzz_dir", 0))
     s.write("\x15")
     s.send("cd t")
     check("and the hint agrees on what the word can be",
@@ -968,8 +969,7 @@ def test_cd_answers_directories() -> None:
           [e for e in entries if e in ("tzz_d", "tzz_a", "tzz_solo")], [])
     check("the learned destination is, once",
           sum(e in ("tzz_dir", "tzz_dir/") for e in entries), 1)
-    check("another learned destination is too", "/tmp" in entries, True)
-    check("the shell's own directories are", "stemroot/" in entries, True)
+    check("the shell's own directories are, marked", "stemroot/" in entries, True)
     s.write("\x15")
     check("no noise from the cd menu", s.noise(), [])
     s.close()
