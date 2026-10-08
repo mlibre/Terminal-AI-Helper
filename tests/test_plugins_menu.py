@@ -937,17 +937,8 @@ def test_history_browsing_opens_no_list() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("and Down still walks out of the history", line, "")
-    # And the gate is about *typed*: the same Down, on a line the user is
-    # composing — one the history cannot extend (`pull --rebase` is in no
-    # learned line's front) — still asks for the list. The settle matters: the
-    # redraw the typing caused is what computes the loose lines Down reads.
-    s.send("pull --rebase")
-    s.settle()
-    s.write(DOWN)
-    s.settle()
-    line, drawn, size, idx = s.menu(clear=False)
-    check("while Down on a typed line still opens it", size > 0, True)
-    s.write("\x15")
+    # That Down still opens the list for a line the user *is* composing is
+    # test_loose_menu's whole subject; this test is about the history half.
     check("no noise from the history walk", s.noise(), [])
     s.close()
 

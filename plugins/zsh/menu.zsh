@@ -348,7 +348,9 @@ _tai_menu_open() {
     if (( dir_arg )); then
       if [[ "$word" != "." && "$word" != ".." && "$word" != "-" &&
             "$word" != "./" && "$word" != "../" ]]; then
-        for c in "${~word}*(N/)"; do out+=( "$c" ); outq+=( 1 ); done
+        # Unquoted, exactly like the assignment below: quoted, the pattern
+        # never compiles and the loop iterates once over the literal text.
+        for c in ${~word}*(N/); do out+=( "$c" ); outq+=( 1 ); done
       fi
     else
       entries=( ${~word}*(N) )
