@@ -144,7 +144,7 @@ _TAI_CMD=""
 # row, at most three rows, and each row only so wide. A learned line can be a
 # whole curl request, and a screen of those is worse than the three that fit.
 : ${_TAI_MENU_LOOSE_ROWS:=3}
-: ${_TAI_MENU_LOOSE_CELL:=20}
+: ${_TAI_MENU_LOOSE_CELL:=50}
 # Rows of files a path argument is answered from, and how much of each place is
 # read. The same four numbers live in tai/fresh.py for the one-shot path, and one
 # variable — TAI_FILE_ROOTS, colon separated — adds roots to both, because the

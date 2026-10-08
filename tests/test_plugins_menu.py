@@ -651,12 +651,13 @@ def test_pasted_text_is_not_a_typo() -> None:
         s = Session("zsh")
         # A pasted token that really is the text of a learned line still finds
         # it: the bound is about the *pattern*, not about losing the answer.
-        # Rows in a loose list are capped at _TAI_MENU_LOOSE_CELL=20 chars, so
+        # Rows in a loose list are capped at _TAI_MENU_LOOSE_CELL=50 chars, so
         # what is painted is a prefix of the line, not the whole thing.
         s.send(verbatim)
         s.settle()
         check("a pasted token typed verbatim still answers",
-              s._dump(clear=False)[2], "MENU=[\\n  curl https://exampl…] N=[1] IDX=[1]")
+              s._dump(clear=False)[2],
+              "MENU=[\\n  curl https://example.com/aaabbbccddeeffgg theend] N=[1] IDX=[1]")
         # …and one that is not in any line does not, because nothing may build a
         # 40-segment pattern out of it.
         s.write(CTRL_U)

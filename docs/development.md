@@ -346,7 +346,7 @@ Autocomplete changes:
 - `Tab` on a word nothing completes for leaves the line alone and does not crash
 - `Tab` with nothing to offer falls back to the shell's own completion
 - the loose list (the learned lines that mention what was typed, when nothing
-  extends it) shows at most three lines, each about twenty characters wide
+  extends it) shows at most three lines, each about fifty characters wide
 - a name on `PATH` that cannot be run is not offered as a command
 - `TAI_NO_MENU=1` puts `Tab` back the way it was
 - an installed command with no history, which must offer `tool --help`

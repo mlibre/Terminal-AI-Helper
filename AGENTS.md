@@ -372,6 +372,22 @@ They exist because each one was a reported failure.
   `--zero` is what makes a newline in a filename not a row break and `-N` is
   what stops a name being quoted. The cap is still a shortlist: the answer is
   `PER_ROOT` files of the *newest* files.
+- **A quoted subscript range on an array is one element, not N.**
+  `ranked=( "${ranked[1,$cap]}" )` trimmed the loose list to a single word
+  holding every entry joined by spaces — 22 lines went in, one joined cell
+  came out, and "the loose list is a glance" drew as one row. The unquoted
+  `${arr[a,b]}` would split nothing in zsh but can glob-expand, so the safe
+  spelling is the offset form: `"${arr[@]:0:$cap}"`. The older trim passed
+  tests because a prefix rarely matched more than a capful of lines; the user
+  whose index matched 256 saw the one-cell row.
+- **The remembered line the user means goes above the remembered line that
+  nearly is.** `_tai_loose` matched a typed word as "every letter in order",
+  so `forest` surfaced every aria2c URL with an f…o…r…e…s…t in it while
+  `cd tmp/fun-game/beauty-forest/` ranked by raw score below the noise. A
+  line holding every typed word *verbatim* now ranks first, and the fuzzy
+  in-order match — the typo tolerance — is the tail it falls into when no
+  exact line exists. Same for the ghost list's reasoning generally: a weaker
+  matcher widens recall only when the strong one returns nothing.
 - **`~word` is git's revision syntax as often as it is a home directory.**
   `expanduser("~main")` hands the token back unchanged because no account called
   `main` exists, `exists()` then says no, and MISSING is the only verdict that

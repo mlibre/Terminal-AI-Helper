@@ -77,8 +77,8 @@ _tai_menu_cell() {
   local -i cap
   if (( _TAI_MENU_LOOSE )); then
     # A learned line is not picked out letter by letter from the list, so the
-    # cell is not a width the terminal sets: the first twenty characters are
-    # enough to recognise the command, and a longer cell is a screen of curl.
+    # cell is not a width the terminal sets: enough characters to recognise
+    # the command, and a longer cell is a screen of curl.
     cap=$_TAI_MENU_LOOSE_CELL
   else
     cap=$(( ${COLUMNS:-80} - 4 ))

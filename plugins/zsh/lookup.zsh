@@ -292,7 +292,7 @@ _tai_word_pat() {
 
 _tai_loose() {
   local prefix="${1:l}"
-  local -a want order ranked pats
+  local -a want ranked pats exact fuzzy ranked_f
   local w line ll ok s t pat
   local -i i k
   # A pasted command is not a half-remembered one. Checked before the cache key
@@ -336,7 +336,7 @@ _tai_loose() {
   done
   for line in "${(@k)_TAI_SCORE[@]}"; do
     ll="${line:l}"
-    ok=1
+    ok=1; fuzzy_used=0
     for (( k = 1; k <= ${#want}; k++ )); do
       w=$want[k]; pat=$pats[k]
       # A word cannot occur in a line shorter than itself, and the test for that
@@ -346,12 +346,25 @@ _tai_loose() {
       (( ${#w} > ${#ll} )) && { ok=0; break }
       [[ "$ll" == *"$w"* ]] && continue
       [[ -n "$pat" && "$ll" == ${~pat} ]] || { ok=0; break }
+      fuzzy_used=1
     done
-    (( ok )) && order+=("$line")
+    (( ok )) || continue
+    if (( fuzzy_used )); then
+      fuzzy+=("$line")
+    else
+      exact+=("$line")
+    fi
   done
-  # Same ranking the rest of the index already uses: highest score first,
-  # capped. Insertion into a list that is bounded, so the cost stays constant.
-  for line in "${order[@]}"; do
+  # Two tiers: a line holding every typed word verbatim outranks one that only
+  # holds their letters in order. Without the tiers, `forest` was answered by
+  # whichever high-scoring line happened to have an f … o … r … e … s … t in it,
+  # and the line the user meant — the one with `forest` in it — ranked below
+  # the junk on score. Typo tolerance still applies, it just comes second.
+  # Same ranking the rest of the index already uses, per tier: highest score
+  # first, capped. Insertion into a list that is bounded, so the cost stays
+  # constant. Exact lines fill the list first; fuzzy lines only ever reach the
+  # tail.
+  for line in "${exact[@]}"; do
     s=${_TAI_SCORE[$line]:-0}
     if (( ${#ranked} >= $_TAI_LOOSE_CAP )); then
       t=${_TAI_SCORE[${ranked[-1]}]:-0}
@@ -364,14 +377,38 @@ _tai_loose() {
     if (( i > ${#ranked} )); then
       ranked+=("$line")
     else
-      local -a tail_=( "${ranked[i,-1]}" )
+      local -a tail_=( "${ranked[@]:$i-1}" )
       local -a head_=( )
-      (( i > 1 )) && head_=( "${ranked[1,i-1]}" )
+      (( i > 1 )) && head_=( "${ranked[@]:0:$i-1}" )
       ranked=( "${head_[@]}" "$line" "${tail_[@]}" )
     fi
     (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
-      ranked=( "${ranked[1,$_TAI_LOOSE_CAP]}" )
+      ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
   done
+  for line in "${fuzzy[@]}"; do
+    s=${_TAI_SCORE[$line]:-0}
+    if (( ${#ranked_f} >= $_TAI_LOOSE_CAP )); then
+      t=${_TAI_SCORE[${ranked_f[-1]}]:-0}
+      (( s <= t )) && continue
+    fi
+    for (( i = 1; i <= ${#ranked_f}; i++ )); do
+      t=${_TAI_SCORE[${ranked_f[i]}]:-0}
+      (( s > t )) && break
+    done
+    if (( i > ${#ranked_f} )); then
+      ranked_f+=("$line")
+    else
+      local -a tail_=( "${ranked_f[@]:$i-1}" )
+      local -a head_=( )
+      (( i > 1 )) && head_=( "${ranked_f[@]:0:$i-1}" )
+      ranked_f=( "${head_[@]}" "$line" "${tail_[@]}" )
+    fi
+    (( ${#ranked_f} > $_TAI_LOOSE_CAP )) && \
+      ranked_f=( "${ranked_f[@]:0:$_TAI_LOOSE_CAP}" )
+  done
+  ranked=( "${ranked[@]}" "${ranked_f[@]}" )
+  (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
+    ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
   _TAI_LOOSE_LINES=( "${ranked[@]}" )
   _TAI_LOOSE_CACHED=( "${ranked[@]}" )
   _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
