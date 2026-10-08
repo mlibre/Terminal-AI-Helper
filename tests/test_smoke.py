@@ -388,7 +388,10 @@ try:
         for i in range(fresh_mod.PER_ROOT + 4):
             old_one = many / f"aaa{i:02d}.mp4"
             old_one.write_text("x")
-            os.utime(old_one, (now - 30 * 86400, now - 30 * 86400))
+            # One second apart, `aaa00` the oldest: equal mtimes would leave the
+            # cap's cut to the filesystem's listing order, and then this test
+            # passes on one machine and fails on another for no code reason.
+            os.utime(old_one, (now - 30 * 86400 + i, now - 30 * 86400 + i))
         newest = many / "zzz-just-downloaded.AppImage"
         newest.write_text("x")
         os.utime(newest, (now, now))
@@ -403,8 +406,8 @@ try:
         from tai.fresh import PER_ROOT
         kept = [c for c in crowded if "/Downloads3/" in c]
         assert len(kept) == PER_ROOT, f"the cap stopped bounding the answer: {crowded}"
-        assert not any(c.endswith("aaa00.mp4") for c in crowded), \
-            f"the oldest file survived a cap meant to keep the newest: {crowded}"
+        assert not any(c.endswith(f"aaa{i:02d}.mp4") for i in range(4) for c in crowded), \
+            f"an oldest file survived a cap meant to keep the newest: {crowded}"
         # Put the root list back: the assertions below are about the default
         # roots, and an environment variable left pointing at a scratch
         # directory would make them pass or fail for the wrong reason.

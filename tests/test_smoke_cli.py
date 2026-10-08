@@ -442,6 +442,10 @@ try:
     for _p in _gen_paths[:2]:
         assert _p.exists(), f"the writer did not produce {_p}"
     for _shell, _plugin in (("zsh", "plugins/tai.zsh"), ("bash", "plugins/tai.bash")):
+        # A bash-only machine skips the zsh half rather than failing here; the
+        # rest of this suite has already run, which is the point of the suite.
+        if _shell == "zsh" and not shutil.which("zsh"):
+            continue
         _env = dict(os.environ, TAI_INDEX=_gen_index, TAI_HISTORY_FILES="")
         # zsh needs `-f` (no rc) and bash must not read a profile; both take the
         # program with `-c`.

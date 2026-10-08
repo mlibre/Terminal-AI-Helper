@@ -130,7 +130,10 @@ def files(word: str = "", cwd: str = "") -> list[str]:
         for directory, written in roots(cwd):
             found += _scan(os.path.join(directory, (pattern_word or "") + "*"),
                            len(directory) + 1, written)
-    found.sort(key=lambda pair: -pair[0])
+    # Ties by name: a same-second download batch answered in glob order is a
+    # different list from one call to the next on some filesystems, and a hint
+    # that reshuffles while the disk stands still reads as a wrong answer.
+    found.sort(key=lambda pair: (-pair[0], pair[1]))
     return [name for _, name in found]
 
 
@@ -170,5 +173,7 @@ def _scan(pattern: str, cut: int, written: str) -> list[tuple[float, str]]:
         out.append((mtime, f"{written}{name[cut:]}"))
     # Newest first, then the cap. `files()` sorts the roots together afterwards,
     # so this ordering only decides which entries of *this* root survive it.
-    out.sort(key=lambda pair: -pair[0])
+    # Ties by name, so which of an equal-mtime batch the cap keeps is decided
+    # here and not by the order the filesystem happened to list them in.
+    out.sort(key=lambda pair: (-pair[0], pair[1]))
     return out[:PER_ROOT]

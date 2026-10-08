@@ -364,6 +364,15 @@ with tempfile.TemporaryDirectory() as fake_home:
     assert "! bash: could not update" in neither.stderr, neither.stderr
 print("OK — install: two lines and one command, and no ✓ it cannot back up.")
 
+# Everything below speaks to a real zsh: the pause is install.sh editing a
+# zshrc, which it only does when zsh itself is present, and the errexit checks
+# source the plugin in one. A machine without zsh skips from here instead of
+# failing — the rest of test.sh still runs, which is the deal test.sh offers a
+# bash-only box.
+if not shutil.which("zsh"):
+    print("SKIP — the remaining install checks need the zsh binary; none here.")
+    sys.exit(0)
+
 # zsh-autosuggestions, which Manjaro's prompt loads for you. The installer pauses
 # it and `tai uninstall` gives it back, so both halves are exercised here: a block
 # added but never removed is a user's shell quietly configured differently from how

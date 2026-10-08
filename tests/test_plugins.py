@@ -71,6 +71,8 @@ def test_bash() -> None:
 
 
 def test_zsh() -> None:
+    if not SHELLS["zsh"]:
+        return
     print("zsh ghost text and keys")
     # Read ZLE's own view of the suggestion from inside a widget. Asserting on
     # the bytes ZLE paints is unreliable, because how the post-display region
@@ -298,6 +300,10 @@ def test_each_shell_reads_its_own_index() -> None:
     observable rather than merely wrong on paper.
     """
     for shell, want in (("zsh", ZSH_INDEX), ("bash", BASH_INDEX)):
+        # A machine without one of the shells skips its half rather than
+        # failing here; the other shell's assertions still run.
+        if not SHELLS[shell]:
+            continue
         # A live session, and the file it actually resolved. Read out of the
         # running shell rather than re-deriving it here, so a plugin that
         # resolved the wrong path cannot agree with this test by construction.
@@ -349,6 +355,9 @@ def test_a_foreign_index_is_not_executed() -> None:
     good_bash = BASH_INDEX.read_text()
     for shell, path, good in (("zsh", ZSH_INDEX, good_zsh),
                               ("bash", BASH_INDEX, good_bash)):
+        # Same deal as everywhere else: a missing shell skips its half.
+        if not SHELLS[shell]:
+            continue
         for label, text in (
             ("the wrong file entirely", "hello world\n_TAI_SCORE=()\n"),
             ("a header with something else under it",

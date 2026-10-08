@@ -457,6 +457,8 @@ def test_loose_menu() -> None:
     kept after Enter until a second one runs it. Also the key-sequence
     wiring: an rc file that bound the arrows somewhere else still gets
     the armed list from the same key."""
+    if not SHELLS["zsh"]:
+        return
     print("zsh loose menu, armed by the down arrow")
     # Words that no learned line starts with, but that learned lines do
     # contain: the glimpse comes up by itself, and Down steps into it.
