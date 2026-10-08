@@ -368,8 +368,10 @@ _tai_query_do() {
     # Last resort, and only while the line is still just the command name or has
     # just opened its first argument. `9router --p` is not answered with
     # `9router --help`; that would be a value the plugin then has to discard as
-    # "not an extension".
-    if [[ "$prefix" == "$first" || "$prefix" == *' ' ]] && _tai_installed "$first"; then
+    # "not an extension". A directory argument is never answered with --help:
+    # `cd --help` is a man page where a destination was asked for.
+    if ! _tai_dirarg "$prefix" && [[ "$prefix" == "$first" || "$prefix" == *' ' ]] \
+        && _tai_installed "$first"; then
       _TAI_BEST="$first --help"
       _TAI_BEST_HELP=1
     fi
@@ -385,6 +387,31 @@ _tai_query_do() {
   fi
   if [[ -z "$_TAI_BEST" && "$prefix" != *$'\n'* && ${#prefix} -ge $_TAI_LOOSE_MIN_PREFIX ]]; then
     _tai_loose "$prefix"
+    # A cd line in the glimpse is a destination someone once stood in, and
+    # "somewhere else" is exactly where it can stay: the loose list is filtered
+    # here rather than inside _tai_loose because the glimpse cache outlives the
+    # directory — a list filtered for this directory would be served, from the
+    # cache, in the next one. A line that does not begin with the destination
+    # command is not a cd answer at all, and a compound (`cd x && make`) is
+    # judged by its destination, its second word, not by whatever ends it.
+    if _tai_dirarg "$prefix"; then
+      local -a live_l
+      local dline
+      for dline in "${_TAI_LOOSE_LINES[@]}"; do
+        [[ "$dline" == (cd|pushd)' '* ]] || continue
+        _tai_destination_live "${${dline#* }%% *}" && live_l+=( "$dline" )
+      done
+      _TAI_LOOSE_LINES=( "${live_l[@]}" )
+    fi
+  fi
+
+  # A learned cd destination was judged for liveness where it was recorded,
+  # and alive there. From the directory the user stands in now it can be
+  # anything but — bare `vllm` offered two directories away from vllm is the
+  # reported case, and Enter on it answers "no such file or directory". One
+  # builtin stat, paid only on a line whose head is cd or pushd.
+  if [[ -n "$_TAI_BEST" ]] && _tai_dirarg "$prefix"; then
+    _tai_destination_live "${_TAI_BEST##* }" || _TAI_BEST=""
   fi
 }
 

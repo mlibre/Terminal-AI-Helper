@@ -72,6 +72,16 @@ Each one exists because of a reported failure.
   read statically is *unknown*, and unknown never removes anything. Only `cd`
   and `pushd`, only the first argument, and never a leading dash are judged as
   paths — `cd -` is "go back".
+- **A directory argument is answered by directories that exist here.** After
+  `cd`/`pushd` no file is ever offered (the shell answers "not a directory"),
+  and a relative destination learned somewhere else is tested from the
+  directory the user stands in — one builtin stat in the plugins, the same
+  rule in the ghost, the menu, the loose glimpse and the completion.
+- **A buffer that arrived from the history is not typed.** The loose list is
+  for a line the user is composing: Up-then-Down through the history moves
+  history, and the arrows clear the typed flag on their way to the fallback.
+  Opening the list on a recalled line armed it with itself as its only row —
+  the reported "stuck in a list".
 - **The shell plugin and the Python path must agree.** `_tai_query`,
   `tai suggest`, and the file-root rule in `plugins/zsh/files.zsh`,
   `plugins/bash/files.bash`, and `tai/fresh.py` are three implementations of

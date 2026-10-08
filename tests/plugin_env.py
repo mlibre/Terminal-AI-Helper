@@ -185,6 +185,8 @@ RIGHT = "\x1b[C"      # right arrow, normal cursor-key mode
 RIGHT_APP = "\x1bOC"  # right arrow, application cursor-key mode: what konsole and
                       # every xterm-compatible terminal send once ZLE has enabled
                       # it with terminfo's smkx at line-init
+UP = "\x1b[A"         # up arrow, normal cursor-key mode: the plugin binds both
+DOWN = "\x1b[B"       # down arrow spellings, so the tests use the plain ones
 TAB = "\t"
 ENTER = "\r"         # what a terminal sends for Enter; zsh reads it as ^M
 CTRL_F = "\x06"

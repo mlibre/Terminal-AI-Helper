@@ -116,16 +116,41 @@ _tai_complete() {
   # there at all. Read through the same lookup _tai_query makes, so bash and
   # zsh answer the same question the same way — answered in globals, not in a
   # process substitution, which was a fork per completion press.
-  _tai_file_answer "$line"
-  for c in "${_TAI_FILES[@]}"; do
-    [[ -n "$c" ]] && _tai_reply "$c"
-  done
-  # readline replaces the *current word* with each entry, so a whole command
-  # line as an entry would be inserted in the middle of the line. Offer the
-  # last word; everything before it is already typed.
+  # Never on a directory argument: a file after `cd` is the one thing the
+  # shell refuses.
+  local dir_arg=0
+  _tai_dirarg "$line" && dir_arg=1
+  if (( ! dir_arg )); then
+    _tai_file_answer "$line"
+    for c in "${_TAI_FILES[@]}"; do
+      [[ -n "$c" ]] && _tai_reply "$c"
+    done
+  fi
+  # A directory argument is answered by directories: the shell's own list
+  # first — `compgen -d` is a builtin, and this is Tab time, not the
+  # keystroke path — then the learned words, each one tested with the same
+  # liveness rule the ghost applies. `tzz_dir` from the history and `tzz_dir/`
+  # from the listing are one completion said twice, so the slash-stripped
+  # forms dedup against each other and the learned form wins.
+  local stem x
   while IFS= read -r c; do
     [[ -n "$c" && "$c" == "$line"* ]] && _tai_reply "${c##*[[:space:]]}"
   done <<< "$values"
+  if (( dir_arg )); then
+    local curw=""
+    [[ "$line" != *' ' ]] && curw="${line##* }"
+    while IFS= read -r c; do
+      [[ -n "$c" ]] || continue
+      stem="${c%/}"
+      for x in "${COMPREPLY[@]}"; do
+        [[ "$x" == "$stem" || "$x" == "$stem/" ]] && c="" && break
+      done
+      # The slash is the zsh menu's own marking of a directory, and readline
+      # is told `nospace`, so without it here the entry reads `tmp` where
+      # every other shell writes `tmp/`.
+      [[ -n "$c" ]] && _tai_reply "$c/"
+    done < <(compgen -d -- "$curw")
+  fi
 }
 
 # Add one completion, once. A learned file argument that still exists is offered

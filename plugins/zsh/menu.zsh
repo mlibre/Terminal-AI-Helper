@@ -198,7 +198,7 @@ _tai_menu_open() {
   # `cat \"my`.
   local -a out outq entries dirs kept keptq
   local -A isdir dup
-  local word before c rest p
+  local word before c rest p real
   local -i len=${#BUFFER} i skip width term limit added=0 cap=0
 
   # The width of the terminal, which the layout below is built to. Read once
@@ -206,6 +206,13 @@ _tai_menu_open() {
   # many columns it will end up with.
   term=${COLUMNS:-0}
   (( term > 0 )) || term=80
+
+  # A directory argument changes what the word can be. After `cd` and `pushd`
+  # a file is an error the user has to notice and retype, so every source
+  # below is filtered for it: no file answer, no --help, a dirs-only glob,
+  # and a learned destination has to be a directory *from here*.
+  local -i dir_arg=0
+  _tai_dirarg "$before" && dir_arg=1
 
   # The word the cursor is on, and the line in front of it. The index is keyed
   # on whole lines, so a lookup needs both.
@@ -245,7 +252,9 @@ _tai_menu_open() {
   #    disagree about which file `chmod +x ` means. That lookup is _TAI_BEST from
   #    the last redraw, which described this line: a keystroke that changed the
   #    line has already run _tai_update and put it back in step.
-  if _tai_file_answer "$BUFFER"; then
+  #    Never on a directory argument: the file answer answers with files, and
+  #    after `cd` a file is the one thing the shell refuses.
+  if (( ! dir_arg )) && _tai_file_answer "$BUFFER"; then
     out+=( "${_TAI_FILES[@]}" )
     outq+=( "${_TAI_FILES_Q[@]}" )
   fi
@@ -265,7 +274,7 @@ _tai_menu_open() {
   # `9router --p` is never answered with `--help`. When the command name *is* the
   # word being typed the completion is that name again, and the filter below
   # throws it away like any other candidate that says nothing new.
-  if (( ! ${#_TAI_LINES} )) && [[ "$before" == *' ' ]]; then
+  if (( ! dir_arg )) && (( ! ${#_TAI_LINES} )) && [[ "$before" == *' ' ]]; then
     c="${before%% *}"
     _tai_installed "$c" && { out+=( --help ); outq+=( 0 ) }
   fi
@@ -328,14 +337,26 @@ _tai_menu_open() {
   #    sorted. Directories are marked, so the list reads as paths. `globable` is
   #    the same question as above: both of these are patterns built from the
   #    typed word, so neither is safe to compile when it will not parse.
+  #    On a directory argument the glob answers with directories only — the
+  #    file half of this listing is what put `AGENTS.md` after `cd `. The five
+  #    relative moves skip the glob entirely: `cd .` listing the dot-directory
+  #    cache is a menu about nothing, and the learned word completes those
+  #    moves as it always has.
   if (( globable )); then
-    entries=( ${~word}*(N) )
-    dirs=( ${~word}*(N/) )
-    for c in "${dirs[@]}"; do isdir[${c%/}]=1; done
-    for c in "${entries[@]}"; do
-      if (( ${+isdir[$c]} )); then out+=( "$c/" ); else out+=( "$c" ); fi
-      outq+=( 1 )
-    done
+    if (( dir_arg )); then
+      if [[ "$word" != "." && "$word" != ".." && "$word" != "-" &&
+            "$word" != "./" && "$word" != "../" ]]; then
+        for c in "${~word}*(N/)"; do out+=( "$c" ); outq+=( 1 ); done
+      fi
+    else
+      entries=( ${~word}*(N) )
+      dirs=( ${~word}*(N/) )
+      for c in "${dirs[@]}"; do isdir[${c%/}]=1; done
+      for c in "${entries[@]}"; do
+        if (( ${+isdir[$c]} )); then out+=( "$c/" ); else out+=( "$c" ); fi
+        outq+=( 1 )
+      done
+    fi
   fi
   fi
 
@@ -368,6 +389,15 @@ _tai_menu_open() {
     [[ -n "$c" && "$c" != "$word" && "$c" == "$word"* ]] || continue
     _tai_clean "$c" || continue
     [[ -z "${dup[${c%/}]}" ]] || continue
+    if (( dir_arg )) && [[ "$c" != "-" ]]; then
+      # A learned destination was judged for liveness where it was recorded;
+      # from here it may be gone, and bare `vllm` two directories away from
+      # vllm is the reported case. One builtin stat per surviving candidate,
+      # and `-` is the shell's own slot, which works everywhere.
+      real="$c"
+      [[ "$real" == "~"* ]] && real="${real/#\~/$HOME}"
+      [[ -d "$real" ]] || continue
+    fi
     dup[${c%/}]=1
     _TAI_MENU+=( "$c" ); _TAI_MENU_Q+=( "${outq[i]}" )
   done

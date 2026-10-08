@@ -84,6 +84,25 @@ def test_bash_menu() -> None:
     check("no noise from the coloured listing", s.noise(), [])
     s.close()
 
+    # A directory argument is answered by directories and by nothing else: the
+    # shell's own `compgen -d` list, learned words tested for liveness, and no
+    # file anywhere in it — `cd tzz_a` is an error the user would have to
+    # notice and retype. TAI_COMPLETE_ALL=1 is what puts tai on the default
+    # completion, which is where a `cd ` Tab lands.
+    s = Session("bash", env_extra={"TAI_COMPLETE_ALL": "1"})
+    s.run(f"cd {MENU_DIR}")
+    s.send("cd ")
+    mark = len(s.seen)
+    s.write(TAB)
+    s.settle()
+    raw = s.raw()[mark:]
+    check("bash offers the directories after cd", "stemroot/" in raw, True)
+    check("and the learned destination", "tzz_dir" in raw, True)
+    check("but no file, however fresh",
+          "tzz_a" not in raw and "tzz_solo" not in raw, True)
+    check("no noise from the cd listing", s.noise(), [])
+    s.close()
+
 
 def test_zsh_menu() -> None:
     """Tab lists the completions, Tab moves the mark, Enter takes one.
@@ -387,16 +406,24 @@ def test_zsh_menu_stem() -> None:
     s = Session("zsh")
     s.run(f"cd {MENU_DIR}")
 
+    # Four entries, not five: `stemroot/` holds a directory argument's menu,
+    # and `stem_zeta.iso` is a file — the shell answers `cd stem_zeta.iso`
+    # with "not a directory", so the menu does not offer it. The long
+    # directory name still sets the width of every cell, which is the half
+    # of the cost the stem rule answers.
+    stem_dirs = [n for n in STEM_NAMES if n.endswith("/")]
     s.send("cd stemroot/")
     s.write(TAB)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("the stem is drawn once, by the line, and not on every row",
-          menu_entries(drawn), STEM_NAMES)
+          menu_entries(drawn), stem_dirs)
     check("the line is untouched", line, "cd stemroot/")
-    check("every entry is there", size, len(STEM_NAMES))
+    check("every entry is there", size, len(stem_dirs))
+    check("a file is not offered after cd",
+          "stem_zeta.iso" in menu_entries(drawn), False)
     check("the first entry is selected",
-          selected_entry(screen_of(s)), STEM_NAMES[0])
+          selected_entry(screen_of(s)), stem_dirs[0])
     s.write(ENTER)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
@@ -862,6 +889,82 @@ def test_loose_tiers() -> None:
         write_index()
 
 
+def test_history_browsing_opens_no_list() -> None:
+    """Up through the history and Down again is history, not a menu.
+
+    The reported case: a few Ups to read previous commands, a Down or two to
+    come back, and somewhere in the middle the loose list opened — armed on a
+    line nobody typed, its only row the very line already on the prompt. Down
+    on a buffer that arrived from the history means the next history entry;
+    the list is for a line the user is composing. The gate is a typed flag:
+    set by the widgets that mean an edit, cleared by the arrows on their way
+    to history, and required before Down (or a redraw) opens the loose list.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh up-down history browsing opens no list")
+    s = Session("zsh")
+    s.run(f"cd {MENU_DIR}")
+    s.run("git status")          # two lines in the history, the first learned
+    s.write(UP)
+    s.settle()
+    s.write(UP)
+    s.settle()
+    s.write(DOWN)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("Down over a history line does not open the list", size, 0)
+    check("and the history moved instead", line, "git status")
+    s.write(DOWN)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("and Down still walks out of the history", line, "")
+    # And the gate is about *typed*: the same Down, on a line the user is
+    # composing — one the history cannot extend (`pull --rebase` is in no
+    # learned line's front), still asks for the list.
+    s.send("pull --rebase")
+    s.write(DOWN)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("while Down on a typed line still opens it", size > 0, True)
+    s.write("\x15")
+    check("no noise from the history walk", s.noise(), [])
+    s.close()
+
+
+def test_cd_answers_directories() -> None:
+    """`cd` is answered by directories, and only by ones that exist here.
+
+    The reported case: `cd ` listed `AGENTS.md` and the other files of the
+    current directory, because the directory glob offered every entry and the
+    file answer answers any path-shaped word. Enter on any of it answers
+    "not a directory". The other half: a learned destination is alive where it
+    was recorded, and from here bare `vllm` — two directories away from vllm —
+    is the same error with a history lesson attached.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh a cd menu of directories only")
+    s = Session("zsh")
+    s.run(f"cd {MENU_DIR}")
+    s.send("cd ")
+    s.write(LIST)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    entries = menu_entries(drawn)
+    check("the menu opened", size > 0, True)
+    check("no file is offered after cd",
+          [e for e in entries if e in ("tzz_d", "tzz_a", "tzz_solo")], [])
+    check("the learned destination is, once",
+          sum(e in ("tzz_dir", "tzz_dir/") for e in entries), 1)
+    check("the shell's own directories are", "stemroot/" in entries, True)
+    check("a relative move is still on offer", ".." in entries, True)
+    check("and the slot is too", "-" in entries, True)
+    s.write("\x15")
+    check("no noise from the cd menu", s.noise(), [])
+    s.close()
+
+
 def main() -> int:
     setup()
     test_bash_menu()
@@ -872,6 +975,8 @@ def main() -> int:
     test_loose_tiers()
     test_pasted_text_is_not_a_typo()
     test_unpaintable_rows_are_never_drawn()
+    test_history_browsing_opens_no_list()
+    test_cd_answers_directories()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")

@@ -29,6 +29,16 @@ typeset -g _TAI_PASTE_PREV=""
 typeset -gi _TAI_PASTE_QUIET=0
 typeset -gi _TAI_PASTE_JUMP=25
 
+# Is the line *typed*? A history line is not: Up fills the buffer with a
+# command the user ran once, and on that buffer Down means "the next history
+# entry" — it did not mean "open the list" until something was typed. The flag
+# is set by the widgets that mean editing (insert, delete, taking a hint) and
+# cleared when a whole line arrives some other way: the arrow widgets below
+# clear it as they hand the key to history, and a new line starts without it.
+# Without the flag, Up-then-Down through the history opened the loose list on
+# a line nobody typed, with the line itself as its only row.
+typeset -gi _TAI_TYPED=0
+
 _tai_paste_state() {
   # The unwrapped case: how far the buffer moved since the last redraw. One
   # character in either direction is a keystroke — typed or removed — and ends
@@ -61,6 +71,14 @@ fi
 
 _tai_update() {
   local -i ours_was=$_TAI_DREW
+  # What the last widget was decides whether this buffer is typed. The hook
+  # runs after every widget, and the names here are the ones that mean an
+  # edit; anything else leaves the flag as it was, because "unknown" is not
+  # evidence either way and the arrows speak for themselves.
+  case "${LASTWIDGET:-}" in
+    self-insert*|backward-delete-char*|delete-char*|tai-accept|tai-accept-word|tai-accept-or-complete|tai-tab|tai-enter)
+      _TAI_TYPED=1 ;;
+  esac
   _TAI_SUGGESTION=""
   region_highlight=()
   # The menu stands in for the ghost while it is open, and POSTDISPLAY holds one
@@ -106,7 +124,7 @@ _tai_update() {
   # removed character re-arms the glimpse, and Down asks for it directly at any
   # time.
   if (( ! _TAI_MENU_IDX )) && [[ -z "$_TAI_BEST" ]] && \
-     (( ! _TAI_PASTE_QUIET )) && \
+     (( _TAI_TYPED )) && (( ! _TAI_PASTE_QUIET )) && \
      (( ${#BUFFER} >= _TAI_LOOSE_MIN_PREFIX )) && \
      (( ${#_TAI_LOOSE_LINES} )) && \
      [[ -z "${_TAI_SCORE[$BUFFER]:-}" ]] && \
@@ -383,10 +401,15 @@ tai-arrow-down() {
     return
   fi
   if [[ "${TAI_NO_MENU:-0}" != "1" && -z "$_TAI_BEST" && \
+        $_TAI_TYPED -eq 1 && \
+        -z "${_TAI_SCORE[$BUFFER]:-}" && "$BUFFER" != "$_TAI_MENU_DISMISS" && \
         ${#BUFFER} -ge $_TAI_LOOSE_MIN_PREFIX && ${#_TAI_LOOSE_LINES} -gt 0 ]]; then
-    # Asked for by arrow, not by a redraw: the list arrives armed.
+    # Asked for by arrow, not by a redraw: the list arrives armed. Asked for
+    # by arrow on a *typed* line, that is — a buffer that arrived from the
+    # history is a line the user ran once, and Down on it means history.
     _tai_menu_open_loose && _TAI_MENU_ARMED=1 && _tai_menu_paint
   else
+    _TAI_TYPED=0
     zle "$_TAI_DOWN_FALLBACK"
   fi
 }
@@ -406,6 +429,7 @@ tai-arrow-up() {
     fi
     return
   fi
+  _TAI_TYPED=0
   zle "$_TAI_UP_FALLBACK"
 }
 zle -N tai-arrow-up
@@ -447,9 +471,11 @@ _tai_line_init() {
   _TAI_HINT=""
   _TAI_DREW=0
   _TAI_MENU_DISMISS=""
-  # A new line is a new story: no paste has arrived on it yet.
+  # A new line is a new story: no paste has arrived on it yet, and nothing
+  # on it is typed.
   _TAI_PASTE_PREV=""
   _TAI_PASTE_QUIET=0
+  _TAI_TYPED=0
   # And no directory snapshot is worth keeping either: the file answer reads
   # its snapshots for a second after taking them, and a line that starts now
   # should not be answered by what was on disk while the last one was edited.

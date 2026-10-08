@@ -110,6 +110,31 @@ _tai_installed() { command -v -- "$1" >/dev/null 2>&1; }
 
 _TAI_WRAPPERS=" sudo doas nohup time nice ionice stdbuf command "
 
+# The head of the line, behind one wrapper: is this a command that takes a
+# directory and nothing else? `cd` and `pushd` are the whole closed list — the
+# same list tai/paths.py judges destinations with, and the reason no file is
+# ever offered after `cd`: the shell answers "not a directory", and a
+# suggestion the shell refuses is not a suggestion.
+_tai_dirarg() {
+  local head="${1%% *}" rest
+  if [[ "$_TAI_WRAPPERS" == *" $head "* ]]; then
+    rest="${1#* }"
+    head="${rest%% *}"
+  fi
+  [[ "$head" == "cd" || "$head" == "pushd" ]]
+}
+
+# A directory from where the user stands. `-` is the shell's own slot and
+# works in every directory; `~` is rewritten and tested; everything else is
+# tested as written — a relative destination recorded somewhere else is
+# exactly the suggestion that fails with "no such file or directory" here.
+_tai_destination_live() {
+  local t="$1"
+  [[ "$t" == "-" ]] && return 0
+  [[ "$t" == "~"* ]] && t="${t/\~/$HOME}"
+  [[ -d "$t" ]]
+}
+
 # Rank the line behind the wrapper and put the wrapper back. `sudo git ` completes
 # from the `git ...` the user has run.
 _tai_wrapped() {
@@ -221,7 +246,13 @@ _tai_query() {
       [[ "$out" == "$prefix"* && "$out" != "$prefix" ]] || out=""
     fi
   fi
-  if [[ -z "$out" ]]; then
+  # An installed command the history has never seen. `--help` is the only thing
+  # worth offering: the bare name is an echo of what is already typed, and any
+  # flag would be a guess. `command -v` is a builtin, so this costs no process,
+  # and it only runs when the index has no answer, so a tool with learned
+  # knowledge never reaches it. A directory argument is never answered with
+  # --help: `cd --help` is a man page where a destination was asked for.
+  if [[ -z "$out" ]] && ! _tai_dirarg "$prefix"; then
     first="${prefix%% *}"
     # Last resort, and only while the line is still just the command name or has
     # just opened its first argument. `tool --p` is not answered with
@@ -229,6 +260,14 @@ _tai_query() {
     if [[ "$prefix" == "$first" || "$prefix" == *' ' ]] && _tai_installed "$first"; then
       out="$first --help"
     fi
+  fi
+  # A learned cd destination was judged for liveness where it was recorded,
+  # and alive there. From the directory the user stands in now it can be
+  # anything but — bare `vllm` offered two directories away from vllm is the
+  # reported case, and Enter on it answers "no such file or directory". One
+  # builtin stat, paid only on a line whose head is cd or pushd.
+  if [[ -n "$out" ]] && _tai_dirarg "$prefix"; then
+    _tai_destination_live "${out##* }" || out=""
   fi
   _TAI_OUT="$out"
 }

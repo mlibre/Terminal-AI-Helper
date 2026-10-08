@@ -161,6 +161,20 @@ that one; `chmod +x Down` is not answered from `~/Downloads`. And a word that
 names a directory is completed by what is inside it — `cat ~/tmp` reads
 `~/tmp/x`, not `~tmpx`.
 
+### cd is answered by directories that exist here
+
+`cd ` lists destinations — directories of the current directory, and the ones
+the history holds — never a file, because the shell answers "not a directory".
+A destination learned somewhere else is judged from where you stand: a bare
+`vllm` recorded in another directory is not offered two directories away from
+vllm, which is the difference between a memory and an error message.
+
+### History navigation is history
+
+Up-then-Down through the history moves through the history. The loose list
+opens for a line you are *typing* — Down still asks for it there — and a line
+that arrived from the history is never answered with a list of itself.
+
 ### systemctl completes its units
 
 `sudo systemctl restart her<Tab>` cycles the real unit files, like Manjaro's

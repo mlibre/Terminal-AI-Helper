@@ -96,6 +96,31 @@ _tai_globable() {
   [[ "$1" != *[\(\)\[\]\^\<\>\|]* ]]
 }
 
+# The head of the line, behind one wrapper: is this a command that takes a
+# directory and nothing else? `cd` and `pushd` are the whole closed list — the
+# same list tai/paths.py judges destinations with, and the reason the menu and
+# the ghost must never offer a file after `cd`: the shell would answer
+# "not a directory", and a suggestion the shell refuses is not a suggestion.
+# Three callers (ghost, menu, loose glimpse) ask once per line, so the answer
+# costs two parameter expansions and one pattern test.
+_tai_dirarg() {
+  local head="${1%% *}"
+  (( ${_TAI_WRAPPERS[(I)head]} )) && { head="${1#* }"; head="${head%% *}"; }
+  [[ "$head" == (cd|pushd) ]]
+}
+
+# A directory from where the user stands. `-` is the shell's own slot and
+# works in every directory; `~` is rewritten and tested; everything else is
+# tested as written, which is the point — a relative destination recorded
+# somewhere else is exactly the suggestion that fails with "no such file or
+# directory" here, and one builtin stat is what catches it.
+_tai_destination_live() {
+  local t="$1"
+  [[ "$t" == "-" ]] && return 0
+  [[ "$t" == "~"* ]] && t="${t/#\~/$HOME}"
+  [[ -d "$t" ]]
+}
+
 # A name from the filesystem, written so a shell passes it as one word.
 #
 # `cat ` answered with `My Document.pdf` and the arrow wrote it into the line

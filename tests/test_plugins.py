@@ -307,7 +307,12 @@ def test_each_shell_reads_its_own_index() -> None:
         # A live session, and the file it actually resolved. Read out of the
         # running shell rather than re-deriving it here, so a plugin that
         # resolved the wrong path cannot agree with this test by construction.
+        # The session stands in MENU_DIR, because the answer it reads is a
+        # *destination* — `cd tzz_dir` — and a destination is judged from where
+        # the user stands: from the repository root it is dead, and the plugin
+        # is right to stay silent about it.
         s = Session(shell)
+        s.run(f"cd {MENU_DIR}")
         try:
             scratch = s.buf.with_name("tai_index_name.txt")
             scratch.unlink(missing_ok=True)
