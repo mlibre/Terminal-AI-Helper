@@ -54,10 +54,9 @@ each runnable on its own; `./test.sh` runs them all. Three of them share
 `smoke_env.py` and six share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences:
 
-- **A test function that no `main()` calls is not a test.** One sat unrun for a
-  while with an expectation the plugin had outgrown — the `region_highlight` span
-  of the ghost text — and failed on the first run once it had a `main()` of its
-  own. Adding a test means adding the call.
+- **A test function that no `main()` calls is not a test.** Adding a test
+  means adding the call. See "A test nobody calls is not a test" in
+  [AGENTS.md](../AGENTS.md).
 - **The shared modules are the only copy.** The fixture writer, the key names,
   the screen model and the `Session` live in `plugin_*`, the scratch world in
   `smoke_env.py`. A test that defines its own copy of any of those is a second
@@ -204,15 +203,14 @@ the plugin to be innocent.**
 
 ### The plugin index fixture
 
-Every plugin test reads an index `tests/plugin_env.py` builds. That fixture is
-the generator: it imports `WORD_KEY_MAX_DEPTH` and `WORD_CANDIDATE_CAP` from
-`tai.index` rather than restating them, and `test_fixture_matches_generator`
-asserts the two agree on the key set and the candidate lists.
-
-A fixture that is a *plausible stand-in* is worse than no fixture. One that wrote
-single-word and trailing-space `_TAI_WORD` keys — neither of which the generator
-writes — made wrapper transparency pass in CI while answering nothing on a real
-install, because those keys are exactly the ones that lookup reads.
+Every plugin test reads an index `tests/plugin_env.py` builds. The fixture
+imports `WORD_KEY_MAX_DEPTH` and `WORD_CANDIDATE_CAP` from `tai.index` rather
+than restating them, and `test_fixture_matches_generator` asserts the two agree
+on the key set and the candidate lists — the fixture is the generator's own
+output, not a stand-in. Why a stand-in is not good enough: it once wrote
+single-word and trailing-space `_TAI_WORD` keys, neither of which the
+generator writes, which made wrapper transparency pass in CI while answering
+nothing on a real install.
 
 ## Working on the shell plugins
 

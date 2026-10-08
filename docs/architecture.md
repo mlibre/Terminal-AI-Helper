@@ -100,21 +100,17 @@ on the first word (`tai/typo.py`). The full weight list lives at the top of
 `tai/engine.py`.
 
 Three of the rules are about what may be *ranked* rather than how, and they live
-in `tai/paths.py` because they are about whether a candidate still exists:
+in `tai/paths.py` because they are about whether a candidate still exists. Each
+is stated fully, with its failure history, in [AGENTS.md](../AGENTS.md):
 
 - **Path liveness.** A command whose path is gone is not suggested, however
-  often it was run. The check is deliberately conservative: a token it cannot
-  read statically is *unknown*, and unknown never removes anything. `~main` is
-  the clearest case — it is a git revision at least as often as it is a home
-  directory, and it is only a home directory when that account exists.
-- **`cd` destinations.** `..`, `.` and `-` are true in every directory that has
-  ever existed, so their frequency is evidence about walking back up, not about
-  where to be. They rank below every real destination and are never removed.
+  often it was run. The check is deliberately conservative: unknown never
+  removes anything.
+- **`cd` destinations.** `..`, `.` and `-` rank below every real destination
+  and are never removed.
 - **File arguments.** A line that ends in a *file* is answered from the
-  filesystem, not from the history, because the file you are about to use is by
-  definition not in the history yet. Which lines those are is learned from what
-  the command means (`tai/paths.py:takes_file`) and written into `_TAI_FILE`,
-  so the shell can act on it without a process and without guessing.
+  filesystem, learned from what the command means (`takes_file`) and written
+  into `_TAI_FILE`, so the shell acts without a process and without guessing.
 
 ## Three implementations of one rule
 
