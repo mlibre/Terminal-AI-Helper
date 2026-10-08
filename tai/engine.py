@@ -166,9 +166,19 @@ class Engine:
 
     def build_from_rows(self, rows) -> None:
         """rows: iterable of (cmd, cwd, repo, branch, exit_code, ts) in
-        chronological order (oldest first) for correct seq."""
+        chronological order (oldest first) for correct seq.
+
+        Rows the recorder itself would reject are dropped here as well: older
+        databases hold rows written before the filter existed, and every
+        consumer of the engine — the index the plugins source, `tai suggest`,
+        the predictor — reads through this one list.
+        """
+        from tai.store import is_recordable
         for cmd, cwd, repo, branch, exit_code, ts in rows:
-            self.add(cmd or "", cwd or "", repo or "", branch or "",
+            cmd = (cmd or "").strip()
+            if not is_recordable(cmd):
+                continue
+            self.add(cmd, cwd or "", repo or "", branch or "",
                      exit_code or 0, ts or int(time.time()))
 
     # -- prefix lookup ----------------------------------------------------

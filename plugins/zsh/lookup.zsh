@@ -39,6 +39,25 @@ typeset -g _TAI_FILE_JOIN=""
 # 1 when the current _TAI_BEST is an entry _TAI_FILES_Q says needs quoting.
 typeset -gi _TAI_BEST_Q=0
 
+# A stored command that carries raw control bytes can never be painted: the
+# ghost and the loose menu write candidates into POSTDISPLAY, and to this
+# terminal those bytes are escape sequences, not text. Such rows used to land
+# in the index from paste markers that made it into the recorded buffer, and
+# an ESC at the head of a ghost line went to the screen raw. The store refuses
+# them at record time now, but a shell sources the index it *finds* — this is
+# the last line of the defence, where candidates are about to become bytes on
+# screen. Any C0 control or DEL: ESC is one of them, a tab would smear a
+# menu row, and a newline would turn one candidate into two cells.
+_tai_clean() {
+  local s="$1" c
+  local -i i
+  for (( i = 1; i <= ${#s}; i++ )); do
+    c="${s[i]}"
+    (( #c < 32 || #c == 127 )) && return 1
+  done
+  return 0
+}
+
 # Command names considered for a half-typed command name, in one lookup. A key
 # holds at most WORD_CANDIDATE_CAP lines, so this bounds the lines too. The widest
 # range on a real 6k-command history was 46 keys; it bites only on a first letter
@@ -109,7 +128,7 @@ _tai_lines() {
     _tai_first_values "$prefix"
     values="$_TAI_VALUES"
   fi
-  [[ -n "$values" ]] && _TAI_LINES=( "${(@f)values}" ) && return
+  [[ -n "$values" ]] && { for c in "${(@f)values}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done } && return
   [[ "$prefix" == *' '* ]] || return
   # Nothing for the whole line: rank the line behind the wrapper, then put the
   # wrapper back. `sudo git ` completes from the `git ...` the user has run.
@@ -133,7 +152,7 @@ _tai_lines() {
     values="$_TAI_VALUES"
   fi
   [[ -n "$values" ]] && _TAI_LINES_LEAD="$head "
-  for c in "${(@f)values}"; do _TAI_LINES+=( "$c" ); done
+  for c in "${(@f)values}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
 }
 
 # The best line in _TAI_LINES that extends the prefix, into _TAI_BEST.
@@ -189,7 +208,8 @@ _tai_query() {
     # An empty prompt predicts the command that followed the last one.
     _TAI_LINES=()
     _TAI_LINES_LEAD=""
-    [[ -n "$last" ]] && _TAI_LINES=( "${(@f)_TAI_SEQ[$last]}" )
+    local c
+    [[ -n "$last" ]] && for c in "${(@f)_TAI_SEQ[$last]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
     _tai_best ""
     return
   fi
@@ -268,15 +288,19 @@ typeset -gi _TAI_LOOSE_MAX_LINE=200
 # linear in anything a person can see. A word past this is the signature of a
 # paste, so it is matched as a plain substring instead of becoming a pattern:
 # the same visible answer for exact text, 85ms rather than 34s on a 6KB token.
-# It is matched, not dropped — see the note where `pats` is built.
+# It is matched, not dropped — see the note where `rxs` is built.
 typeset -gi _TAI_LOOSE_MAX_WORD=32
 
-# The in-order pattern for one word: its letters joined by `*`, each escaped so
-# a word holding `-`, `/` or `[` is letters and not syntax. A glob, not a
-# regex: the same match the glob engine runs is roughly twice as fast here as
-# the one `[[ =~ ]]` drives, measured on 7.3k learned lines.
-_tai_word_pat() {
-  local w="$1" pat="*" c
+# The in-order check for one word, as a regex: its letters joined by `.*`, each
+# escaped so a word holding `-`, `/` or `[` is letters and not syntax. Measured:
+# the same check through the letters-as-a-glob pattern is not merely slower —
+# on an adversarial spelling (`npm` gives it `n…p…m` shapes across every
+# `--header` of a 1KB URL, and an `aaaa…` word *thirty-two* rounds past the
+# escaped letter count) the glob engine does not come back on a keystroke at
+# all, while the same text answers as a regex in ~0 s. There is no operator
+# for it in zsh that is both this fast and safe, so it is spelled as one.
+_tai_word_re() {
+  local w="$1" re="" c
   local -i i
   for (( i = 1; i <= ${#w}; i++ )); do
     c="${w[i]}"
@@ -284,16 +308,16 @@ _tai_word_pat() {
       [a-z0-9_-]) ;;
       *) c="\\$c" ;;
     esac
-    [[ -n "$pat" && "$pat" != "*" ]] && pat+='*'
-    pat+="$c"
+    re+="$c"
+    [[ $i -lt ${#w} ]] && re+=".*"
   done
-  print -r -- "${pat}*"
+  print -r -- "$re"
 }
 
 _tai_loose() {
   local prefix="${1:l}"
-  local -a want ranked pats exact fuzzy ranked_f
-  local w line ll ok s t pat
+  local -a want ranked rxs exact fuzzy ranked_f
+  local w line ll ok s t rx c
   local -i i k
   # A pasted command is not a half-remembered one. Checked before the cache key
   # and before any line is read, so the answer is nothing and the cost is one
@@ -326,26 +350,48 @@ _tai_loose() {
   # it still has to be *found*, because a word that drops out of the question
   # takes its veto with it: `cd <pasted-path>` would then only ask whether the
   # line mentions `cd`, and every learned `cd` command would answer.
-  pats=()
+  # Substring words go first, so the cheap vetoes of the whole question veto
+  # every line before a matcher is ever run: for `npm i repomix@latest -g`
+  # the two-letter `-g` is the one that throws almost every line out.
+  local -a want_plain want_glob
   for w in "${want[@]}"; do
     if (( ${#w} < 3 || ${#w} > _TAI_LOOSE_MAX_WORD )); then
-      pats+=( "" )
+      want_plain+=("$w")
     else
-      pats+=( "$(_tai_word_pat "$w")" )
+      want_glob+=("$w")
+    fi
+  done
+  want=( "${want_plain[@]}" "${want_glob[@]}" )
+  rxs=()
+  for w in "${want[@]}"; do
+    if (( ${#w} < 3 || ${#w} > _TAI_LOOSE_MAX_WORD )); then
+      rxs+=( "" )
+    else
+      rxs+=( "$(_tai_word_re "$w")" )
     fi
   done
   for line in "${(@k)_TAI_SCORE[@]}"; do
     ll="${line:l}"
     ok=1; fuzzy_used=0
     for (( k = 1; k <= ${#want}; k++ )); do
-      w=$want[k]; pat=$pats[k]
+      w=$want[k]; rx=$rxs[k]
       # A word cannot occur in a line shorter than itself, and the test for that
       # is arithmetic. It is also the whole cost of a long token: asked about
       # 7k lines one at a time, the substring comparison of a 6KB word is
       # skipped for every line that could not possibly hold it.
       (( ${#w} > ${#ll} )) && { ok=0; break }
       [[ "$ll" == *"$w"* ]] && continue
-      [[ -n "$pat" && "$ll" == ${~pat} ]] || { ok=0; break }
+      [[ -n "$rx" ]] || { ok=0; break }
+      # A fuzzy surface can only hit a line that already holds every letter of
+      # the word — a quoted substring test is a C strstr, and the in-order
+      # matcher is where the line is really judged. Without this prefilter a
+      # full pass cost minutes, one check per line per word, and the shell
+      # froze on the keystroke that needed it.
+      for (( j = 1; j <= ${#w}; j++ )); do
+        c="${w[j]}"
+        [[ "$ll" == *"$c"* ]] || { ok=0; break 2 }
+      done
+      [[ "$ll" =~ $rx ]] || { ok=0; break }
       fuzzy_used=1
     done
     (( ok )) || continue
@@ -409,8 +455,9 @@ _tai_loose() {
   ranked=( "${ranked[@]}" "${ranked_f[@]}" )
   (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
     ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
-  _TAI_LOOSE_LINES=( "${ranked[@]}" )
-  _TAI_LOOSE_CACHED=( "${ranked[@]}" )
+  _TAI_LOOSE_LINES=()
+  for c in "${ranked[@]}"; do _tai_clean "$c" && _TAI_LOOSE_LINES+=( "$c" ); done
+  _TAI_LOOSE_CACHED=( "${_TAI_LOOSE_LINES[@]}" )
   _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
 }
 # The generation the cache above is keyed on, and the key itself. A reload

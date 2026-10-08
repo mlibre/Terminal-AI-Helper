@@ -152,10 +152,9 @@ def test_zsh_menu() -> None:
 
     # The same single entry, but a name that exists only because it matched on
     # PATH: the reported case, where `exe` had exactly one match anywhere and it
-    # was a script the user had never run. Nothing in the history, nothing in the
-    # directory, and no hint on screen, so one Tab must not write it into the
-    # line. The menu is shown even with one entry, because this is the one case
-    # where there is something to read, and Enter is the second key.
+    # was a script the user had never run. PATH alone says *it exists*, and one
+    # entry is one entry — every other shell completes the ambiguity that
+    # remains.
     s.send(MENU_FAR[:3])
     check("and nothing is hinted for it",
           s.suggestion().split(" PD=")[0], "SUG=[]")
@@ -163,13 +162,8 @@ def test_zsh_menu() -> None:
     s.write(TAB)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
-    check("a name only PATH knows is shown before it is written",
-          (line, size, menu_entries(drawn)), (MENU_FAR[:3], 1, [MENU_FAR]))
-    check("and it is the selected entry", selected_entry(screen_of(s)), MENU_FAR)
-    s.write(ENTER)
-    s.settle()
-    line, drawn, size, idx = s.menu(clear=False)
-    check("Enter still fills it in", (line, size), (MENU_FAR, 0))
+    check("one entry is taken even when only PATH knows it",
+          (line, size), (MENU_FAR, 0))
     s.write("\x15")
 
     # A learned name and the directory of the same name are one completion, not
@@ -699,6 +693,39 @@ def test_pasted_text_is_not_a_typo() -> None:
         write_index()
 
 
+def test_unpaintable_rows_are_never_drawn() -> None:
+    """A learned row with raw control bytes never reaches the terminal.
+
+    The history held two rows that were really bracketed-paste envelopes, and
+    the index inherited them: one began with ESC, the other with SYN. Painted
+    from either into POSTDISPLAY, those bytes went to the terminal unescaped
+    and were escape sequences, not text. The store, the engine, and the zsh
+    plugin's candidate lists now all refuse them; this rides the one path a
+    user hits — a glimpse that would have drawn one — and asserts nothing is
+    drawn at all.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("a control byte in a row is never drawn")
+    text = ZSH_INDEX.read_text()
+    dirty = '\x1b[200~zqx run~'
+    ZSH_INDEX.write_text(
+        text + f"_TAI_SCORE+=({_zq(dirty)} 9)\n"
+               f"_TAI_FIRST+=({_zq('zqx')} {_zq(dirty)})\n"
+               f"_TAI_WORD+=({_zq('zqx run')} {_zq(dirty)})\n")
+    try:
+        s = Session("zsh")
+        s.send("zqx")
+        s.settle()
+        # The loose list was the only answer: the row that would have fed it
+        # is filtered, so nothing may appear — before, the raw ESC line was.
+        check("no raw bytes are glimpsed", s._dump(clear=False)[2],
+              "MENU=[] N=[0] IDX=[0]")
+        s.close()
+    finally:
+        write_index()
+
+
 def main() -> int:
     setup()
     test_bash_menu()
@@ -706,6 +733,7 @@ def main() -> int:
     test_zsh_menu_stem()
     test_loose_menu()
     test_pasted_text_is_not_a_typo()
+    test_unpaintable_rows_are_never_drawn()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")

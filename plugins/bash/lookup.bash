@@ -42,6 +42,10 @@ _tai_best() {
   local values="$1" prefix="$2" best="" best_score=-1 c s
   while IFS= read -r c; do
     [[ -z "$c" || "$c" == "$prefix" || "$c" != "$prefix"* ]] && continue
+    # A stored command whose text holds a raw control byte is unpaintable as
+    # ghost text: the byte goes to the terminal as an escape sequence. The
+    # store refuses at record time now, but this shell sources what it finds.
+    [[ "$c" =~ [[:cntrl:]] ]] && continue
     s="${_TAI_SCORE[$c]:-0}"
     if (( s > best_score )); then best="$c"; best_score="$s"; fi
   done <<< "$values"

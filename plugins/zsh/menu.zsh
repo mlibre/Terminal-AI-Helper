@@ -69,6 +69,11 @@ _tai_menu_cell() {
   else
     REPLY=$e
   fi
+  # An entry that is equal to the stem would draw one blank row: `.config/`
+  # and `.config/opencode` share the stem `.config/`, and cutting it off the
+  # first one leaves an empty line where the choice is. Paint the whole
+  # entry for that row instead: a row nobody can read is not a row.
+  [[ -z "$REPLY" ]] && REPLY=$e
   # A loose list is made of whole history lines, and a command line can be a
   # curl request — characters that have no business being in one cell of one
   # column. Without a cap the widest entry picks `_TAI_MENU_WIDTH` to the full
@@ -283,6 +288,13 @@ _tai_menu_open() {
 
   # Keep what extends the line, once each, in the order above.
   #
+  # A candidate with a raw control byte in it is not a candidate at all:
+  # it would be written into POSTDISPLAY, and there it is an escape
+  # sequence, not text. The learned lists already filter these away, but
+  # the filesystem answers do not — a directory and a pasted command dump
+  # the bytes it carries straight through the glob — so the menu checks
+  # before it speaks.
+  #
   # "Extends" is the whole test, and "extends" means adds something: a candidate
   # equal to the word is a copy of what is typed, and a candidate that does not
   # start with it is a different word entirely. Every `cd …` line in the history
@@ -301,6 +313,7 @@ _tai_menu_open() {
   for (( i = 1; i <= ${#out}; i++ )); do
     c="$out[i]"
     [[ -n "$c" && "$c" != "$word" && "$c" == "$word"* ]] || continue
+    _tai_clean "$c" || continue
     [[ -z "${dup[${c%/}]}" ]] || continue
     dup[${c%/}]=1
     _TAI_MENU+=( "$c" ); _TAI_MENU_Q+=( "${outq[i]}" )

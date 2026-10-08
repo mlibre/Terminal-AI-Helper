@@ -144,34 +144,6 @@ tai-tab() {
 }
 zle -N tai-tab
 
-# Whether Tab may write the only entry into the line without showing it first.
-#
-# The test is whether the answer is already in front of the user. The hint is:
-# POSTDISPLAY at this point is still what the last redraw drew, because the menu
-# is painted after this, and the line the user is reading is $BUFFER with that
-# tail on it. A name in the directory they are standing in is the other thing
-# that counts, because the next Tab or `ls` would show it anyway.
-#
-# What does not count is a name that exists only because it matched on PATH.
-# `exe` in a shell whose only `exe*` is a script nobody has run is one key from
-# being written into the line, with the hint saying nothing — the hint and Tab
-# answering two different questions about the same three letters, and the line
-# rewritten before either answer had been read. It is a menu of one, which is
-# otherwise never worth showing: this is the one case where there is something to
-# read.
-_tai_menu_takeable() {
-  local entry="${_TAI_MENU[1]}" head="${BUFFER[1,$(( _TAI_MENU_FROM - 1 ))]}"
-  # A name in the directory they are standing in, which is the other thing that
-  # puts the answer in front of them: `ls` would show it, and a trailing slash
-  # only says the name is a directory.
-  [[ -e "$entry" ]] && return 0
-  # Or the hint had already reached exactly this word, with the rest of it still
-  # there to type: `git p` hinting `git pull --rebase` is the hint saying
-  # `git pull`. Equality would be too strict — the hint completes a line and this
-  # completes a word inside it.
-  [[ "$BUFFER$POSTDISPLAY" == "$head$entry"* ]]
-}
-
 # Tab opens the menu, and every Tab after that moves the selection one entry
 # along. The line is not touched: a menu is a way of looking, not of choosing.
 #
@@ -180,11 +152,9 @@ _tai_menu_takeable() {
 # starts with `docker`, so the honest answer there is the file listing — not a
 # menu of one entry that is the word already typed.
 #
-# One entry is not a menu either — nothing to look at, nothing to choose between
-# — so the key takes it, which is what `cd t<Tab>` should do when the only thing
-# starting with `t` in that directory is the one the hint already showed, and
-# what every shell does when a completion is unambiguous. _tai_menu_takeable is
-# where the exception lives: one entry nobody has been shown is drawn first.
+# One entry is not a list — nothing to look at, nothing to choose between — so
+# a single candidate is committed, which is what `cd t<Tab>` does when the
+# only thing starting with `t` is one directory.
 tai-menu() {
   # The index is keyed on whole lines, so there is no history behind a word in
   # the middle of one, and replacing a word the cursor is not on is not a
@@ -213,12 +183,11 @@ tai-menu() {
     zle expand-or-complete
     return
   fi
-  # One entry is not a menu — nothing to look at, nothing to choose between — so
+  # One entry is not a list — nothing to look at, nothing to choose between — so
   # the key takes it, which is what every shell does with an unambiguous
   # completion. It also reaches the loose list: a glimpse of exactly one learned
-  # line that the hint was already saying is answered, not dangled, and without
-  # this the list could never be cycled past.
-  if (( ${#_TAI_MENU} == 1 )) && _tai_menu_takeable; then
+  # line is answered, not dangled.
+  if (( ${#_TAI_MENU} == 1 )); then
     _tai_menu_commit
     return
   fi

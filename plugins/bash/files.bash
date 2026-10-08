@@ -57,6 +57,10 @@ _tai_keep_fresh() {
   local shown="$1" real="$2" mtime
   mtime="$(stat -c %Y -- "$real" 2>/dev/null)" || mtime=0
   [[ "$mtime" == "" ]] && mtime=0
+  # A name with a control byte in it is unpaintable text for the same reason
+  # an unrecordable stored command is: what is written to the terminal is not
+  # text.
+  [[ "$shown" =~ [[:cntrl:]] ]] && return 0
   local -i m
   for (( m = 0; m < ${#_TAI_FRESH[@]}; m++ )); do
     (( mtime > _TAI_FRESH_MTIME[m] )) && break

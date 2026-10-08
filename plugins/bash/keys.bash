@@ -111,6 +111,9 @@ _tai_complete() {
 # history holds — and COMPREPLY holding it twice makes readline print it twice.
 _tai_reply() {
   local c
+  # A learned line carrying raw control bytes is not a completion it is this
+  # plugin's promise to never paint: what it would write is escape bytes.
+  [[ "$1" =~ [[:cntrl:]] ]] && return 0
   for c in "${COMPREPLY[@]}"; do [[ "$c" == "$1" ]] && return 0; done
   COMPREPLY+=("$1")
 }

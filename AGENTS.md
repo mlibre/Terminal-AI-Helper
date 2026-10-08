@@ -153,13 +153,14 @@ Each one exists because of a reported failure.
   completion and executing it are two decisions. `Enter` takes; a second
   `Enter` runs. It was asked for after it shipped the other way — do not
   "fix" it back without being asked.
-- **One completion is not a list — unless nobody has been shown it.** A single
-  entry is taken only when it is already in front of the user: a name in the
-  current directory, or the current line already reaching it. Otherwise draw
-  the list and let `Enter` be the second key. Read the hint out of
-  `POSTDISPLAY`, not out of `_TAI_BEST`: the promise being read may be another
-  plugin's. A learned name and a path of the same name are one entry —
-  de-duplicate on the name without its trailing slash, learned form winning.
+- **One completion is not a list.** A single entry is taken, not drawn:
+  there is nothing to choose between. The previous rule drew a one-entry
+  menu whenever the name was not already in front of the user, so `exe`
+  — a script a PATH matched but the history never saw — was drawn where
+  every other shell simply completes; the user can read one entry. Read the hint out of `POSTDISPLAY`, not out of
+  `_TAI_BEST`: the promise being read may be another plugin's. A learned
+  name and a path of the same name are one entry — de-duplicate on the name
+  without its trailing slash, learned form winning.
 - **A `Tab` press is not the keystroke path, but it is not free either.** A
   glob and a hash expansion are fine; testing every name on `PATH` to display
   ten was measured at tens of milliseconds. `$commands` is what a `PATH`
@@ -249,6 +250,28 @@ Each one exists because of a reported failure.
   the same thing are the ones to suspect.
 
 ## Completion standard
+
+- **Unbounded per-line cost is a freeze on the keystroke path.** The loose
+  glimpse's fuzzy match ran one letters-as-a-glob pattern per typed word
+  against every stored line, and zsh's glob evaluator on real learned lines —
+  long `aria2c` URLs, packing lists — turns that into minutes, once per
+  keystroke that the prefix lookup cannot answer. Measured: the same word set
+  on a real 7k-line history, >60s before, ~0 s after. Every literal of the
+  word must be present for the pattern to match, and a quoted substring test
+  is a C strstr, so run presence first; and run the words with no pattern at
+  all first of all, so the cheapest vetoes — `-g` on an npm install line,
+  a pasted path fragment — throw the line out before any pattern is
+  compiled.
+- **What the plugin paints is terminal text, never the stored line.** A
+  stored command can carry raw control bytes — the real history held two
+  rows that were actually bracketed-paste envelopes — and POSTDISPLAY goes
+  to the terminal literally, so an ESC inside a glimpse was an escape
+  sequence on the wire. The store refuses them at record time, the engine
+  drops them at build, and both plugins filter at the candidate lists
+  (zsh `_tai_lines`/`_tai_loose`/`_tai_keep_fresh`, bash `_tai_best`/
+  `_tai_keep_fresh`), because a shell sources the index it *finds*, not
+  the one it should have. A candidate is only allowed to land on screen if
+  it is still text there.
 
 A change is ready when it is useful, understandable, safe, tested, documented,
 and does not make the default experience slower or harder.

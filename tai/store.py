@@ -38,6 +38,15 @@ def is_recordable(cmd: str) -> bool:
     # recorded.
     if "\n" in cmd or "\r" in cmd:
         return False
+    # A recorded buffer can collect raw control bytes — bracketed-paste
+    # markers landing in the buffer are the ones seen on a real install — and
+    # the plugin paints such a line into the terminal verbatim: the bytes are
+    # escape bytes to it, and an ESC at the head of a ghost line went to the
+    # terminal unescaped. Not a command anyone would retype, so it is not a
+    # command worth storing. (UTF-8 text is outside this range: a multi-byte
+    # sequence's continuation bytes are all 0x80 and up.)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in cmd):
+        return False
     return not (_SECRET.search(cmd) or _WRAPPER.search(cmd))
 
 

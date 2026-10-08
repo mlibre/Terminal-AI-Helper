@@ -76,6 +76,30 @@ assert is_recordable("git commit -m __START__"), "lookalike text must be kept"
 assert not is_recordable('git commit -m "line one\n\nline two"'), \
     "a command with a newline in it must not be recorded"
 assert not is_recordable("git diff\ngit status"), "two commands are not one"
+# A recorded buffer can collect raw control bytes — bracketed-paste markers,
+# SYN — and as a candidate they would be painted onto the user's terminal
+# raw. The two real rows this was found with were exactly that: an opened
+# paste envelope, and a lone SYN.
+assert not is_recordable('\x1b[200~git push --force-with-lease origin main~'), \
+    "a paste envelope must not be recorded"
+assert not is_recordable('proxy-ns \x16'), "a SYN byte kills the row"
+assert not is_recordable('git commit\x7f'), "a DEL byte kills the row"
+assert is_recordable('printf "caf\\u00e9"'), "ordinary UTF-8 must be kept"
+
+# And the model that seeds the index drops such rows too, so a database
+# rebuilt from rows — `tai refresh`, or a database written before the
+# filter existed — produces a clean index even without a purge.
+from tai.engine import Engine
+_eng = Engine()
+_eng.build_from_rows([
+    ("git push", "", "", "", 0, 1),
+    ('\x1b[200~git push force~', "", "", "", 0, 2),
+    ("git status", "", "", "", 0, 3),
+])
+assert list(_eng.cmds) == ["git push", "git status"], \
+    f"control bytes must not reach the engine: {list(_eng.cmds)!r}"
+assert _eng.seq.get("git push") == {"git status": 1}, \
+    "the dropped row must not join to either neighbour"
 print("\nOK — top-1 + sequence + typo + flags + record filter, all fast.")
 
 # `schema_note` is what tells "no history yet" apart from "a store every reader

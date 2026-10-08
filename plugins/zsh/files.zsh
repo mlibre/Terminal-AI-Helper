@@ -257,6 +257,9 @@ typeset -ga _TAI_FRESH_MTIME
 _tai_keep_fresh() {
   local shown="$1" real="$2" m i
   local -a names paths
+  # A name with a raw control byte in it is unpaintable for the same reason
+  # an unrecording stored command is: what lands in POSTDISPLAY is not text.
+  _tai_clean "$shown" || return 0
   # Insert before the first entry older than this file, so the list stays newest
   # first. The comparison is `&& break` and not `|| break`: a loop that steps
   # *past* the files that are newer and appends after them produces a list
