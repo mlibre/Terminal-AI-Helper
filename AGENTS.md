@@ -18,8 +18,7 @@ Build **simple, fast, smart, delightful software** that works immediately.
 - Omit information that does not help users decide, act, or recover. Implementation
   details, disclaimers and negative claims belong only where they change
   expectations or prevent misuse.
-- **No cosmetic git commands.** A commit, branch, or push must change behavior
-  or documentation, not formatting, ordering, or appearances.
+- **No cosmetic git commands.**
 
 ## Project direction
 
@@ -169,7 +168,7 @@ Each one exists because of a reported failure.
   `Tab` cycles files/folders/options and never touches the hint. The one
   exception is the `--help` fallback for a command the history has never seen:
   the hint is drawn for `→`, and `Tab` answers the typed word with the honest
-  menu. The test that matters is the pair — `docker ` lists, `git <Tab>` lists
+  menu. The test that matters is the pair — `docker` lists, `git <Tab>` lists
   without writing a hint.
 - **The list and the hint are the same lookup.** Both read `_tai_lines`;
   duplicating the index lookup is how a rule ends up working in one and not
