@@ -1,0 +1,471 @@
+"""tai engine — in-memory fast ranker. Stdlib only.
+
+Goals: <2ms suggest on 10k distinct, <10MB RAM, no deps.
+Signals: freq + recency + cwd + repo + branch + hour + exit + sequence
+         + token n-gram + typo-tolerant prefix.
+Output: Jev-Choice-compatible {choice, probabilities, confidence}.
+"""
+from __future__ import annotations
+
+import bisect
+import math
+import time
+
+from tai.paths import destinations_first
+from tai.typo import near_miss_lines
+
+
+# Tunable weights (see tai tune). Defaults from smoke + manual tuning.
+W_FREQ = 3.0
+W_RECENCY = 2.0
+W_CWD = 2.2
+W_REPO = 1.2
+W_BRANCH = 1.0
+W_SUCCESS = 0.6
+W_SEQ = 2.5
+W_HOUR = 0.4
+W_TOKEN = 0.8
+LEN_PENALTY_DIV = 60.0
+MAX_LEN_PEN = 0.6
+EXACT_CTX_BONUS = 0.5
+TYPO_PENALTY = 1.0
+TEMP_DEFAULT = 0.9
+
+
+def hour_bucket(ts: int | None = None) -> int:
+    try:
+        t = time.localtime(ts) if ts else time.localtime()
+    except (OverflowError, OSError, ValueError):
+        return 0            # a timestamp we cannot read has no hour
+    h = t.tm_hour
+    if h < 6:
+        return 0
+    if h < 12:
+        return 1
+    if h < 18:
+        return 2
+    return 3
+
+
+# Hour buckets are asked for once per stored row, and every row in a session
+# carries the same few timestamps. Keyed by the ten-minute window rather than by
+# the second, so the table is bounded by the history's span rather than by its
+# length, and so a window that straddles a DST change still answers from its own
+# timestamp. 20k rows of `localtime` cost 43ms of a 139ms build; this is ~1ms.
+_HOURS: dict[int, int] = {}
+
+
+def _hour_of(ts: int) -> int:
+    window = ts // 600
+    bucket = _HOURS.get(window)
+    if bucket is None:
+        bucket = _HOURS[window] = hour_bucket(ts)
+    return bucket
+
+
+def _softmax(scores: list[float], temp: float = 1.0) -> list[float]:
+    if not scores:
+        return []
+    m = max(scores)
+    exps = [math.exp((s - m) / max(temp, 1e-6)) for s in scores]
+    tot = sum(exps) or 1.0
+    return [e / tot for e in exps]
+
+
+class CmdStats:
+    """What the ranker knows about one command.
+
+    `__slots__` and plain dicts, because there is one of these per distinct
+    command and the memory budget is a few MB: a 20k-command history has to fit
+    in a sub-millisecond suggest. Written as a plain class rather than a
+    dataclass because the defaults are what the whole codebase mutates in place.
+
+    Dicts, not Counters. A Counter is a dict that costs a Python-level
+    `__init__` and `__missing__` on every construction and every miss, and this
+    class builds three per command while the n-gram tables below build ~120k
+    more: measured on a 20k-row history, swapping them for dicts took
+    `build_from_rows` from 397ms to under 150ms. Nothing here used a Counter
+    feature — it is read with `.get`, incremented, and iterated.
+    """
+
+    __slots__ = ("freq", "last_ts", "cwd", "repo", "branch", "hour",
+                 "success", "fail")
+
+    def __init__(self):
+        self.freq = 0
+        self.last_ts = 0
+        self.cwd: dict[str, int] = {}
+        self.repo: dict[str, int] = {}
+        self.branch: dict[str, int] = {}
+        self.hour = [0, 0, 0, 0]
+        self.success = 0
+        self.fail = 0
+
+
+class Engine:
+    def __init__(self):
+        self.cmds: dict[str, CmdStats] = {}
+        self.seq: dict[str, dict[str, int]] = {}
+        self.token_bigram: dict[str, dict[str, int]] = {}
+        self.token_trigram: dict[tuple[str, str], dict[str, int]] = {}
+        self.sorted_cmds: list[str] = []
+        self._prev_cmd: str | None = None  # for building seq incrementally
+        self._first_word_cache: list[str] | None = None  # see tai/typo.py
+
+    # -- learning ---------------------------------------------------------
+    def add(self, cmd: str, cwd: str = "", repo: str = "",
+            branch: str = "", exit_code: int = 0,
+            ts: int | None = None,
+            _prev: str | None = "__USE_LAST__") -> None:
+        cmd = cmd.strip()
+        if not cmd or len(cmd) > 2000:
+            return
+        ts = ts if ts is not None else int(time.time())
+        st = self.cmds.get(cmd)
+        if st is None:
+            st = self.cmds[cmd] = CmdStats()
+            bisect.insort(self.sorted_cmds, cmd)
+            self._first_word_cache = None   # the derived list is now stale
+        st.freq += 1
+        if ts >= st.last_ts:
+            st.last_ts = ts
+        if cwd:
+            st.cwd[cwd] = st.cwd.get(cwd, 0) + 1
+        if repo:
+            st.repo[repo] = st.repo.get(repo, 0) + 1
+        if branch:
+            st.branch[branch] = st.branch.get(branch, 0) + 1
+        st.hour[_hour_of(ts)] += 1
+        if (exit_code or 0) == 0:
+            st.success += 1
+        else:
+            st.fail += 1
+        # token n-grams within command
+        toks = cmd.split()
+        bigram = self.token_bigram
+        trigram = self.token_trigram
+        for i, tok in enumerate(toks[1:], 1):
+            row = bigram.get(toks[i - 1])
+            if row is None:
+                row = bigram[toks[i - 1]] = {}
+            row[tok] = row.get(tok, 0) + 1
+            if i >= 2:
+                key = (toks[i - 2], toks[i - 1])
+                row3 = trigram.get(key)
+                if row3 is None:
+                    row3 = trigram[key] = {}
+                row3[tok] = row3.get(tok, 0) + 1
+        # sequence
+        prev = self._prev_cmd if _prev == "__USE_LAST__" else _prev
+        if prev:
+            row = self.seq.get(prev)
+            if row is None:
+                row = self.seq[prev] = {}
+            row[cmd] = row.get(cmd, 0) + 1
+        self._prev_cmd = cmd
+
+    def build_from_rows(self, rows) -> None:
+        """rows: iterable of (cmd, cwd, repo, branch, exit_code, ts) in
+        chronological order (oldest first) for correct seq."""
+        for cmd, cwd, repo, branch, exit_code, ts in rows:
+            self.add(cmd or "", cwd or "", repo or "", branch or "",
+                     exit_code or 0, ts or int(time.time()))
+
+    # -- prefix lookup ----------------------------------------------------
+    def _prefix_range(self, prefix: str) -> list[str]:
+        """The commands starting with `prefix`, in lexical order.
+
+        The sort is what makes this a walk rather than a scan: every string
+        beginning with `prefix` is >= `prefix` and lies before any string that
+        does not, so the first entry that stops matching ends the range. `cap`
+        bounds the walk for a prefix as broad as a single letter, where the
+        range is the whole history and ranking every entry is not worth it.
+        """
+        if not prefix:
+            return []
+        cmds = self.sorted_cmds
+        out: list[str] = []
+        i = bisect.bisect_left(cmds, prefix)
+        n = len(cmds)
+        while i < n and len(out) < 2000:
+            c = cmds[i]
+            if not c.startswith(prefix):
+                break
+            out.append(c)
+            i += 1
+        return out
+
+    # -- suggest ----------------------------------------------------------
+    def suggest(self, prefix: str = "", cwd: str = "", repo: str = "",
+                branch: str = "", last_commands: list | None = None,
+                limit: int = 1, temp: float = TEMP_DEFAULT,
+                now_ts: int | None = None,
+                exclude: set | None = None) -> dict:
+        """Rank candidates for `prefix`.
+
+        `exclude` drops candidates before ranking. The engine itself never
+        touches the filesystem — it has to stay a sub-millisecond in-memory
+        ranker — so the caller decides policy (currently: commands whose paths
+        no longer exist) and passes the result in.
+        """
+        # `choices[:limit]` and `[...][:max(limit, 1) * 3]` disagree about a
+        # limit of zero or less: one asks for nothing and the other asks for
+        # three, so a negative limit returned a list nobody asked for. One
+        # answer, here, rather than a policy spread across two slices.
+        limit = max(1, limit)
+        t0 = time.time()
+        prefix = prefix or ""
+        last_commands = last_commands or []
+        now = now_ts or int(time.time())
+        hb = hour_bucket(now)
+        prev = last_commands[-1].strip() if last_commands else ""
+
+        prefix_stripped = prefix.strip()
+        cand_names: list[str] = []
+        typo_set: set[str] = set()
+        if prefix_stripped:
+            cand_names = self._prefix_range(prefix)
+            if prefix != prefix_stripped:
+                extra = self._prefix_range(prefix_stripped)
+                if extra:
+                    seen = set(cand_names)
+                    cand_names += [c for c in extra if c not in seen]
+            if len(cand_names) < 3:
+                typo = near_miss_lines(self, prefix_stripped)
+                if typo:
+                    seen = set(cand_names)
+                    for c in typo:
+                        if c not in seen:
+                            cand_names.append(c)
+                            typo_set.add(c)
+        else:
+            # empty prefix: rank all distinct (two-stage filter inside scoring)
+            cand_names = list(self.cmds.keys())
+
+        if exclude:
+            cand_names = [c for c in cand_names if c not in exclude]
+        if not cand_names:
+            wrapped = split_wrapper(prefix)
+            if wrapped:
+                # Nothing for `sudo git st` in this history, so rank the line as
+                # if the wrapper were not there and put it back. The suggestion
+                # is a command the user really ran, one word apart.
+                head, rest = wrapped
+                inner = self.suggest(prefix=rest, cwd=cwd, repo=repo,
+                                      branch=branch, last_commands=last_commands,
+                                      limit=limit, temp=temp, now_ts=now_ts,
+                                      exclude=exclude)
+                return _rewrap(inner, head, prefix)
+            return _fallback(prefix, limit)
+
+        # two-stage: if huge, pre-filter by cheap freq+recency to 600
+        if len(cand_names) > 600:
+            scored_pre = []
+            for name in cand_names:
+                st = self.cmds[name]
+                age_days = max(0, (now - (st.last_ts or now)) / 86400)
+                rec = math.exp(-age_days / 14.0)
+                fq = math.log1p(st.freq)
+                scored_pre.append((fq + rec, name))
+            scored_pre.sort(reverse=True)
+            cand_names = [n for _, n in scored_pre[:600]]
+
+        follow = self.seq.get(prev, None) if prev else None
+        max_follow = max(follow.values()) if follow else 0
+
+        # token context for next-token bonus
+        ptoks = prefix.split()
+        tri_ctx = tuple(ptoks[-2:]) if len(ptoks) >= 2 else None
+        bi_ctx = ptoks[-1] if ptoks else None
+
+        scored: list[tuple[float, str]] = []
+        for name in cand_names:
+            st = self.cmds[name]
+            age_days = max(0, (now - (st.last_ts or now)) / 86400)
+            recency = math.exp(-age_days / 14.0)
+            freq_s = min(math.log1p(st.freq) / math.log1p(20), 1.0)
+            cwd_s = min((st.cwd.get(cwd, 0) if cwd else 0) / max(st.freq, 1), 1.0)
+            # basename fallback: half credit
+            if cwd and cwd_s == 0 and st.cwd:
+                base = cwd.rstrip("/").split("/")[-1]
+                for k, v in st.cwd.items():
+                    if k.rstrip("/").split("/")[-1] == base:
+                        cwd_s = min(0.5 * v / max(st.freq, 1), 0.5)
+                        break
+            repo_s = min((st.repo.get(repo, 0) if repo else 0) / max(st.freq, 1), 1.0)
+            branch_s = min((st.branch.get(branch, 0) if branch else 0) / max(st.freq, 1), 1.0)
+            success_s = max(-0.5, min(1.0, (st.success - st.fail * 0.5) / max(st.freq, 1))) * 0.5 + 0.5
+            hour_s = (st.hour[hb] / max(st.freq, 1)) if st.freq else 0.0
+            seq_s = (follow.get(name, 0) / max_follow) if (follow and max_follow) else 0.0
+
+            # token n-gram bonus: P(next token | context)
+            tok_s = 0.0
+            if prefix and name.startswith(prefix):
+                rest = name[len(prefix):].lstrip()
+                if rest:
+                    nxt = rest.split()[0]
+                    if tri_ctx and tri_ctx in self.token_trigram:
+                        tc = self.token_trigram[tri_ctx]
+                        tok_s = max(tok_s, tc.get(nxt, 0) / max(sum(tc.values()), 1))
+                    if bi_ctx and bi_ctx in self.token_bigram:
+                        bc = self.token_bigram[bi_ctx]
+                        tok_s = max(tok_s, 0.7 * bc.get(nxt, 0) / max(sum(bc.values()), 1))
+
+            extra_len = max(0, len(name) - len(prefix))
+            len_pen = min(extra_len / LEN_PENALTY_DIV, MAX_LEN_PEN)
+
+            score = (
+                W_FREQ * freq_s
+                + W_RECENCY * recency
+                + W_CWD * cwd_s
+                + W_REPO * repo_s
+                + W_BRANCH * branch_s
+                + W_SUCCESS * success_s
+                + W_HOUR * hour_s
+                + W_SEQ * seq_s
+                + W_TOKEN * tok_s
+                - len_pen
+            )
+            if cwd and repo and st.cwd.get(cwd, 0) and st.repo.get(repo, 0):
+                score += EXACT_CTX_BONUS
+            if name in typo_set:
+                score -= TYPO_PENALTY
+            # never surface failed-command as top-1 when a good alt exists?
+            # handled softly via success_s; keep hard rule out for recall.
+            scored.append((score, name))
+
+        # `cd ..` and `cd -` are true in every directory there is, so how often
+        # they were typed is not evidence about where the user wants to be. They
+        # are ranked below every real destination and never removed, and the
+        # index applies the same rule to the scores the shell plugins read — one
+        # rule, two rankers, and `tai suggest` cannot disagree with the hint.
+        scored = destinations_first(scored)
+        scored.sort(reverse=True)
+        # A suggestion has to extend the line. A candidate identical to what is
+        # already typed cannot be rendered as a hint and accepting it changes
+        # nothing, so it must not win: `ls -l` would otherwise hide `ls -la`. A
+        # candidate that does not *start with* the prefix is not an answer
+        # either — the rule the shell plugins enforce on their side of the
+        # index, and the one `completion` below silently assumes when it slices
+        # the choice by `len(prefix)`.
+        #
+        # "Extends" is the test, not "differs from": the filter was `n !=
+        # prefix`, which dropped the echo and nothing else, so a prefix that
+        # differs from the command by more than that — `'  git'`, `'git  '`, a
+        # tab — was answered with `'git stash'`, which extends nothing and has
+        # an empty completion. `typo_set` is the exception and says so: a
+        # near-miss first word is the whole point of typo tolerance, so those are
+        # kept, and they are already ranked below every exact match by
+        # `TYPO_PENALTY`.
+        #
+        # Filter first, then cap, then split. Taking the names from the filtered
+        # list and the scores from the head of the unfiltered one paired every
+        # command with the *next* command's score, and shortened the candidate
+        # list to whatever survived — so the softmax, the probabilities and the
+        # confidence all described commands that were not on offer.
+        kept = [(s, n) for s, n in scored
+                if n.startswith(prefix) and n != prefix or n in typo_set
+                ][: limit * 3][:200]
+        top_scores = [s for s, _ in kept]
+        top_names = [n for _, n in kept]
+        probs = _softmax(top_scores, temp=temp)
+
+        conf = 0.0
+        if len(probs) == 1:
+            conf = min(0.55 + probs[0] * 0.3, 0.95)
+        elif probs:
+            conf = max(0.0, min(1.0, (probs[0] - probs[1]) * 2.2 + 0.35))
+
+        elapsed_ms = (time.time() - t0) * 1000
+        choices = [
+            {"cmd": n, "prob": round(p, 4), "score": round(s, 3)}
+            for n, p, s in zip(top_names, probs, top_scores)
+        ][:limit]
+        # No candidate means no answer. Echoing the prefix back would read as
+        # "here is your suggestion" to every caller, which is the one thing a
+        # suggestion must never be; the shell plugins return "" for the same
+        # case, and the two paths have to agree.
+        best = top_names[0] if top_names else ""
+        return {
+            "type": "choice",
+            "choice": best,
+            "completion": best[len(prefix):] if best.startswith(prefix) else "",
+            "probabilities": {c["cmd"]: c["prob"] for c in choices},
+            "choices": choices,
+            "confidence": round(conf, 3),
+            "latency_ms": round(elapsed_ms, 2),
+            "count": len(cand_names),
+        }
+
+
+def _rewrap(result: dict, head: str, prefix: str) -> dict:
+    """Put the wrapper back on a suggestion made for the line behind it."""
+    choice = result.get("choice") or ""
+    if not choice:
+        return result
+    full = f"{head} {choice}"
+    out = dict(result)
+    out["choice"] = full
+    out["completion"] = full[len(prefix):] if full.startswith(prefix) else ""
+    out["probabilities"] = {f"{head} {c}": p for c, p in result.get("probabilities", {}).items()}
+    out["choices"] = [dict(c, cmd=f"{head} {c['cmd']}") for c in result.get("choices", [])]
+    out["wrapped"] = head
+    return out
+
+
+def _fallback(prefix: str, limit: int) -> dict:
+    """Seed vocabulary and the installed-command answer, when ranking cannot.
+
+    The same rule as the shell plugins applies: a candidate identical to what is
+    already typed is not an answer, so the seed corpus must not reintroduce the
+    echo that ranking just rejected.
+
+    A tool that is installed but has never been run gets `tool --help`. It is the
+    only honest thing to say about a command the history has never seen, and the
+    plugins already answer it, so `tai suggest` has to answer it too — otherwise
+    the two paths disagree about the same question, which is the one thing they
+    are not allowed to do.
+    """
+    from tai.seed import SEED_COMMANDS
+    defaults = list(SEED_COMMANDS)
+    cands = [d for d in defaults if d.startswith(prefix) and d != prefix] if prefix \
+        else defaults[:3]
+    if not cands and prefix and not any(ch.isspace() for ch in prefix):
+        import shutil
+        if shutil.which(prefix):
+            cands = [f"{prefix} --help"]
+    cands = cands[:limit]
+    probs = _softmax([1.0 - i * 0.2 for i in range(len(cands))]) if cands else []
+    return {
+        "type": "choice",
+        "choice": cands[0] if cands else "",
+        "completion": cands[0][len(prefix):] if cands and cands[0].startswith(prefix) else "",
+        "probabilities": {c: round(p, 4) for c, p in zip(cands, probs)},
+        "choices": [{"cmd": c, "prob": round(p, 4), "score": 0.0} for c, p in zip(cands, probs)],
+        "confidence": 0.25 if cands else 0.0,
+        "latency_ms": 0.05,
+        "count": 0,
+    }
+
+
+# Words that run the command after them rather than being the command. The
+# history is full of `git ...` and the shell autocomplete is asked for
+# `sudo git ...`, so without treating the wrapper as transparent the whole
+# vocabulary behind it is invisible. Deliberately a closed list, and deliberately
+# excluding `env` and `xargs`: both change what follows them enough that
+# re-attaching the wrapper would be a lie.
+WRAPPERS = ("sudo", "doas", "nohup", "time", "nice", "ionice", "stdbuf", "command")
+
+
+def split_wrapper(prefix: str) -> tuple[str, str] | None:
+    """("sudo", "git st") when `prefix` runs another command behind a wrapper.
+
+    A wrapper carrying its own options (`sudo -u root git st`) is left alone:
+    the rest of the line is not the wrapped command, and guessing where the
+    options end is not worth a wrong completion.
+    """
+    head, sep, rest = (prefix or "").partition(" ")
+    if not sep or head not in WRAPPERS or not rest or "=" in rest:
+        return None
+    return head, rest
+

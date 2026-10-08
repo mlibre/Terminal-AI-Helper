@@ -1,0 +1,48 @@
+# Build a real GitHub release for every commit landed on the default branch.
+#
+# One main branch drives everything: each push that turns green gets its own
+# tag and a GitHub release marking the tree it shipped from. Tests run first;
+# a red tree never becomes a release. The tag is a single incrementing number
+# derived from main's history length, prepended with the date for meaning.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # needed for git tag + release object
+
+jobs:
+  test-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tag numbering counts main's history
+
+      - name: Install shells
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Run all test suites
+        run: ./test.sh
+
+      - name: Create and push tag
+        id: tag
+        run: |
+          set -e
+          count=$(git rev-list --count HEAD)
+          short=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y.%m.%d)
+          tag="v${date}-${count}-${short}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "${{ steps.tag.outputs.tag }}"
+          generate_release_notes: true
