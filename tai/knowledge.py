@@ -9,38 +9,50 @@ lives in `tai.helptext`, which is where the conservative parsing rules live.
 """
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import tempfile
 import time
-from dataclasses import dataclass, field
 
 from tai.helptext import (DISCOVER_WORKERS, MAX_HELP_BYTES, TOOL_TIMEOUT,
                           TOOL_TIMEOUT_SLOW, _NO_HELP, _complete_candidates,
                           _declared, _extract, _run)
 
+# This module is loaded by `tai record` — once per command the user runs, just
+# to answer "has this tool been learned?" — so its module level stays cheap:
+# json, shutil, tempfile and subprocess are imported inside the functions that
+# use them, and ToolKnowledge is a plain class rather than a dataclass, whose
+# machinery (`inspect`, and the futures some of its users pull in) cost more
+# than the one question the record path asks of this file.
 
-@dataclass
+
 class ToolKnowledge:
-    name: str
-    path: str = ""
-    version: str = ""
-    help_text: str = ""
-    verbs: list[str] = field(default_factory=list)
-    flags: list[str] = field(default_factory=list)
-    # Subcommand → the flags that subcommand accepts. Keyed rather than flattened
-    # because the position is the whole point: `docker run --blkio-weight` is a
-    # command docker rejects, and a single flat flag list for the tool is how it
-    # would end up suggested. Empty for every tool that does not answer for
-    # itself, which is nearly all of them.
-    subs: dict[str, list[str]] = field(default_factory=dict)
-    # Subcommand → the subcommands *it* has. One level only, because that is the
-    # depth `gh pr checkout` and `gh repo view` live at and the depth where the
-    # forks stop being worth what they answer: every extra level doubles the probes
-    # and the index entries, and the third level of `gh` is a flag anyway.
-    subverbs: dict[str, list[str]] = field(default_factory=dict)
-    updated: int = 0
+    """What one installed tool says about itself, read-only."""
+
+    __slots__ = ("name", "path", "version", "help_text", "verbs", "flags",
+                 "subs", "subverbs", "updated")
+
+    def __init__(self, name: str, path: str = "", version: str = "",
+                 help_text: str = "", verbs: list | None = None,
+                 flags: list | None = None,
+                 subs: dict | None = None,
+                 subverbs: dict | None = None, updated: int = 0):
+        self.name = name
+        self.path = path
+        self.version = version
+        self.help_text = help_text
+        self.verbs = verbs if verbs is not None else []
+        self.flags = flags if flags is not None else []
+        # Subcommand → the flags that subcommand accepts. Keyed rather than flattened
+        # because the position is the whole point: `docker run --blkio-weight` is a
+        # command docker rejects, and a single flat flag list for the tool is how it
+        # would end up suggested. Empty for every tool that does not answer for
+        # itself, which is nearly all of them.
+        self.subs = subs if subs is not None else {}
+        # Subcommand → the subcommands *it* has. One level only, because that is the
+        # depth `gh pr checkout` and `gh repo view` live at and the depth where the
+        # forks stop being worth what they answer: every extra level doubles the
+        # probes and the index entries, and the third level of `gh` is a flag anyway.
+        self.subverbs = subverbs if subverbs is not None else {}
+        self.updated = updated
 
     def as_dict(self) -> dict:
         return {
@@ -68,6 +80,9 @@ class ToolKnowledge:
 
 def discover(name: str, timeout: float | None = None,
              probe: list[str] | None = None) -> ToolKnowledge:
+    import shutil
+    import tempfile
+
     name = name.strip()
     limit = TOOL_TIMEOUT if timeout is None else timeout
     path = shutil.which(name) or ""
@@ -110,6 +125,8 @@ def discover(name: str, timeout: float | None = None,
 
 
 def _version(name: str, timeout: float | None = None) -> str:
+    import tempfile
+
     out, _ = _run([name, "--version"], timeout=timeout or 0.5,
                   cwd=tempfile.gettempdir())
     return out.strip().splitlines()[0][:300] if out.strip() else ""
@@ -209,6 +226,8 @@ def discover_many(names: list[str] | None = None,
     """
     if names is None:
         names = sorted(set(default_tools()) | set(path_tools()))
+    import shutil
+
     todo = [n for n in names if n and shutil.which(n)]
     if not todo:
         return []
@@ -224,6 +243,8 @@ def discover_many(names: list[str] | None = None,
 
 
 def save_many(tools: list[ToolKnowledge]) -> None:
+    import json
+
     from tai.store import session
     with session() as con:
         con.executemany(
@@ -235,6 +256,8 @@ def save_many(tools: list[ToolKnowledge]) -> None:
 
 
 def load_all() -> list[ToolKnowledge]:
+    import json
+
     from tai.store import session
     try:
         with session() as con:

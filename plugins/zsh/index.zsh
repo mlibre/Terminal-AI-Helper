@@ -115,7 +115,7 @@ if [[ -z "$_TAI_BIN" ]]; then
   _TAI_BIN="tai"
   if ! command -v tai >/dev/null 2>&1; then
     _TAI_CLI="${0:A:h}/../tai/cli.py"
-    [[ -r "$_TAI_CLI" ]] && _TAI_BIN="python3 $_TAI_CLI"
+    [[ -r "$_TAI_CLI" ]] && _TAI_BIN="python3 -S -E $_TAI_CLI"
   fi
 fi
 

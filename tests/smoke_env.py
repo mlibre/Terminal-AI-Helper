@@ -22,11 +22,19 @@ os.chdir(REPO)
 # is invisible: the index just starts suggesting commands nobody ever typed. It
 # happened here — 300 rows of a five-command fixture, with a /home/u working
 # directory, all of it ranking above the user's real commands.
-SCRATCH_DB = "/tmp/opencode/tai_test.db"
-SCRATCH_INDEX = "/tmp/opencode/tai_test_index.zsh"
+SCRATCH_DB = "/tmp/tai/tai_test.db"
+SCRATCH_INDEX = "/tmp/tai/tai_test_index.zsh"
 os.environ["TAI_DB"] = SCRATCH_DB
 os.environ["TAI_INDEX"] = SCRATCH_INDEX
 os.environ["TAI_NO_AUTO_RECORD"] = "1"
+
+# The scratch directory has to exist before anything reads a file in it. The
+# store's own connect() creates it, but the first suite runs assertions about a
+# database tai has *never* written — `schema_note` must not create the file it
+# inspects, and the test then opens its own sqlite handle there. On a machine
+# where nothing had made the directory yet, that connect raised
+# "unable to open database file" and the suite died before its second assertion.
+pathlib.Path(SCRATCH_DB).parent.mkdir(parents=True, exist_ok=True)
 
 for _p in (SCRATCH_DB, SCRATCH_DB + "-wal", SCRATCH_DB + "-shm"):
     pathlib.Path(_p).unlink(missing_ok=True)

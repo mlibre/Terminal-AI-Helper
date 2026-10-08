@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
+# `subprocess` is imported inside `_run`: this module is loaded by `tai record`
+# through tai.knowledge, and the probing it exists for is the only thing that
+# spawns a process.
 
 TOOL_TIMEOUT = float(os.environ.get("TAI_HELP_TIMEOUT", "1.5"))
 # A second, longer budget for tools that stayed silent. `9router --help` needs
@@ -73,6 +75,8 @@ _META_FLAGS = frozenset({"--help", "-h", "--version", "-v", "--usage", "-V"})
 
 def _run(args: list[str], timeout: float = TOOL_TIMEOUT,
          cwd: str | None = None) -> tuple[str, str]:
+    import subprocess
+
     try:
         p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            stdin=subprocess.DEVNULL, cwd=cwd,

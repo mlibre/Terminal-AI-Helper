@@ -17,7 +17,7 @@ if [ ! -r $TAI_CLI_PATH ]; then
   echo "tai: $TAI_CLI_PATH is gone — reinstall from the checkout, or point this line at it" >&2
   exit 1
 fi
-exec python3 $TAI_CLI_PATH "\$@"
+exec python3 -S -E $TAI_CLI_PATH "\$@"
 EOF
 chmod +x "$BIN_DIR/tai"
 

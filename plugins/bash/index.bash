@@ -4,13 +4,6 @@
 # associative arrays and reads the index once, so the parts after it can be
 # pure definitions.
 
-# tai.bash — embedded native autocomplete. No daemon, no socket, no Python
-# process on the keystroke path. Uses bash associative arrays loaded from the
-# generated ~/.local/share/tai/bash-index.bash snapshot.
-#
-# Install: tai refresh && source this file
-# Refresh after learning more history: tai refresh
-
 # TAI_INDEX names the *zsh* index — the same variable the index builder and
 # plugins/tai.zsh read, so there is one decision about where the indexes live
 # rather than two that can disagree. This file is one name away from it, which is
@@ -115,7 +108,7 @@ if [[ ${#_TAI_ARGV[@]} -eq 0 ]]; then
   _TAI_ARGV=(tai)
   if ! command -v tai >/dev/null 2>&1; then
     _TAI_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../tai/cli.py"
-    [[ -r "$_TAI_CLI" ]] && _TAI_ARGV=(python3 "$_TAI_CLI")
+    [[ -r "$_TAI_CLI" ]] && _TAI_ARGV=(python3 -S -E "$_TAI_CLI")
   fi
 fi
 
@@ -129,6 +122,17 @@ _TAI_LAST=""
 # "newest first" order in _tai_keep_fresh a comparison rather than a guess.
 _TAI_FRESH=()
 _TAI_FRESH_MTIME=()
+# The answers, written into these rather than captured from stdout: the keystroke
+# handlers run under `bind -x`, where a `$( )` around a lookup was a fork per
+# keypress for a string the lookup had already written. Initialised so a shell
+# with `set -u` can read them before the first lookup answers.
+_TAI_OUT=""
+_TAI_VALUES=""
+_TAI_BEST_LINE=""
+_TAI_WRAPPED_OUT=""
+_TAI_QUOTED=""
+_TAI_FILES=()
+_TAI_FILES_Q=()
 
 # Command names considered for a half-typed command name, in one lookup. A key
 # holds at most WORD_CANDIDATE_CAP lines, so this bounds the lines too.

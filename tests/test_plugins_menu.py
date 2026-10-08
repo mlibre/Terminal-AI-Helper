@@ -643,28 +643,50 @@ def test_pasted_text_is_not_a_typo() -> None:
         f"_TAI_WORD+=({_zq('curl')} {_zq(line)})\n")
     try:
         s = Session("zsh")
-        # A pasted token that really is the text of a learned line still finds
-        # it: the bound is about the *pattern*, not about losing the answer.
-        # Rows in a loose list are capped at _TAI_MENU_LOOSE_CELL=50 chars, so
-        # what is painted is a prefix of the line, not the whole thing.
-        s.send(verbatim)
+        # A paste does not open the list on its own. It arrives wrapped in the
+        # bracketed-paste envelope — what a terminal sends when the user pastes —
+        # and nobody has read a line that arrived at once, so three rows of
+        # guesses under it is noise on top of noise. The learned line IS here
+        # (the pasted fragment is its verbatim text), so the empty menu below is
+        # the paste rule answering, not the scan finding nothing.
+        s.send(PASTE_START + "pull --re" + PASTE_END)
         s.settle()
-        check("a pasted token typed verbatim still answers",
+        check("a paste does not open the list on its own",
+              s._dump(clear=False)[2], "MENU=[] N=[0] IDX=[0]")
+        # …and one real keystroke re-arms the glimpse: the buffer changed by a
+        # character, which is typing, which is what the list is for. The glimpse
+        # answers for the line as it now stands, same as it would have before
+        # the paste.
+        s.write(BACKSPACE)
+        s.settle()
+        check("and removing a character brings it back",
               s._dump(clear=False)[2],
-              "MENU=[\\n  curl https://example.com/aaabbbccddeeffgg theend] N=[1] IDX=[1]")
-        # …and one that is not in any line does not, because nothing may build a
-        # 40-segment pattern out of it.
+              "MENU=[\\n  git pull --rebase] N=[1] IDX=[1]")
+        # A pasted token that is not the text of any line is not fuzzy-matched
+        # either: the letters-in-order rule is the tail of the same scan, and
+        # re-arming it does not invent an answer the scan does not have.
+        # (36 and 40 characters: each also crosses the raw-arrival bound, so
+        # both rules — the envelope and the length — answer the same way.)
         s.write(CTRL_U)
-        s.send(in_order)
+        s.send(PASTE_START + in_order + PASTE_END)
         s.settle()
         check("a pasted token that is not text is not fuzzy-matched either",
               s._dump(clear=False)[2], "MENU=[] N=[0] IDX=[0]")
-        # A line past `_TAI_LOOSE_MAX_LINE` is refused outright.
+        s.write(BACKSPACE)
+        s.settle()
+        check("and re-arming it does not invent an answer either",
+              s._dump(clear=False)[2], "MENU=[] N=[0] IDX=[0]")
+        # A line past `_TAI_LOOSE_MAX_LINE` is refused outright, before the scan
+        # starts at all — and a keystroke after it does not change that.
         s.write(CTRL_U)
-        s.send("curl " + "z" * 220)
+        s.send(PASTE_START + "curl " + "z" * 220 + PASTE_END)
         s.settle()
         check("a pasted line is refused", s._dump(clear=False)[2],
               "MENU=[] N=[0] IDX=[0]")
+        s.write(BACKSPACE)
+        s.settle()
+        check("and stays refused once the character is removed",
+              s._dump(clear=False)[2], "MENU=[] N=[0] IDX=[0]")
         s.close()
     finally:
         write_index()
@@ -681,7 +703,7 @@ def test_pasted_text_is_not_a_typo() -> None:
     write_index([f"echo line{i} filler{i} tail{i}" for i in range(2000)])
     try:
         env = dict(os.environ, TAI_INDEX=str(ZSH_INDEX), TAI_DB=str(DB),
-                   TAI_HISTORY_FILES="", TAI_DATA_DIR="/tmp/opencode/tai_loose")
+                   TAI_HISTORY_FILES="", TAI_DATA_DIR="/tmp/tai/tai_loose")
         try:
             subprocess.run(
                 ["zsh", "-f", "-c",

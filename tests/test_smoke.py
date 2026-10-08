@@ -327,8 +327,8 @@ print(f"OK — file arguments: {len(FILE_LINES)} lines, the shape is the command
 # downloaded has to beat one you used last month.
 from tai.fresh import files, roots
 
-FRESH_HOME = pathlib.Path("/tmp/opencode/tai_fresh_home")
-FRESH_WORK = pathlib.Path("/tmp/opencode/tai_fresh_work")
+FRESH_HOME = pathlib.Path("/tmp/tai/tai_fresh_home")
+FRESH_WORK = pathlib.Path("/tmp/tai/tai_fresh_work")
 for stale in (FRESH_HOME, FRESH_WORK):
     if stale.exists():
         import shutil

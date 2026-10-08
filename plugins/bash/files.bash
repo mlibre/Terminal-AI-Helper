@@ -31,7 +31,10 @@ _tai_quote() {
   local s="$1" lead="" out=""
   if [[ "$s" == "~/"* ]]; then lead="~/"; s="${s#\~/}"; fi
   out="${s//[![:alnum:]_.\/:=@%+,^-]/\\&}"
-  printf '%s%s' "$lead" "$out"
+  # Answered in a global, not on stdout: this runs on the keystroke path, where
+  # a function's stdout is the terminal and a `$( )` around the call was a fork
+  # per press.
+  _TAI_QUOTED="$lead$out"
 }
 
 # The files `word` could be, newest first, one per line.
@@ -105,7 +108,11 @@ _tai_fresh_files() {
   # on a machine where a test had just run — a file nobody chmods, and the newest
   # thing on disk besides the AppImage just downloaded. `~/Downloads` is a root
   # anyway, so the case that mattered did not need the descent.
-  for dir in ${TAI_FILE_ROOTS//:/ } ${XDG_DOWNLOAD_DIR:+"$XDG_DOWNLOAD_DIR"} \
+  # Guarded, not bare: this is reachable under `set -u` from a caller that has
+  # never set the variable, and an unset substitution erroring out is a message
+  # on a completion press where "no extra roots" was the whole answer.
+  local extra_roots="${TAI_FILE_ROOTS:-}"
+  for dir in ${extra_roots//:/ } ${XDG_DOWNLOAD_DIR:+"$XDG_DOWNLOAD_DIR"} \
              "$HOME/Downloads" "$HOME/Download" "$HOME/Desktop"; do
     [[ -n "$dir" ]] || continue
     [[ "${dir/#\~/$HOME}" == /* ]] || dir="$PWD/$dir"
@@ -167,12 +174,16 @@ _tai_keep_root() {
 # The files a path argument could be, and whether what tai learned for this line
 # is still one of them.
 #
-# Prints them, one per line. Called from _tai_complete rather than _tai_query,
-# because bash has no ghost text: the answer appears when completion is asked
-# for, which is the only moment a user can see it.
+# Answers in the globals _TAI_FILES and _TAI_FILES_Q — one flag per entry, 1
+# when it is a name off the disk that has to be quoted before a shell passes it
+# as one word, 0 when it is the word of a line the user ran and is already
+# shell text. Nothing is printed: every caller runs under `bind -x`, where
+# stdout is the terminal, and the old print-then-capture round trip was a fork
+# per answer on a keypress.
 _tai_file_answer() {
   local line="$1" before word key last
   local -a kept
+  _TAI_FILES=(); _TAI_FILES_Q=()
   # `*" "*` — a space *anywhere* — and not `*' '`, which is a space at the end.
   # That second one reads like the test above it and is the opposite question:
   # `chmod +x freeb` has a space in it and no trailing one, so it would have been
@@ -202,13 +213,16 @@ _tai_file_answer() {
   _TAI_FRESH=( "${kept[@]}" )
   # A learned argument that is still a file here outranks the newest one: it was
   # asked for before and it exists, which is what keeps this from displacing
-  # `cat ~/notes/todo.txt` with whatever was touched last.
-  last="$(_tai_best "${_TAI_WORD[$key]:-}" "$line")"
-  last="${last##* }"
+  # `cat ~/notes/todo.txt` with whatever was touched last. It is already the
+  # text the user ran, so its flag is 0; everything that came off the disk is
+  # raw text and travels with a 1.
+  _tai_best "${_TAI_WORD[$key]:-}" "$line"
+  last="${_TAI_BEST_LINE##* }"
   if [[ -n "$last" && "$last" == "$word"* && -e "${last/#\~/$HOME}" ]]; then
-    printf '%s\n' "$last"
+    _TAI_FILES+=( "$last" ); _TAI_FILES_Q+=( 0 )
   fi
-  printf '%s\n' "${_TAI_FRESH[@]}"
+  _TAI_FILES+=( "${_TAI_FRESH[@]}" )
+  for last in "${_TAI_FRESH[@]}"; do _TAI_FILES_Q+=( 1 ); done
 }
 
 # Words that run the command after them rather than being the command. The

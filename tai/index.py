@@ -221,6 +221,10 @@ def build(max_commands: int = 20000) -> int:
         for cmd in stale:
             eng.cmds.pop(cmd, None)
         eng.sorted_cmds = [c for c in eng.sorted_cmds if c not in stale]
+        # The filter is order-preserving, but the engine's sorted-list contract
+        # is "sorted by the time it is read, not before": mark it so any later
+        # reader re-sorts rather than trusting the filter to have kept order.
+        eng._cmds_dirty = True
         # The sequence table as well, and it is the one that leaks. A stale
         # command dropped from `cmds` is gone from _TAI_SCORE, _TAI_FIRST and
         # _TAI_WORD — and still sat in `eng.seq`, which is written verbatim, so
@@ -262,6 +266,12 @@ def build(max_commands: int = 20000) -> int:
     # constants and writes them back into engine.py, and a hardcoded copy here
     # meant every tuned run reported success and changed nothing a user sees.
     now = int(time.time())
+    # Membership is asked twice per command below, and `SEED_COMMANDS` is a
+    # list: `cmd in SEED_COMMANDS` scanned it for every command in the store.
+    # A set built once is the same question without the scan; `.index` is only
+    # asked of the handful of commands that are actually seeds.
+    seed_set = frozenset(SEED_COMMANDS)
+    n_seeds = len(SEED_COMMANDS)
     scored: list[tuple[int, str]] = []
     for cmd, st in eng.cmds.items():
         # A seed the user has never run is a convention, not an observation. It
@@ -270,18 +280,17 @@ def build(max_commands: int = 20000) -> int:
         # having an ordered corpus. A seed the user *has* run is scored as
         # history, with nothing added: the history is the evidence, and the
         # corpus has no vote about a command the user has already answered.
-        pure = cmd in SEED_COMMANDS and cmd not in from_history
+        pure = cmd in seed_set and cmd not in from_history
         if pure:
             seed_rank = SEED_COMMANDS.index(cmd)
-            scored.append((
-                int((len(SEED_COMMANDS) - seed_rank) * SEED_RANK_STEP), cmd))
+            scored.append((int((n_seeds - seed_rank) * SEED_RANK_STEP), cmd))
             continue
         age_days = max(0, (now - (st.last_ts or now)) / 86400)
         recency = math.exp(-age_days / 14.0)
         freq = min(math.log1p(st.freq) / math.log1p(20), 1.0)
         success = max(-0.5, min(1.0, (st.success - st.fail * 0.5) / max(st.freq, 1))) * 0.5 + 0.5
         score = W_FREQ * freq + W_RECENCY * recency + W_SUCCESS * success
-        if cmd in generated and cmd not in SEED_COMMANDS:
+        if cmd in generated and cmd not in seed_set:
             score *= COLD_FACTOR
         # Integer milli-score keeps comparisons native and process-free in zsh/bash.
         scored.append((int(round(score * 1000)), cmd))

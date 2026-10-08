@@ -200,7 +200,51 @@ typeset -gi _TAI_LOOSE_CAP=16
 
 # The one line tai would complete, into _TAI_BEST. The menu reads the same
 # candidates through _tai_lines and takes all of them; this takes the winner.
+#
+# Answered once per question, not once per redraw. ZLE redraws far more often
+# than a line changes — the cursor moves, a menu paints, the window resizes,
+# another plugin touches the screen — and every one of those used to pay for
+# the whole lookup again for an answer nothing could have changed. So the
+# question ("prefix, last command, index generation") is remembered beside the
+# answer (the globals the ghost, the menu and the keys read), and an unchanged
+# question restores the answer instead of recomputing it. The generation is
+# part of the key because a reloaded index is a different index with the same
+# line in front of it: _tai_load_index bumps it, so a cached answer can never
+# speak for candidates that are no longer installed.
+typeset -g _TAI_Q_FOR=""
+typeset -ga _TAI_Q_SNAP=()
+
+# Splitting a newline-joined answer back into lines. `${(@f)""}` is one empty
+# element, not none — an @-quoted empty result keeps a word — and an empty
+# candidate is not a line, so an empty answer splits to an empty array.
+_tai_q_split() {
+  REPLY=()
+  [[ -n "$1" ]] && REPLY=( "${(@f)1}" )
+}
+
 _tai_query() {
+  local key="$1"$'\n'"$2"$'\n'"$_TAI_LOOSE_GEN"
+  if [[ "$key" == "$_TAI_Q_FOR" ]]; then
+    _tai_q_split "$_TAI_Q_SNAP[1]"; _TAI_LINES=( "${REPLY[@]}" )
+    _TAI_LINES_LEAD=$_TAI_Q_SNAP[2]
+    _TAI_BEST=$_TAI_Q_SNAP[3]
+    _TAI_BEST_HELP=$_TAI_Q_SNAP[4]
+    _TAI_BEST_Q=$_TAI_Q_SNAP[5]
+    _tai_q_split "$_TAI_Q_SNAP[6]"; _TAI_LOOSE_LINES=( "${REPLY[@]}" )
+    _tai_q_split "$_TAI_Q_SNAP[7]"; _TAI_FILES=( "${REPLY[@]}" )
+    _tai_q_split "$_TAI_Q_SNAP[8]"; _TAI_FILES_Q=( "${REPLY[@]}" )
+    _TAI_FILE_JOIN=$_TAI_Q_SNAP[9]
+    return
+  fi
+  _tai_query_do "$1" "$2"
+  _TAI_Q_SNAP=( "${(pj:\n:)_TAI_LINES}" "$_TAI_LINES_LEAD" "$_TAI_BEST"
+                "$_TAI_BEST_HELP" "$_TAI_BEST_Q"
+                "${(pj:\n:)_TAI_LOOSE_LINES}" "${(pj:\n:)_TAI_FILES}"
+                "${(pj:\n:)_TAI_FILES_Q}" "$_TAI_FILE_JOIN" )
+  _TAI_Q_FOR="$key"
+}
+
+_tai_query_do() {
   local prefix="$1" last="$2" first
   _TAI_BEST_HELP=0; _TAI_BEST_Q=0
   _TAI_LOOSE_LINES=()
@@ -317,9 +361,9 @@ _tai_word_re() {
 
 _tai_loose() {
   local prefix="${1:l}"
-  local -a want ranked rxs exact fuzzy ranked_f
-  local w line ll ok s t rx c
-  local -i i k
+  local -a want rxs exact fuzzy
+  local w line ll rx ok fuzzy_used
+  local -i k
   # A pasted command is not a half-remembered one. Checked before the cache key
   # and before any line is read, so the answer is nothing and the cost is one
   # comparison.
@@ -421,55 +465,55 @@ _tai_loose() {
   # first, capped. Insertion into a list that is bounded, so the cost stays
   # constant. Exact lines fill the list first; fuzzy lines only ever reach the
   # tail.
-  for line in "${exact[@]}"; do
-    s=${_TAI_SCORE[$line]:-0}
-    if (( ${#ranked} >= $_TAI_LOOSE_CAP )); then
-      t=${_TAI_SCORE[${ranked[-1]}]:-0}
-      (( s <= t )) && continue
-    fi
-    for (( i = 1; i <= ${#ranked}; i++ )); do
-      t=${_TAI_SCORE[${ranked[i]}]:-0}
-      (( s > t )) && break
-    done
-    if (( i > ${#ranked} )); then
-      ranked+=("$line")
-    else
-      local -a tail_=( "${ranked[@]:$i-1}" )
-      local -a head_=( )
-      (( i > 1 )) && head_=( "${ranked[@]:0:$i-1}" )
-      ranked=( "${head_[@]}" "$line" "${tail_[@]}" )
-    fi
-    (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
-      ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
-  done
-  for line in "${fuzzy[@]}"; do
-    s=${_TAI_SCORE[$line]:-0}
-    if (( ${#ranked_f} >= $_TAI_LOOSE_CAP )); then
-      t=${_TAI_SCORE[${ranked_f[-1]}]:-0}
-      (( s <= t )) && continue
-    fi
-    for (( i = 1; i <= ${#ranked_f}; i++ )); do
-      t=${_TAI_SCORE[${ranked_f[i]}]:-0}
-      (( s > t )) && break
-    done
-    if (( i > ${#ranked_f} )); then
-      ranked_f+=("$line")
-    else
-      local -a tail_=( "${ranked_f[@]:$i-1}" )
-      local -a head_=( )
-      (( i > 1 )) && head_=( "${ranked_f[@]:0:$i-1}" )
-      ranked_f=( "${head_[@]}" "$line" "${tail_[@]}" )
-    fi
-    (( ${#ranked_f} > $_TAI_LOOSE_CAP )) && \
-      ranked_f=( "${ranked_f[@]:0:$_TAI_LOOSE_CAP}" )
-  done
-  ranked=( "${ranked[@]}" "${ranked_f[@]}" )
+  _TAI_RANKED=()
+  for line in "${exact[@]}"; do _TAI_RANK_LINE="$line"; _tai_ranked_insert; done
+  _TAI_RANKED_EXACT=( "${_TAI_RANKED[@]}" )
+  _TAI_RANKED=()
+  for line in "${fuzzy[@]}"; do _TAI_RANK_LINE="$line"; _tai_ranked_insert; done
+  ranked=( "${_TAI_RANKED_EXACT[@]}" "${_TAI_RANKED[@]}" )
   (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
     ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
   _TAI_LOOSE_LINES=()
   for c in "${ranked[@]}"; do _tai_clean "$c" && _TAI_LOOSE_LINES+=( "$c" ); done
   _TAI_LOOSE_CACHED=( "${_TAI_LOOSE_LINES[@]}" )
   _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
+}
+
+# One line into the bounded, best-first list _TAI_RANKED, by _TAI_SCORE. The
+# line to insert travels in _TAI_RANK_LINE, and both globals rather than
+# parameters, because the insertion is shared by the two tiers of the loose
+# answer — one copy of the rule, or the exact tier and the fuzzy tier drift
+# apart the first time one of them is "fixed". Globals and not `typeset -n`
+# references for the same reason every helper here answers in a global: it is
+# one mechanism, not two, and there is no nameref scope to reason about on a
+# keystroke.
+typeset -ga _TAI_RANKED=()
+typeset -ga _TAI_RANKED_EXACT=()
+typeset -g _TAI_RANK_LINE=""
+
+_tai_ranked_insert() {
+  local line="$_TAI_RANK_LINE" s t
+  local -i i
+  local -a src=( "${_TAI_RANKED[@]}" )
+  s=${_TAI_SCORE[$line]:-0}
+  if (( ${#src} >= $_TAI_LOOSE_CAP )); then
+    t=${_TAI_SCORE[${src[-1]}]:-0}
+    (( s <= t )) && return
+  fi
+  for (( i = 1; i <= ${#src}; i++ )); do
+    t=${_TAI_SCORE[${src[i]}]:-0}
+    (( s > t )) && break
+  done
+  if (( i > ${#src} )); then
+    _TAI_RANKED=( "${src[@]}" "$line" )
+  else
+    local -a tail_=( "${src[@]:$i-1}" )
+    local -a head_=( )
+    (( i > 1 )) && head_=( "${src[@]:0:$i-1}" )
+    _TAI_RANKED=( "${head_[@]}" "$line" "${tail_[@]}" )
+  fi
+  (( ${#_TAI_RANKED} > $_TAI_LOOSE_CAP )) && \
+    _TAI_RANKED=( "${_TAI_RANKED[@]:0:$_TAI_LOOSE_CAP}" )
 }
 # The generation the cache above is keyed on, and the key itself. A reload
 # bumps the generation because the answer for a prefix is an answer about the

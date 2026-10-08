@@ -60,6 +60,9 @@ One question per key. `Tab` moves through the completions, `Ctrl-Space` opens
 the list when you want to look rather than commit; it also sits on `Ctrl-T`
 (xterm sends NUL for `Ctrl-Space`). The hint is `→`'s, never `Tab`'s.
 
+Pasted text never opens the list on its own — a paste is not a query — and
+one typed or removed character brings the list back.
+
 Taking a directory from a list is not a request to go there — you may want the
 rest of the path or another argument — so `Enter` takes and stops;
 a second runs it.

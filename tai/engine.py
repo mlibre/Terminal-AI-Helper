@@ -31,6 +31,12 @@ EXACT_CTX_BONUS = 0.5
 TYPO_PENALTY = 1.0
 TEMP_DEFAULT = 0.9
 
+# The freq normaliser, hoisted: it is a constant asked once per candidate per
+# suggest, and `math.log1p(20)` was being recomputed for every one of them.
+_LOG1P20 = math.log1p(20)
+# Half-life of a command's recency, in days, as `exp(-age / TAU)`.
+_TAU = 14.0
+
 
 def hour_bucket(ts: int | None = None) -> int:
     try:
@@ -111,6 +117,22 @@ class Engine:
         self.sorted_cmds: list[str] = []
         self._prev_cmd: str | None = None  # for building seq incrementally
         self._first_word_cache: list[str] | None = None  # see tai/typo.py
+        self._cmds_dirty = False         # sorted_cmds holds appends, not order
+
+    def _ensure_sorted(self) -> None:
+        """Sort the command list if anything was appended since the last sort.
+
+        `add` used to `bisect.insort` every new command, which kept the list
+        sorted at all times at an O(n) memmove per *new distinct* command — on a
+        50k-row history with thousands of distinct names, that memmove work was
+        an order of magnitude more than one final sort. Nothing can read the
+        list before asking here: `_prefix_range` needs the lexical order to walk
+        a bisect range, and `_first_words` in tai/typo.py keeps the same
+        contract. One sort at first use, then appends only mark it dirty.
+        """
+        if self._cmds_dirty:
+            self.sorted_cmds.sort()
+            self._cmds_dirty = False
 
     # -- learning ---------------------------------------------------------
     def add(self, cmd: str, cwd: str = "", repo: str = "",
@@ -124,7 +146,8 @@ class Engine:
         st = self.cmds.get(cmd)
         if st is None:
             st = self.cmds[cmd] = CmdStats()
-            bisect.insort(self.sorted_cmds, cmd)
+            self.sorted_cmds.append(cmd)
+            self._cmds_dirty = True     # one sort at first read, not insort per add
             self._first_word_cache = None   # the derived list is now stale
         st.freq += 1
         if ts >= st.last_ts:
@@ -193,6 +216,7 @@ class Engine:
         """
         if not prefix:
             return []
+        self._ensure_sorted()
         cmds = self.sorted_cmds
         out: list[str] = []
         i = bisect.bisect_left(cmds, prefix)
@@ -269,13 +293,21 @@ class Engine:
             return _fallback(prefix, limit)
 
         # two-stage: if huge, pre-filter by cheap freq+recency to 600
+        # The pre-filter's per-command arithmetic is the main loop's arithmetic
+        # for the same names — the recency `exp` and the `log1p` of the same
+        # frequency — so it is cached here and reused below rather than paid
+        # twice for the 600 that survive.
+        pre: dict[str, tuple[float, float]] | None = None
         if len(cand_names) > 600:
+            pre = {}
             scored_pre = []
+            exp, log1p = math.exp, math.log1p
             for name in cand_names:
                 st = self.cmds[name]
                 age_days = max(0, (now - (st.last_ts or now)) / 86400)
-                rec = math.exp(-age_days / 14.0)
-                fq = math.log1p(st.freq)
+                rec = exp(-age_days / _TAU)
+                fq = log1p(st.freq)
+                pre[name] = (fq, rec)
                 scored_pre.append((fq + rec, name))
             scored_pre.sort(reverse=True)
             cand_names = [n for _, n in scored_pre[:600]]
@@ -289,11 +321,16 @@ class Engine:
         bi_ctx = ptoks[-1] if ptoks else None
 
         scored: list[tuple[float, str]] = []
+        exp = math.exp
         for name in cand_names:
             st = self.cmds[name]
-            age_days = max(0, (now - (st.last_ts or now)) / 86400)
-            recency = math.exp(-age_days / 14.0)
-            freq_s = min(math.log1p(st.freq) / math.log1p(20), 1.0)
+            if pre is not None:
+                fq, recency = pre[name]
+                freq_s = min(fq / _LOG1P20, 1.0)
+            else:
+                age_days = max(0, (now - (st.last_ts or now)) / 86400)
+                recency = exp(-age_days / _TAU)
+                freq_s = min(math.log1p(st.freq) / _LOG1P20, 1.0)
             cwd_s = min((st.cwd.get(cwd, 0) if cwd else 0) / max(st.freq, 1), 1.0)
             # basename fallback: half credit
             if cwd and cwd_s == 0 and st.cwd:

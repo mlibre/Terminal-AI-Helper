@@ -67,6 +67,7 @@ def _first_words(eng) -> list[str]:
     """
     cached = eng._first_word_cache
     if cached is None:
+        eng._ensure_sorted()      # the list is appends until first read
         seen: dict[str, None] = {}
         for c in eng.sorted_cmds:
             w = c.split(" ", 1)[0]

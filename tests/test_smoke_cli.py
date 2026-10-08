@@ -32,13 +32,15 @@ class _Args:
 
 learned: list[str] = []
 import tai.knowledge as knowledge
-real_which, real_learn, real_is_known = knowledge.shutil.which, knowledge.learn, knowledge.is_known
+# "Installed" is answered by the CLI's own PATH lookup now, and it is that one
+# function the stub replaces — the machine's real PATH decides nothing here.
+real_which, real_learn, real_is_known = tai_cli._which, knowledge.learn, knowledge.is_known
 knowledge.learn = lambda tools=None: (learned.extend(tools or []), 1)[1]
 knowledge.is_known = lambda name: False
 # Only these two are on this fictional PATH, so "installed" is decided by the
 # stub rather than by whatever the machine running the test happens to have.
 INSTALLED = {"9router", "ls"}
-knowledge.shutil.which = lambda name: f"/usr/bin/{name}" if name in INSTALLED else None
+tai_cli._which = lambda name: f"/usr/bin/{name}" if name in INSTALLED else None
 
 os.environ["TAI_NO_LEARN"] = "1"
 _Args.command = "9router --port 20128"
@@ -64,7 +66,7 @@ for never in ("", "   ", "--version", "/usr/bin/ls -l", "cd /tmp", "ls"):
     else:
         assert learned == [], f"{never!r} must not be learned: {learned}"
 # Put the module back before anything else uses it.
-knowledge.shutil.which, knowledge.learn, knowledge.is_known = real_which, real_learn, real_is_known
+tai_cli._which, knowledge.learn, knowledge.is_known = real_which, real_learn, real_is_known
 
 # What `--help` is read into. The guard in the usage-line parser was written with
 # a doubled backslash — a backslash, the letter `w` and a dash — where a word
@@ -325,8 +327,8 @@ print("OK — refresh: imports, rebuilds, one line, and reports a failed build."
 # they were both wrong on.
 import re as _re
 
-_seed_db = "/tmp/opencode/tai_seedband.db"
-_seed_index = "/tmp/opencode/tai_seedband_index.zsh"
+_seed_db = "/tmp/tai/tai_seedband.db"
+_seed_index = "/tmp/tai/tai_seedband_index.zsh"
 for _p in (_seed_db, _seed_db + "-wal", _seed_db + "-shm", _seed_index):
     pathlib.Path(_p).unlink(missing_ok=True)
 _saved_db, _saved_index = os.environ["TAI_DB"], os.environ["TAI_INDEX"]
@@ -383,8 +385,8 @@ finally:
 # store — reached honestly rather than by accident. The guard existed and could
 # not fire: it asked whether the *engine* was empty, and by then the seed corpus
 # and the generated tool vocabulary had been added to it.
-_dead_db = "/tmp/opencode/tai_alldead.db"
-_dead_index = "/tmp/opencode/tai_alldead.zsh"
+_dead_db = "/tmp/tai/tai_alldead.db"
+_dead_index = "/tmp/tai/tai_alldead.zsh"
 for _p in (_dead_db, _dead_db + "-wal", _dead_db + "-shm", _dead_index):
     pathlib.Path(_p).unlink(missing_ok=True)
 pathlib.Path(_dead_index).write_text("# tai index — the good one\n_TAI_SCORE+=('x' '1')\n")
@@ -419,8 +421,8 @@ print("OK — the index: conventions rank below observed usage, and stay on offe
 # with the writer under test and source it in the two shells, and require
 # silence — a refusal names the file, so any output at all is the failure.
 _repo = pathlib.Path(__file__).resolve().parent.parent
-_gen_dir = pathlib.Path("/tmp/opencode/tai_gen_dir")
-_gen_db = "/tmp/opencode/tai_gen_dir/history.db"
+_gen_dir = pathlib.Path("/tmp/tai/tai_gen_dir")
+_gen_db = "/tmp/tai/tai_gen_dir/history.db"
 # The bash snapshot is one derived name away from the zsh one, so both live in
 # this scratch directory and nothing this block writes can be another test's file.
 _gen_index = str(_gen_dir / "zsh-index.zsh")
@@ -464,13 +466,13 @@ print("OK — an all-stale history is refused, and the last good index survives 
 # "no match" as success, so a constant the writer and the source spelled
 # differently each was left alone while the run printed `wrote …/engine.py` after
 # minutes of search. A tune that changed nothing must say so and touch nothing.
-_tune_dir = pathlib.Path("/tmp/opencode/tai_tune_copy")
+_tune_dir = pathlib.Path("/tmp/tai/tai_tune_copy")
 shutil.rmtree(_tune_dir, ignore_errors=True)
 _tune_dir.mkdir(parents=True)
 shutil.copytree(_repo / "tai", _tune_dir / "tai")
-_tune_db = "/tmp/opencode/tai_tune_copy/history.db"
-_tune_env = dict(os.environ, TAI_DB=_tune_db, TAI_INDEX="/tmp/opencode/tai_tune_copy/i.zsh",
-                 TAI_NO_AUTO_RECORD="1", TAI_DATA_DIR="/tmp/opencode/tai_tune_copy/data")
+_tune_db = "/tmp/tai/tai_tune_copy/history.db"
+_tune_env = dict(os.environ, TAI_DB=_tune_db, TAI_INDEX="/tmp/tai/tai_tune_copy/i.zsh",
+                 TAI_NO_AUTO_RECORD="1", TAI_DATA_DIR="/tmp/tai/tai_tune_copy/data")
 _saved_db = os.environ["TAI_DB"]
 os.environ["TAI_DB"] = _tune_db
 try:

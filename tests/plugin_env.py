@@ -21,13 +21,13 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))     # `_index_rows` reads tai.paths to mark file args
 PLUGINS = {"bash": REPO / "plugins" / "tai.bash", "zsh": REPO / "plugins" / "tai.zsh"}
 SHELLS = {"bash": shutil.which("bash"), "zsh": shutil.which("zsh")}
-DB = pathlib.Path("/tmp/opencode/tai_plugins_test.db")
-EDITOR = pathlib.Path("/tmp/opencode/tai_dump_line.sh")
+DB = pathlib.Path("/tmp/tai/tai_plugins_test.db")
+EDITOR = pathlib.Path("/tmp/tai/tai_dump_line.sh")
 # Where a bash test reads COMPREPLY back from. Its own file, not the dump
 # editor's, because sharing one file would make one assertion's output another
 # one's synchronisation point.
-REPLY = pathlib.Path("/tmp/opencode/tai_reply.txt")
-INDEX_DIR = pathlib.Path("/tmp/opencode/tai_test_index")
+REPLY = pathlib.Path("/tmp/tai/tai_reply.txt")
+INDEX_DIR = pathlib.Path("/tmp/tai/tai_test_index")
 ZSH_INDEX = INDEX_DIR / "zsh-index.zsh"
 BASH_INDEX = INDEX_DIR / "bash-index.bash"
 # Where the record subprocess is allowed to write an index. Recording triggers a
@@ -38,7 +38,7 @@ BASH_INDEX = INDEX_DIR / "bash-index.bash"
 RECORD_INDEX = INDEX_DIR / "record-index.zsh"
 # A database of its own for the recording test, one per iteration — see there.
 RECORD_DB = DB.with_name("tai_plugins_record.db")
-HISTFILE = pathlib.Path("/tmp/opencode/tai_test_history")
+HISTFILE = pathlib.Path("/tmp/tai/tai_test_history")
 # A directory of names no history entry shares, so the menu it produces is
 # exactly these names on any machine. The prefix is deliberately not a real one:
 # the fixture index has no key for it, so nothing is learned about it and the
@@ -47,14 +47,14 @@ HISTFILE = pathlib.Path("/tmp/opencode/tai_test_history")
 # the terminal's idea of the line — the line is gone by then, because Enter runs
 # it. The names go on PATH as well, so the command list has something to offer
 # and the two sources have to agree on it.
-MENU_DIR = pathlib.Path("/tmp/opencode/tai_menu_cwd")
+MENU_DIR = pathlib.Path("/tmp/tai/tai_menu_cwd")
 # A second directory on PATH holding names that are *not* runnable: a file with no
 # execute bit, and a directory. zsh puts both in `$commands`, and `whence` calls
 # neither a command, so a menu built from that hash without asking would offer
 # entries that fail with "permission denied" the moment Enter ran them. They are
 # also not in the current directory, so nothing else in the menu can account for
 # them: if they show up, the menu believed the hash.
-MENU_BIN = pathlib.Path("/tmp/opencode/tai_menu_bin")
+MENU_BIN = pathlib.Path("/tmp/tai/tai_menu_bin")
 MENU_UNRUNNABLE = ["tzz_nodir", "tzz_nope"]
 # A runnable name in the second directory and *not* in the current one, with
 # nothing in the history behind it: the whole `exe` case, where the only match
@@ -79,7 +79,7 @@ MENU_ENTRIES = ["tzz_a", "tzz_b", "tzz_c", "tzz_other", "tzz_solo",
 # named `aaa_…` so it sorts first under any locale collation — zsh's glob order
 # ignores `_` in a UTF-8 locale, so a name that merely looked like it sorted first
 # did not, and the selection under test was a different entry than intended.
-STEM_ROOT = pathlib.Path("/tmp/opencode/tai_menu_cwd/stemroot")
+STEM_ROOT = pathlib.Path("/tmp/tai/tai_menu_cwd/stemroot")
 STEM_NAMES = ["aaa_stem_a_very_long_directory_name/", "stem_alpha/", "stem_beta/",
               "stem_gamma/", "stem_zeta.iso"]
 # Two files that share a whole *word*, for the boundary that is a space rather
@@ -113,9 +113,9 @@ SYNTAX_HIGHLIGHTING = pathlib.Path(
 # the file that was just downloaded is not in the history yet. The download goes
 # in its own HOME so the developer's ~/Downloads is never read and the assertion
 # is about this directory's files rather than about whatever the machine has.
-FILE_HOME = pathlib.Path("/tmp/opencode/tai_file_home")
+FILE_HOME = pathlib.Path("/tmp/tai/tai_file_home")
 FILE_DOWNLOADS = FILE_HOME / "Downloads"
-FILE_WORK = pathlib.Path("/tmp/opencode/tai_file_work")
+FILE_WORK = pathlib.Path("/tmp/tai/tai_file_work")
 # The file the fake download writes, and the older file already in the working
 # directory. Their mtimes are set explicitly with os.utime rather than by the
 # order the test happens to create them in, so "newest first" is a fact about
@@ -125,7 +125,7 @@ FILE_WORK = pathlib.Path("/tmp/opencode/tai_file_work")
 # that a glob does not become a pattern match is only about the *index* if nothing
 # else could answer, and "no file here matches" is a fact about the fixture rather
 # than about whatever machine the suite runs on.
-EMPTY_DIR = pathlib.Path("/tmp/opencode/tai_empty_cwd")
+EMPTY_DIR = pathlib.Path("/tmp/tai/tai_empty_cwd")
 DOWNLOADED = "freebuff-0.0.154-linux-x86_64.AppImage"
 WORK_OLD = "notes.txt"
 
@@ -188,6 +188,13 @@ RIGHT_APP = "\x1bOC"  # right arrow, application cursor-key mode: what konsole a
 TAB = "\t"
 ENTER = "\r"         # what a terminal sends for Enter; zsh reads it as ^M
 CTRL_F = "\x06"
+# What a terminal sends when the user pastes: the bracketed-paste envelope
+# around the text. A paste arrives wrapped or not at all — zsh answers the
+# envelope by calling its bracketed-paste widget, which is the one honest
+# signal that this much arrived at once rather than keystroke by keystroke.
+PASTE_START = "\x1b[200~"
+PASTE_END = "\x1b[201~"
+BACKSPACE = "\x7f"   # backward-delete-char: the one-character edit
 # The key that opens the list on purpose, whatever is on screen. Both do the
 # same thing now that Tab cycles the list rather than taking the hint, so tests
 # that want a list read the more deliberate key.

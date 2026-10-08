@@ -20,19 +20,39 @@ updating, and diagnostics.
     tai eval-jev
 """
 import argparse
-import json
 import os
-import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 REPO_URL = "https://github.com/mlibre/terminal-ai-helper"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tai.maintenance import _rebuild_index, _rebuild_quietly
+# Nothing heavy is imported at module level, and the reason is `tai record`: it
+# runs in a fresh process after every single command the user types, so every
+# import here is paid once per command for the life of an install. argparse is
+# unavoidable (every path parses arguments) and the store is what record opens;
+# json, shutil and subprocess are each needed by one command, and maintenance,
+# knowledge and jev by a few — all of them load inside the functions that use
+# them, so a record pays for none of them.
+
+
+def _which(name: str) -> str | None:
+    """The PATH lookup `shutil.which` performs, without importing shutil.
+
+    The one question `tai record` asks of the filesystem — is this tool
+    installed — used to drag the whole `shutil` module into a process that runs
+    once per command. os is already loaded; this is the same answer for the one
+    case that matters: an exact name, no Windows extensions, executable and a
+    file rather than a directory.
+    """
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d:
+            d = os.curdir
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
 
 
 def cmd_suggest(a) -> int:
@@ -42,6 +62,7 @@ def cmd_suggest(a) -> int:
     res = suggest(prefix=a.prefix or "", cwd=cwd, repo=repo,
                   branch=branch, last_commands=last, limit=a.limit)
     if a.jev:
+        import json
         try:
             from tai.decisions import unsafe_score
             from tai.jev import decide
@@ -73,6 +94,7 @@ def cmd_suggest(a) -> int:
             print(f"tai: semantic rerank unavailable ({e}); using the local ranking",
                   file=sys.stderr)
     if a.json:
+        import json
         print(json.dumps(res))
     elif a.limit > 1:
         for c in res.get("choices", []):
@@ -104,6 +126,7 @@ def cmd_refresh(a) -> int:
     file and the plugin re-reads it at the next prompt when it changes, so
     nothing has to be restarted.
     """
+    from tai.maintenance import _rebuild_index
     from tai.store import import_shell_history
     imported = import_shell_history()
     try:
@@ -130,6 +153,9 @@ def cmd_update(a) -> int:
     from a path they have to type.
     """
     repo = _repo_dir()
+    import shutil
+    import subprocess
+
     git = shutil.which("git")
     if not git:
         print("tai: git is not installed, so there is nothing to update from")
@@ -172,6 +198,7 @@ def _auto_maintain(total: int) -> None:
     """Rebuild at 100-command boundaries without blocking the shell."""
     if total % 100:
         return
+    from tai.maintenance import _rebuild_quietly
     _rebuild_quietly()
 
 
@@ -195,11 +222,13 @@ def _learn_on_use(command: str) -> None:
     name = words[0] if words else ""
     if not name or name.startswith("-") or "/" in name or len(name) > 64:
         return
-    if not shutil.which(name):
+    if not _which(name):
         return
-    from tai.knowledge import is_known, learn
+    from tai.knowledge import is_known
     if is_known(name):
         return
+    from tai.knowledge import learn
+    from tai.maintenance import _rebuild_quietly
     if learn([name]):
         _rebuild_quietly()
 
@@ -268,6 +297,8 @@ def cmd_eval_jev(a) -> int:
 
 
 def cmd_uninstall(a) -> int:
+    import shutil
+
     from tai.paths import data_dir
     home = Path.home()
     # `TAI_DATA_DIR` overrides only *this* command's idea of where the data is.
@@ -333,6 +364,7 @@ def cmd_uninstall(a) -> int:
 
 
 def cmd_purge(a) -> int:
+    from tai.maintenance import _rebuild_quietly
     from tai.store import purge_stale, purge_unrecordable
     n = purge_unrecordable()
     m = purge_stale() if a.stale else 0
@@ -355,6 +387,7 @@ def cmd_purge(a) -> int:
 
 
 def cmd_jev(a) -> int:
+    import json
     from tai.jev import decide
     result = decide(a.prefix, a.candidate, cwd=a.cwd, repo=a.git,
                     branch=a.branch, previous=a.previous)

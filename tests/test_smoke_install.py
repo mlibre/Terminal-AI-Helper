@@ -30,8 +30,8 @@ from smoke_env import _fake_build, _quiet  # noqa: F401  (the build stub, the sh
 # suggestion anywhere else was still the answer to an empty prompt, and scored 0
 # rather than being absent. Both directions matter: a stale command must not
 # *follow* a live one either, or running one stale command suggests the next.
-_seq_db = f"/tmp/opencode/tai_seq_{os.getpid()}.db"
-_seq_index = f"/tmp/opencode/tai_seq_{os.getpid()}_zsh.zsh"
+_seq_db = f"/tmp/tai/tai_seq_{os.getpid()}.db"
+_seq_index = f"/tmp/tai/tai_seq_{os.getpid()}_zsh.zsh"
 _saved_db, _saved_index = os.environ.get("TAI_DB"), os.environ.get("TAI_INDEX")
 os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _seq_db, _seq_index
 try:
@@ -82,7 +82,7 @@ print("OK — a stale command is not a suggestion anywhere, the sequence table i
 # `~/.zhistory` absent from the import table.
 from tai.store import _history_files
 
-custom = pathlib.Path("/tmp/opencode/tai_custom.history")
+custom = pathlib.Path("/tmp/tai/tai_custom.history")
 custom.write_text("nano .zshrc\n")
 home = pathlib.Path(os.path.expanduser("~"))
 try:
@@ -328,8 +328,10 @@ with tempfile.TemporaryDirectory() as fake_home:
     text = wrapper.read_text()
     moved = f"{fake_home}/moved-away/tai/cli.py"
     # Every mention of the checkout's path, which is what "the checkout moved"
-    # means to the wrapper: it checks that path and then runs it.
-    named = text.split("exec python3 ")[1].split('"')[0].strip()
+    # means to the wrapper: it checks that path and then runs it. Named by
+    # shape rather than by position in the exec line, which is free to grow
+    # interpreter flags (`python3 -S -E …`) without breaking this parse.
+    named = [w for w in text.split() if w.endswith("/tai/cli.py")][0]
     wrapper.write_text(text.replace(named, moved))
     gone = subprocess.run([str(wrapper), "suggest", "git st"], env=_install_env(fake_home),
                           capture_output=True, text=True, timeout=120)

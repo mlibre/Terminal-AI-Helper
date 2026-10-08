@@ -262,6 +262,19 @@ Each one exists because of a reported failure.
   all first of all, so the cheapest vetoes — `-g` on an npm install line,
   a pasted path fragment — throw the line out before any pattern is
   compiled.
+- **A paste is not a query.** Text that arrives at once — wrapped in the
+  bracketed-paste envelope, or a paste-sized jump in one redraw — has not
+  been read by anyone, so the loose glimpse stays quiet under it until one
+  typed or removed character re-arms the list. `Down` still asks for it
+  directly. The ghost hint is not touched: a prefix answer is one line, not a
+  screen.
+- **Answers travel in globals, never in `$( )`, on the keystroke path.** In
+  zsh a fork is the one cost a redraw cannot pay; in bash `bind -x` makes a
+  function's stdout the terminal, so the `$( )` that used to wrap every lookup
+  was both a fork per keypress and the only thing keeping the answer off the
+  screen. The zsh question ("buffer, last command, index generation") is also
+  remembered beside its answer, so a redraw that did not change the line
+  restores it instead of recomputing it.
 - **What the plugin paints is terminal text, never the stored line.** A
   stored command can carry raw control bytes — the real history held two
   rows that were actually bracketed-paste envelopes — and POSTDISPLAY goes

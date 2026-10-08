@@ -15,6 +15,50 @@
 # and Tab opening a list over it. So POSTDISPLAY is only ever written when tai
 # has something to say, and cleared when what tai said is gone — never to silence
 # someone else.
+# A paste is not typing, and the glimpse must not treat it as one. The signal
+# is the terminal's own: a terminal that speaks bracketed paste wraps what it
+# sends in the paste envelope, and the widget below marks whatever arrives in
+# one. That is a paste however short it is, and one typed or removed character
+# afterwards is a keystroke again, which re-arms the glimpse. A jump of many
+# characters in one redraw — a paste in a terminal that does not send the
+# envelope, an insertion nobody wrapped — is marked too, at a bound high
+# enough that the fastest coalesced burst of ordinary typing never reaches it.
+# The ghost hint is untouched by any of this: a prefix answer to the line as it
+# now stands is one line, not a screen.
+typeset -g _TAI_PASTE_PREV=""
+typeset -gi _TAI_PASTE_QUIET=0
+typeset -gi _TAI_PASTE_JUMP=25
+
+_tai_paste_state() {
+  # The unwrapped case: how far the buffer moved since the last redraw. One
+  # character in either direction is a keystroke — typed or removed — and ends
+  # the quiet; more than _TAI_PASTE_JUMP at once is an arrival and starts it.
+  # Everything between leaves the flag as it is.
+  local -i d=$(( ${#BUFFER} - ${#_TAI_PASTE_PREV} ))
+  (( d < 0 )) && d=$(( -d ))
+  if (( d == 1 )); then
+    _TAI_PASTE_QUIET=0
+  elif (( d > _TAI_PASTE_JUMP )); then
+    _TAI_PASTE_QUIET=1
+  fi
+  _TAI_PASTE_PREV="$BUFFER"
+}
+
+# The bracketed-paste envelope is the terminal saying "this much arrived at
+# once". Wrapped, not replaced: the builtin still reads to the closing marker
+# and inserts the text, and the flag it sets comes down at the next keystroke —
+# any edit of one character — because the rule is about what arrived, not a
+# permanent mode.
+tai-bracketed-paste() {
+  _TAI_PASTE_QUIET=1
+  zle .bracketed-paste
+}
+zle -N tai-bracketed-paste
+if (( $+widgets[bracketed-paste] )) && \
+   [[ "${widgets[bracketed-paste]:-}" != *tai-bracketed-paste* ]]; then
+  zle -N bracketed-paste tai-bracketed-paste
+fi
+
 _tai_update() {
   local -i ours_was=$_TAI_DREW
   _TAI_SUGGESTION=""
@@ -31,6 +75,7 @@ _tai_update() {
     # screen. Only ever ours: `ours_was` says whether we put it there.
     (( ours_was )) && POSTDISPLAY=""
   fi
+  _tai_paste_state
   _tai_query "$BUFFER" "$_TAI_LAST"
   if [[ -n "$_TAI_BEST" && "$_TAI_BEST" == "$BUFFER"* && "$_TAI_BEST" != "$BUFFER" ]]; then
     _TAI_SUGGESTION="${_TAI_BEST#$BUFFER}"
@@ -54,7 +99,14 @@ _tai_update() {
   # draw it. This is the interactive counterpart to the --help fallback: not a
   # guess, but a show of the mostly-through-the-glass completions the history
   # doesn't offers straight.
+  #
+  # Not while the line is a paste, though: it arrived at once and nobody has
+  # read it, so three rows of guesses under it is noise on top of noise — the
+  # report that asked for this rule called it exactly that. One typed or
+  # removed character re-arms the glimpse, and Down asks for it directly at any
+  # time.
   if (( ! _TAI_MENU_IDX )) && [[ -z "$_TAI_BEST" ]] && \
+     (( ! _TAI_PASTE_QUIET )) && \
      (( ${#BUFFER} >= _TAI_LOOSE_MIN_PREFIX )) && \
      (( ${#_TAI_LOOSE_LINES} )) && \
      [[ -z "${_TAI_SCORE[$BUFFER]:-}" ]] && \
@@ -395,6 +447,9 @@ _tai_line_init() {
   _TAI_HINT=""
   _TAI_DREW=0
   _TAI_MENU_DISMISS=""
+  # A new line is a new story: no paste has arrived on it yet.
+  _TAI_PASTE_PREV=""
+  _TAI_PASTE_QUIET=0
   region_highlight=()
   _tai_menu_close
 }

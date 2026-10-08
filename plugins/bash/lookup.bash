@@ -20,7 +20,7 @@ _tai_first_values() {
   local word="$1" values="" k n=0
   # An empty key is a hard error in bash ("bad array subscript"), not a miss, and
   # an empty command name is not a thing a line can hold anyway.
-  [[ -n "$word" ]] || return 0
+  [[ -n "$word" ]] || { _TAI_VALUES=""; return 0; }
   values="${_TAI_FIRST[$word]:-}"
   # A glob character in the word would make the test mean something other than
   # "begins with the word", and no command is spelled with one.
@@ -32,7 +32,12 @@ _tai_first_values() {
     done
     values="${values%$'\n'}"
   fi
-  printf '%s' "$values"
+  # The answer travels in a global, not on stdout. Everything on this path runs
+  # under `bind -x`, where a function's stdout goes to the terminal — so the
+  # `$( )` that used to wrap every one of these calls was doing two jobs: keeping
+  # the printed answer off the screen, and costing a fork per keypress for the
+  # privilege. Answering in a global does both for free.
+  _TAI_VALUES="$values"
 }
 
 # A candidate identical to what is already typed is skipped: it can never be
@@ -49,7 +54,7 @@ _tai_best() {
     s="${_TAI_SCORE[$c]:-0}"
     if (( s > best_score )); then best="$c"; best_score="$s"; fi
   done <<< "$values"
-  printf '%s' "$best"
+  _TAI_BEST_LINE="$best"
 }
 
 # An installed command the history has never seen. `--help` is the only thing
@@ -65,6 +70,7 @@ _TAI_WRAPPERS=" sudo doas nohup time nice ionice stdbuf command "
 # from the `git ...` the user has run.
 _tai_wrapped() {
   local prefix="$1" head rest key
+  _TAI_WRAPPED_OUT=""
   head="${prefix%% *}"
   rest="${prefix#* }"
   [[ "$_TAI_WRAPPERS" == *" $head "* ]] || return 0
@@ -79,16 +85,23 @@ _tai_wrapped() {
   # reading a one-word key there is a miss against every real index — which is
   # what made `sudo git ` answer nothing, and a test fixture built the other way
   # round hid it.
-  local values=""
-  if [[ "$key" == *" "* ]]; then values="${_TAI_WORD[$key]:-}"; else values="$(_tai_first_values "$key")"; fi
-  local out; out="$(_tai_best "$values" "$rest")"
-  [[ -n "$out" ]] && printf '%s %s' "$head" "$out"
+  local values="" out
+  if [[ "$key" == *" "* ]]; then values="${_TAI_WORD[$key]:-}"; else _tai_first_values "$key"; values="$_TAI_VALUES"; fi
+  _tai_best "$values" "$rest"
+  out="$_TAI_BEST_LINE"
+  [[ -n "$out" ]] || return 0
+  _TAI_WRAPPED_OUT="$head $out"
 }
 
 # Look up the longest *complete* word of the line, not the line itself. The
 # generator writes one key per cumulative word boundary, so the shorter key
 # always holds a superset of the exact-prefix key, and that superset is what lets
 # `ls -l` extend to `ls -la`.
+#
+# The answer lands in _TAI_OUT and nowhere else. Every caller runs under
+# `bind -x`, where stdout is the terminal — the old `$( _tai_query … )` forks
+# both hid the answer from the screen and paid a process for it per keypress,
+# which is the one cost the keystroke path can decline.
 _tai_query() {
   # `values=""` rather than a bare `values`: bash leaves a `local` with no
   # assignment *unset*, and the spaces-only line below never reaches the branch
@@ -96,8 +109,10 @@ _tai_query() {
   # zsh has no such distinction, which is why only bash needs the empty value.
   local prefix="$1" last="$2" first word values="" out
   if [[ -z "$prefix" ]]; then
-    [[ -n "$last" ]] && _tai_best "${_TAI_SEQ[$last]:-}" ""
-    return
+    out=""
+    [[ -n "$last" ]] && { _tai_best "${_TAI_SEQ[$last]:-}" ""; out="$_TAI_BEST_LINE"; }
+    _TAI_OUT="$out"
+    return 0
   fi
   if [[ "$prefix" == *' '* ]]; then
     word="${prefix% *}"
@@ -109,30 +124,38 @@ _tai_query() {
     if [[ "$word" == *" "* ]]; then
       values="${_TAI_WORD[$word]:-}"
     else
-      values="$(_tai_first_values "$word")"
+      _tai_first_values "$word"
+      values="$_TAI_VALUES"
     fi
   else
     first="$prefix"
-    values="$(_tai_first_values "$first")"
+    _tai_first_values "$first"
+    values="$_TAI_VALUES"
   fi
-  out="$(_tai_best "$values" "$prefix")"
+  _tai_best "$values" "$prefix"
+  out="$_TAI_BEST_LINE"
   # Wrapper transparency comes before the `--help` fallback, or that answers
   # `sudo git ` with `sudo --help` and the wrapped line is never looked at.
-  if [[ -z "$out" && "$prefix" == *' '* ]]; then out="$(_tai_wrapped "$prefix")"; fi
+  if [[ -z "$out" && "$prefix" == *' '* ]]; then
+    _tai_wrapped "$prefix" && out="$_TAI_WRAPPED_OUT"
+  fi
   # A path argument is answered by the filesystem, and the same rule as
   # _tai_complete, so accepting with the arrow and completing with Tab cannot
   # disagree about `chmod +x `. The answer is a *word*, so it replaces the word
-  # being typed rather than being appended after it.
+  # being typed rather than being appended after it. Answered in globals and
+  # not in a pipeline: the head-of-list read used to cost two processes — the
+  # command substitution and the `head` — on every keystroke that reached here.
   if [[ "$prefix" == *" "* ]]; then
-    local file join
-    file="$(_tai_file_answer "$prefix" | head -1)"
+    _tai_file_answer "$prefix"
+    local file="${_TAI_FILES[0]:-}" join
     if [[ -n "$file" ]]; then
       if [[ "$prefix" == *" " ]]; then join="$prefix"; else join="${prefix% *} "; fi
       # Quoted here and not in _tai_file_answer, because the two callers need
       # different things: readline quotes its own COMPREPLY when it inserts, and
       # quoting twice would give `My\\ Document.pdf`. This one writes the line
       # itself, so it has to do it — see _tai_quote.
-      out="$join$(_tai_quote "$file")"
+      _tai_quote "$file"
+      out="$join$_TAI_QUOTED"
     fi
   fi
   if [[ -z "$out" ]]; then
@@ -144,7 +167,7 @@ _tai_query() {
       out="$first --help"
     fi
   fi
-  printf '%s' "$out"
+  _TAI_OUT="$out"
 }
 
 _tai_repo() {

@@ -30,16 +30,21 @@ _tai_prompt() {
 }
 if [[ "${PROMPT_COMMAND:-}" != *"_tai_prompt"* ]]; then PROMPT_COMMAND="_tai_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; fi
 
+# Every handler here reads the answer out of _TAI_OUT rather than out of a
+# command substitution: `bind -x` runs in the shell itself, so a `$( )` around
+# a lookup was a fork per keypress for a string the lookup had already written
+# into a variable. _tai_query still prints — that is the contract the tests
+# read — but nothing on this path captures it any more.
 _tai_accept() {
-  local out
-  out="$(_tai_query "$READLINE_LINE" "$_TAI_LAST")"
+  _tai_query "$READLINE_LINE" "$_TAI_LAST"
+  local out="$_TAI_OUT"
   if [[ -n "$out" && "$out" == "$READLINE_LINE"* ]]; then
     READLINE_LINE="$out"; READLINE_POINT=${#READLINE_LINE}
   fi
 }
 _tai_next() {
-  local out
-  out="$(_tai_query "" "$_TAI_LAST")"
+  _tai_query "" "$_TAI_LAST"
+  local out="$_TAI_OUT"
   [[ -n "$out" ]] && READLINE_LINE="$out" && READLINE_POINT=${#READLINE_LINE}
 }
 # One word of the suggestion, as in zsh: the leading space and the first word of
@@ -47,8 +52,8 @@ _tai_next() {
 # character, which is what the right arrow itself does in this plugin — the
 # alternative was a key that reads as a suggestion and does nothing.
 _tai_accept_word() {
-  local out
-  out="$(_tai_query "$READLINE_LINE" "$_TAI_LAST")"
+  _tai_query "$READLINE_LINE" "$_TAI_LAST"
+  local out="$_TAI_OUT"
   if [[ -n "$out" && "$out" == "$READLINE_LINE"* ]]; then
     out="${out#$READLINE_LINE}"
     if [[ "$out" =~ ^([[:space:]]*[^[:space:]]+) ]]; then
@@ -64,8 +69,8 @@ _tai_accept_word() {
 }
 # Right arrow accepts the suggestion at end of line, otherwise moves right.
 _tai_accept_or_right() {
-  local out
-  out="$(_tai_query "$READLINE_LINE" "$_TAI_LAST")"
+  _tai_query "$READLINE_LINE" "$_TAI_LAST"
+  local out="$_TAI_OUT"
   if [[ -n "$out" && "$out" == "$READLINE_LINE"* && $READLINE_POINT == ${#READLINE_LINE} ]]; then
     READLINE_LINE="$out"; READLINE_POINT=${#READLINE_LINE}
   elif (( READLINE_POINT < ${#READLINE_LINE} )); then
@@ -82,22 +87,26 @@ _tai_complete() {
     if [[ "$word" == *" "* ]]; then
       values="${_TAI_WORD[$word]:-}"
     else
-      values="$(_tai_first_values "$word")"
+      _tai_first_values "$word"
+      values="$_TAI_VALUES"
     fi
   elif [[ -n "$line" ]]; then
     first="$line"
-    values="$(_tai_first_values "$first")"
+    _tai_first_values "$first"
+    values="$_TAI_VALUES"
   else
     values=""
   fi
   COMPREPLY=()
   # Files first for a line that ends in one: the filesystem is the vocabulary for
   # a path, and what is on disk beats a name from the history that may not be
-  # there at all. Read through the same lookup _tai_query would make, so bash and
-  # zsh answer the same question the same way.
-  while IFS= read -r c; do
+  # there at all. Read through the same lookup _tai_query makes, so bash and
+  # zsh answer the same question the same way — answered in globals, not in a
+  # process substitution, which was a fork per completion press.
+  _tai_file_answer "$line"
+  for c in "${_TAI_FILES[@]}"; do
     [[ -n "$c" ]] && _tai_reply "$c"
-  done < <(_tai_file_answer "$line")
+  done
   # readline replaces the *current word* with each entry, so a whole command
   # line as an entry would be inserted in the middle of the line. Offer the
   # last word; everything before it is already typed.

@@ -404,7 +404,7 @@ def test_the_cap_is_on_recency_in_both_shells() -> None:
                 # bash: ask `_tai_complete` for COMPREPLY with COMP_LINE set by
                 # hand, the way the existing test does — the cap lives in that
                 # reply, before readline ever draws anything.
-                reply = pathlib.Path("/tmp/opencode/tai_cap_reply.txt")
+                reply = pathlib.Path("/tmp/tai/tai_cap_reply.txt")
                 reply.unlink(missing_ok=True)
                 listed.run(f"COMP_LINE='chmod +x ~/Downloads/cap-'; "
                            f"COMP_POINT=${{#COMP_LINE}}; COMPREPLY=(); _tai_complete; "

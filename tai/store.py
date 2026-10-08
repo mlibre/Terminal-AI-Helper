@@ -13,6 +13,13 @@ from tai.paths import enabled as paths_enabled
 # A command must be safe to persist and useful to suggest before it is kept.
 _SECRET = re.compile(r"(password|secret|token|AKIA|-----BEGIN)", re.I)
 
+# The raw-control-byte half of the filter, at C speed: this runs once per row
+# the engine builds from, and the previous per-character `any(ord(ch) < 32 …)`
+# walk was Python-level work on every character of every row. The class matches
+# exactly what the walk did — C0 controls and DEL, and nothing above 0x7f, so
+# ordinary UTF-8 (whose continuation bytes are all 0x80 and up) is still kept.
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
 # Session-persistence harnesses wrap each real command in a marker envelope:
 #   printf ... __DSH_PERSISTENT_BASH_START_<uuid>__; eval -- $'ls -R ...';
 #   __dsh_persistent_bash_status=$?
@@ -45,7 +52,7 @@ def is_recordable(cmd: str) -> bool:
     # terminal unescaped. Not a command anyone would retype, so it is not a
     # command worth storing. (UTF-8 text is outside this range: a multi-byte
     # sequence's continuation bytes are all 0x80 and up.)
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in cmd):
+    if _CTRL.search(cmd):
         return False
     return not (_SECRET.search(cmd) or _WRAPPER.search(cmd))
 

@@ -62,7 +62,7 @@ def test_wide_file_names_are_measured_in_columns() -> None:
     if not SHELLS["zsh"]:
         return
     print("zsh menu, double-width names")
-    wide = pathlib.Path("/tmp/opencode/tai_wide_names")
+    wide = pathlib.Path("/tmp/tai/tai_wide_names")
     shutil.rmtree(wide, ignore_errors=True)
     wide.mkdir(parents=True)
     # A `wide-` prefix, because an empty word after `cat` answers from the

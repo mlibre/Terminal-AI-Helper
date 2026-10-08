@@ -41,7 +41,7 @@ class Session:
         # a run that was killed and left one behind — cannot answer each other's
         # questions. See the note on $TAI_TEST_DUMP in plugin_env.setup().
         Session._next_buf += 1
-        self.buf = pathlib.Path(f"/tmp/opencode/tai_line_{os.getpid()}"
+        self.buf = pathlib.Path(f"/tmp/tai/tai_line_{os.getpid()}"
                                 f"_{Session._next_buf}.txt")
         env = dict(os.environ, TAI_DB=str(DB), PS1="P> ", TERM="xterm-256color",
                    TAI_TEST_DUMP=str(self.buf),
