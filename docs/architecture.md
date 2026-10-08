@@ -101,7 +101,7 @@ on the first word (`tai/typo.py`). The full weight list lives at the top of
 
 Three of the rules are about what may be *ranked* rather than how, and they live
 in `tai/paths.py` because they are about whether a candidate still exists. Each
-is stated fully, with its failure history, in [AGENTS.md](../AGENTS.md):
+has a full statement in [AGENTS.md](../AGENTS.md):
 
 - **Path liveness.** A command whose path is gone is not suggested, however
   often it was run. The check is deliberately conservative: unknown never
@@ -138,9 +138,8 @@ lot: `gh --help` yields no verbs to the parser and `gh __complete ""` yields all
 of them, each with a description.
 
 Anything read this way is a *convention*, and conventions rank below anything
-the history actually saw — see "Generated vocabulary" in
-[AGENTS.md](../AGENTS.md) for why that band exists and what it cost when it was
-a bonus instead.
+the history actually saw — see "Generated vocabulary ranks below observed
+usage" in [AGENTS.md](../AGENTS.md).
 
 ## The optional model layer
 
