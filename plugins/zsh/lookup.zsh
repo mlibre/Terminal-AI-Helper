@@ -49,14 +49,14 @@ typeset -gi _TAI_BEST_Q=0
 # screen. Any C0 control or DEL: ESC is one of them, a tab would smear a
 # menu row, and a newline would turn one candidate into two cells.
 _tai_clean() {
-  local s="$1" c
-  local -i i
-  for (( i = 1; i <= ${#s}; i++ )); do
-    c="${s[i]}"
-    (( #c < 32 || #c == 127 )) && return 1
-  done
+  # One pattern test, not one per character: this runs once per candidate per
+  # keystroke, and a per-char loop over every candidate measurably cost more
+  # than the whole rest of the lookup. ${~_TAI_CTRL} forces pattern reading:
+  # the raw value would be matched as a literal string.
+  [[ "$1" == *${~_TAI_CTRL}* ]] && return 1
   return 0
 }
+_TAI_CTRL=$'[\x01-\x1f\x7f]'
 
 # Command names considered for a half-typed command name, in one lookup. A key
 # holds at most WORD_CANDIDATE_CAP lines, so this bounds the lines too. The widest
@@ -314,6 +314,7 @@ _tai_word_re() {
   print -r -- "$re"
 }
 
+
 _tai_loose() {
   local prefix="${1:l}"
   local -a want ranked rxs exact fuzzy ranked_f
@@ -370,8 +371,23 @@ _tai_loose() {
       rxs+=( "$(_tai_word_re "$w")" )
     fi
   done
-  for line in "${(@k)_TAI_SCORE[@]}"; do
-    ll="${line:l}"
+  # Lowercase of every learned line, built once per index load and not once per
+  # keystroke: measured, it was the bulk of each loose pass itself. The two
+  # arrays stay parallel so the scan visits both by the same position.
+  if (( _TAI_LOOSE_SNAP != _TAI_LOOSE_GEN )); then
+    _TAI_LOOSE_KEYS=( "${(@k)_TAI_SCORE[@]}" )
+    _TAI_LOOSE_LOW=()
+    local line
+    for line in "${_TAI_LOOSE_KEYS[@]}"; do
+      _TAI_LOOSE_LOW+=( "${line:l}" )
+    done
+    _TAI_LOOSE_SNAP=$_TAI_LOOSE_GEN
+  fi
+  local -i n_k=${#_TAI_LOOSE_KEYS[@]}
+  integer -i i_l
+  for (( i_l = 1; i_l <= n_k; i_l++ )); do
+    line=${_TAI_LOOSE_KEYS[i_l]}
+    ll=${_TAI_LOOSE_LOW[i_l]}
     ok=1; fuzzy_used=0
     for (( k = 1; k <= ${#want}; k++ )); do
       w=$want[k]; rx=$rxs[k]
@@ -382,15 +398,10 @@ _tai_loose() {
       (( ${#w} > ${#ll} )) && { ok=0; break }
       [[ "$ll" == *"$w"* ]] && continue
       [[ -n "$rx" ]] || { ok=0; break }
-      # A fuzzy surface can only hit a line that already holds every letter of
-      # the word — a quoted substring test is a C strstr, and the in-order
-      # matcher is where the line is really judged. Without this prefilter a
-      # full pass cost minutes, one check per line per word, and the shell
-      # froze on the keystroke that needed it.
-      for (( j = 1; j <= ${#w}; j++ )); do
-        c="${w[j]}"
-        [[ "$ll" == *"$c"* ]] || { ok=0; break 2 }
-      done
+      # The in-order witness, straight: a letters-as-a-glob pattern was
+      # exponential on this index's long URL lines, and the per-letter
+      # strstr prefilter it replaced spent more time screening than the
+      # pattern spends deciding, measured on every keystroke bug it is.
       [[ "$ll" =~ $rx ]] || { ok=0; break }
       fuzzy_used=1
     done
@@ -466,4 +477,8 @@ _tai_loose() {
 typeset -gi _TAI_LOOSE_GEN=0
 typeset -g _TAI_LOOSE_FOR=""
 typeset -ga _TAI_LOOSE_CACHED=()
+# The lowercase scan copy is rebuilt when the generation moves on, and not
+# before: the first redraw after a reload pays for it.
+typeset -gi _TAI_LOOSE_SNAP=-1
+typeset -ga _TAI_LOOSE_KEYS=()
 
