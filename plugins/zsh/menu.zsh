@@ -102,7 +102,18 @@ _tai_menu_cell() {
 #
 # Computed on the whole menu, not on what the columns end up holding, so the stem
 # does not change when the terminal is resized or the cap trims the list.
+#
+# And it is bounded by the word being completed, which is the half that keeps the
+# stem honest: a stem may only cut what the line already shows. The report that
+# found this: `cd tm` in a home directory where every learned destination sits
+# under `tmp/` — every entry shared that prefix, the boundary cut handed back
+# `tmp/`, and the menu drew `vllm`, `fun-game/`, `fabric` under a line reading
+# `cd tm`. Nothing on the line says `tmp/`, so the rows read as completions of
+# `tmvllm`, `tmfun-game` — names nobody typed and nothing offers. A stem is a
+# reminder of text that is already on screen; anything else is information taken
+# away.
 _tai_menu_stem() {
+  local word="$1"
   local -a ent
   local c first rest tail
   local -i k len ok at=0
@@ -124,6 +135,26 @@ _tai_menu_stem() {
   done
   (( at )) || { _TAI_MENU_STEM=""; return }
   rest=$first[1,$at]
+  # Clamp to what was typed, before any boundary cut: a stem the word does not
+  # start with is text the line does not show, and no boundary rule downstream
+  # can put it back. `tmp/` for a menu opened on `tm` shrinks here to nothing;
+  # `tmp/` for a menu opened on `tmp/` — the stem the rule below exists for —
+  # passes untouched.
+  while [[ -n "$rest" && "$word" != "$rest"* ]]; do
+    rest="${rest%/}"; rest="${rest% }"
+    local -i blen2=0
+    if [[ "$rest" == */* ]]; then
+      tail=${rest##*/}
+      (( ( ${#rest} - ${#tail} ) > blen2 )) && blen2=$(( ${#rest} - ${#tail} ))
+    fi
+    if [[ "$rest" == *' ' ]]; then
+      tail=${rest##* }
+      (( ( ${#rest} - ${#tail} ) > blen2 )) && blen2=$(( ${#rest} - ${#tail} ))
+    fi
+    (( blen2 )) || { rest=""; break; }
+    rest=$rest[1,$blen2]
+  done
+  [[ -n "$rest" ]] || { _TAI_MENU_STEM=""; return }
   # Already a whole word — the common case for a path, which ends in a slash.
   [[ "$rest" == */ || "$rest" == *' ' ]] && { _TAI_MENU_STEM=$rest; return }
   # Otherwise cut back to the last `/` or space in it, whichever is later, and
@@ -186,7 +217,28 @@ _tai_menu_open() {
     _TAI_MENU_TO=$len; _TAI_MENU_FROM=$(( len - ${#word} + 1 ))
   fi
 
-  # 0. Files, when the line is known to end in one: the filesystem is the
+  # 0a. Units, when the line is a systemctl unit argument: the cached unit list
+  #    IS the vocabulary there, and files, command names and the directory
+  #    listing around it would be noise. Loaded on first use — the one fork a
+  #    Tab pays, once — and read from the array ever after.
+  if _tai_units_menu; then
+    if (( ${#_TAI_UNITS_MENU} )); then
+      for c in "${_TAI_UNITS_MENU[@]}"; do
+        [[ -n "$c" && "$c" != "$word" && "$c" == "$word"* ]] || continue
+        _tai_clean "$c" || continue
+        [[ -z "${dup[${c%/}]}" ]] || continue
+        dup[${c%/}]=1
+        _TAI_MENU+=( "$c" ); _TAI_MENU_Q+=( 0 )
+      done
+      if (( ${#_TAI_MENU} )); then
+        _TAI_MENU_ARMED=1
+        _tai_menu_layout "$word"
+        return 0
+      fi
+    fi
+  else
+
+  # 0b. Files, when the line is known to end in one: the filesystem is the
   #    vocabulary for a path, so what is on disk comes before what tai learned.
   #    The same lookup the ghost text makes — including the ranking that decides
   #    whether a learned argument is still a file here — so the two cannot
@@ -285,6 +337,7 @@ _tai_menu_open() {
       outq+=( 1 )
     done
   fi
+  fi
 
   # Keep what extends the line, once each, in the order above.
   #
@@ -321,10 +374,12 @@ _tai_menu_open() {
   (( ${#_TAI_MENU} )) || return 1
 
   _TAI_MENU_ARMED=1
-  _tai_menu_layout
+  _tai_menu_layout "$word"
 }
 
-# Layout and cap: shared by the normal and the loose menus.
+# Layout and cap: shared by the normal and the loose menus. `$1` is the word the
+# menu was opened for, which bounds the stem — a stem may only cut what the line
+# already shows.
 _tai_menu_layout() {
   _TAI_MENU_STEM=""
   # No stem on a loose list: its entries are whole command lines, and the stem
@@ -334,7 +389,7 @@ _tai_menu_layout() {
   # are for. On a per-word menu the stem is what the line above already shows;
   # here the entries replace the line, so each one has to read whole.
   if (( ${#_TAI_MENU} > 1 )) && (( ! _TAI_MENU_LOOSE )); then
-    _tai_menu_stem
+    _tai_menu_stem "$1"
   fi
 
   # Lay the list out once, at the width the terminal has now, and keep only the
@@ -383,7 +438,7 @@ _tai_menu_open_loose() {
   _TAI_MENU_TO=${#BUFFER}
   _TAI_MENU_ARMED=0
   _TAI_MENU_LOOSE=1
-  _tai_menu_layout
+  _tai_menu_layout ""
   _TAI_MENU_ARMED=0
 }
 

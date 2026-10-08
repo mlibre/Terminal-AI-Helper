@@ -70,7 +70,14 @@ _tai_load_index() {
   # for the same reason: the file has to be the whole truth rather than a growing
   # superset of every index this shell has ever read.
   _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=()
+  _TAI_FIRST_KEYS=()
   [[ -r "$_TAI_INDEX_FILE" ]] && _tai_index_readable && source "$_TAI_INDEX_FILE"
+  # The _TAI_FIRST keys, sorted once, for the binary search a half-typed command
+  # name walks instead of scanning every key on every keystroke. One fork per
+  # index load, never on the keystroke path; the comparison in the search uses
+  # the shell's own collation, and the sort runs in that same locale, so the two
+  # agree.
+  readarray -t _TAI_FIRST_KEYS < <(printf '%s\n' "${!_TAI_FIRST[@]}" | sort)
   # The redirect is wrapped in a group whose stderr is redirected, because inside
   # a function bash reports a failed redirect past the simple command's own
   # 2>/dev/null. The data directory may not exist yet, and a message on every

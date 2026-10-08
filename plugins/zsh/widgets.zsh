@@ -450,6 +450,10 @@ _tai_line_init() {
   # A new line is a new story: no paste has arrived on it yet.
   _TAI_PASTE_PREV=""
   _TAI_PASTE_QUIET=0
+  # And no directory snapshot is worth keeping either: the file answer reads
+  # its snapshots for a second after taking them, and a line that starts now
+  # should not be answered by what was on disk while the last one was edited.
+  _TAI_SNAP_AT=()
   region_highlight=()
   _tai_menu_close
 }
@@ -498,6 +502,12 @@ _tai_precmd() {
   _tai_index_changed && _tai_load_index
   if [[ -n "$_TAI_CMD" ]]; then
     _TAI_LAST="$_TAI_CMD"
+    # The unit cache pre-loads itself in the background after a command that
+    # mentions systemctl has run — the next Tab on a systemctl line then
+    # answers from an array instead of forking. Off the critical path, silent.
+    if [[ "$_TAI_CMD" == *systemctl* ]]; then
+      ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) &
+    fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions
     # but skips the durable write. Read per prompt so it can be set per command.
     [[ "${TAI_NO_AUTO_RECORD:-0}" == "1" ]] || \

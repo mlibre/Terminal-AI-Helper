@@ -65,7 +65,7 @@ _TAI_CTRL=$'[\x01-\x1f\x7f]'
 typeset -gi _TAI_PREFIX_KEYS=64
 
 # The candidate lines for a command name — the word before the first space — into
-# _TAI_VALUES, newline-joined the way the index stores them.
+# _TAI_LINES, newline-joined the way the index stores them.
 #
 # The index keys _TAI_FIRST by the *whole* name, so `godot` is a key and `god` is
 # not, and a half-typed command is the ordinary state of a line being written. The
@@ -83,28 +83,83 @@ typeset -gi _TAI_PREFIX_KEYS=64
 #
 # No fork, deliberately: this runs on the ghost-text path, where a subshell is the
 # one thing that cannot be afforded, so it answers in a global like _TAI_LINES.
+#
+# The answer is one of two shapes, and which one is recorded in
+# _TAI_VALUES_ONE because the ranking that consumes it depends on the shape:
+#
+#   * ONE (the exact key): the key's whole list, which the generator wrote in
+#     score order — so the best candidate that extends the typed line is the
+#     *head* of the list, and no ranking loop is needed at all. This is the shape
+#     on every ordinary keystroke past a complete command name.
+#   * MANY (a half-typed name): the keys that begin with it, and one candidate
+#     per key — each key's own head, which is that key's best line. No key's
+#     list is scanned here: `${values%%\n*}` peels the first line off the string
+#     in one expansion, where splitting 2,600 lines to read one of them was most
+#     of a millisecond per keystroke on a real history. The winner is the best of
+#     the heads, by score, in _tai_best — provably the same winner a scan of
+#     every line would find, because each key's head is the best of that key.
 _tai_first_values() {
-  local word="$1" values="" k n=0
+  local word="$1" values="" k head n=0
+  _TAI_VALUES_ONE=0
   # An empty key is not a command name, and an empty subscript is an error rather
   # than a miss in bash, so the lookup does not happen at all here.
   [[ -n "$word" ]] || { _TAI_VALUES=""; return }
   values="${_TAI_FIRST[$word]:-}"
+  if [[ -n "$values" ]]; then
+    _TAI_VALUES_ONE=1
+    _TAI_VALUES="$values"
+    return
+  fi
   # A glob character in the word would make the pattern mean something other than
   # "begins with the word" — zsh's `(I)` does not honour a backslash escape here —
   # and no command is spelled with one. Answer nothing rather than something else.
-  if [[ -z "$values" && "$word" != *[\*\?\[]* ]]; then
-    for k in "${(@k)_TAI_FIRST[(I)${word}*]}"; do
-      values+="${_TAI_FIRST[$k]}"$'\n'
-      (( ++n >= _TAI_PREFIX_KEYS )) && break
+  [[ "$word" != *[\*\?\[]* ]] || { _TAI_VALUES=""; return }
+  # Half-typed name: the keys that begin with it, and each key's best line. The
+  # head of a key's list is that best line — the generator wrote every list in
+  # score order — and `${values%%\n*}` reads it without splitting the string.
+  # A key whose head carries a raw control byte cannot be painted, so its next
+  # line is its best usable one; the peel repeats, bounded, rather than skipping
+  # the key and its real answer with it.
+  values=""
+  for k in "${(@k)_TAI_FIRST[(I)${word}*]}"; do
+    head="${_TAI_FIRST[$k]}"
+    while [[ -n "$head" ]] && ! _tai_clean "${head%%$'\n'*}"; do
+      # A single-line value peels to nothing — the guard below, not the
+      # expansion, ends the walk: `${head#*\n}` on a line with no newline
+      # returns it unchanged, and a loop that depended on it would never
+      # come back.
+      [[ "$head" == *$'\n'* ]] || { head=""; break; }
+      head="${head#*$'\n'}"
     done
-    values="${values%$'\n'}"
-  fi
-  _TAI_VALUES="$values"
+    [[ -n "$head" ]] || continue
+    values+="${head%%$'\n'*}"$'\n'
+    (( ++n >= _TAI_PREFIX_KEYS )) && break
+  done
+  _TAI_VALUES="${values%$'\n'}"
 }
 typeset -g _TAI_VALUES=""
+# 1 when _TAI_VALUES is one key's own score-ordered list (the head of it is the
+# winner), 0 when it is one head per key and _tai_best must rank by score.
+typeset -gi _TAI_VALUES_ONE=0
 
+# The lines a prefix extends, into _TAI_LINES.
+#
+# The whole working set here is C-level parameter expansion, and that is the
+# difference between a redraw that costs 0.2ms and one that costs 2ms on a real
+# index. The old shape split the key's full candidate list and walked it line by
+# line — a pattern test per line — where `_TAI_FIRST[git]` alone held 2,600
+# lines and every one of them paid the walk on every keystroke, when only the
+# handful that extend the line were ever wanted. Now the split is one expansion,
+# the "starts with the line" test is one `(M)` filter over the array, and the
+# per-line `_tai_clean` walk runs over what survived — usually less than twenty
+# lines, never more than the cap.
+#
+# The pattern is the typed line with every glob character escaped (`${(b)…}`),
+# so `foo[bar` is a literal prefix and not a broken class: the same refusal the
+# file answer makes, made unnecessary.
 _tai_lines() {
-  local prefix="$1" word rest head key values c
+  local prefix="$1" word rest head key values match
+  local -a lines
   _TAI_LINES=()
   _TAI_LINES_LEAD=""
   if [[ "$prefix" == *' '* ]]; then
@@ -119,7 +174,7 @@ _tai_lines() {
     # a shell has ever run, which on a real history was the largest thing in the
     # index and the reason sourcing it took a fifth of a second.
     if [[ "$word" == *" "* ]]; then
-      [[ -n "$word" ]] && values="${_TAI_WORD[$word]:-}"
+      [[ -n "$word" ]] && values="${_TAI_WORD[$word]:-}" && _TAI_VALUES_ONE=1
     else
       _tai_first_values "$word"
       values="$_TAI_VALUES"
@@ -128,7 +183,13 @@ _tai_lines() {
     _tai_first_values "$prefix"
     values="$_TAI_VALUES"
   fi
-  [[ -n "$values" ]] && { for c in "${(@f)values}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done } && return
+  if [[ -n "$values" ]]; then
+    lines=( "${(@f)values}" )
+    lines=( "${(@M)lines:#${(b)prefix}*}" )
+    (( ${#lines} > _TAI_PREFIX_KEYS )) && lines=( "${lines[@]:0:_TAI_PREFIX_KEYS}" )
+    for c in "${lines[@]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
+    (( ${#_TAI_LINES} )) && return
+  fi
   [[ "$prefix" == *' '* ]] || return
   # Nothing for the whole line: rank the line behind the wrapper, then put the
   # wrapper back. `sudo git ` completes from the `git ...` the user has run.
@@ -146,13 +207,22 @@ _tai_lines() {
   # so reading a one-word key there is a miss against every real index and
   # wrapper transparency silently answered nothing at all.
   if [[ "$key" == *" "* ]]; then
-    values="${_TAI_WORD[$key]:-}"
+    values="${_TAI_WORD[$key]:-}" && _TAI_VALUES_ONE=1
   else
     _tai_first_values "$key"
     values="$_TAI_VALUES"
   fi
-  [[ -n "$values" ]] && _TAI_LINES_LEAD="$head "
-  for c in "${(@f)values}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
+  [[ -n "$values" ]] || return
+  _TAI_LINES_LEAD="$head "
+  # The wrapped candidates are the lines behind the wrapper, so the prefix they
+  # have to extend is the line *without* it — `sudo git st` is answered by the
+  # `git st…` lines, and the wrapper goes back on in _tai_best.
+  match="$prefix"
+  [[ -n "$_TAI_LINES_LEAD" ]] && match="${prefix#"$head" }"
+  lines=( "${(@f)values}" )
+  lines=( "${(@M)lines:#${(b)match}*}" )
+  (( ${#lines} > _TAI_PREFIX_KEYS )) && lines=( "${lines[@]:0:_TAI_PREFIX_KEYS}" )
+  for c in "${lines[@]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
 }
 
 # The best line in _TAI_LINES that extends the prefix, into _TAI_BEST.
@@ -161,16 +231,32 @@ _tai_lines() {
 # rendered as ghost text, so letting it win only hides the candidate that could
 # have extended the line: without this, `ls -l` beats `ls -la` and the hint for
 # `ls -l` is nothing at all.
+#
+# When _TAI_VALUES_ONE is set, _TAI_LINES came from one key's own list in the
+# score order the generator wrote — so the first line that extends the prefix is
+# the winner, and the ranking loop does not run at all. When it is clear, the
+# lines are one head per key and the highest score wins, over at most
+# _TAI_PREFIX_KEYS of them.
 _tai_best() {
   local prefix="$1" c line best="" best_score=-1 s
   _TAI_BEST=""
-  for c in "${_TAI_LINES[@]}"; do
-    line="$_TAI_LINES_LEAD$c"
-    [[ -z "$c" || "$line" == "$prefix" || "$line" != "$prefix"* ]] && continue
-    s="${_TAI_SCORE[$c]:-0}"
-    if (( s > best_score )); then best="$c"; best_score="$s"; fi
-  done
-  [[ -n "$best" ]] && _TAI_BEST="$_TAI_LINES_LEAD$best"
+  if (( _TAI_VALUES_ONE )); then
+    for c in "${_TAI_LINES[@]}"; do
+      line="$_TAI_LINES_LEAD$c"
+      [[ -z "$c" || "$line" == "$prefix" ]] && continue
+      best="$line"
+      break
+    done
+  else
+    for c in "${_TAI_LINES[@]}"; do
+      line="$_TAI_LINES_LEAD$c"
+      [[ -z "$c" || "$line" == "$prefix" || "$line" != "$prefix"* ]] && continue
+      s="${_TAI_SCORE[$c]:-0}"
+      if (( s > best_score )); then best="$c"; best_score="$s"; fi
+    done
+    [[ -n "$best" ]] && best="$_TAI_LINES_LEAD$best"
+  fi
+  _TAI_BEST="$best"
 }
 
 # An installed command the history has never seen. `--help` is the only thing
@@ -254,6 +340,10 @@ _tai_query_do() {
     _TAI_LINES_LEAD=""
     local c
     [[ -n "$last" ]] && for c in "${(@f)_TAI_SEQ[$last]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
+    # The sequence key's values are score-ordered like every other list the
+    # generator writes, so the head of it is the prediction — the same shape the
+    # exact-key lookup answers in.
+    _TAI_VALUES_ONE=1
     _tai_best ""
     return
   fi
@@ -283,6 +373,15 @@ _tai_query_do() {
       _TAI_BEST="$first --help"
       _TAI_BEST_HELP=1
     fi
+  fi
+  # A systemctl line is answered by its units — `sudo systemctl restart her`
+  # hints `herm.service`, from the cached unit list, with no process. The hook
+  # is before the loose glimpse because the units are the *answer* to a unit
+  # argument, and three remembered lines that merely mention the word are not.
+  # It never forks: an empty cache answers nothing here and lets the Tab
+  # preload it.
+  if [[ -z "$_TAI_BEST" ]] && _tai_unit_best "$prefix"; then
+    _TAI_BEST="$_TAI_UNIT_BEST"
   fi
   if [[ -z "$_TAI_BEST" && "$prefix" != *$'\n'* && ${#prefix} -ge $_TAI_LOOSE_MIN_PREFIX ]]; then
     _tai_loose "$prefix"
@@ -335,14 +434,28 @@ typeset -gi _TAI_LOOSE_MAX_LINE=200
 # It is matched, not dropped — see the note where `rxs` is built.
 typeset -gi _TAI_LOOSE_MAX_WORD=32
 
-# The in-order check for one word, as a regex: its letters joined by `.*`, each
-# escaped so a word holding `-`, `/` or `[` is letters and not syntax. Measured:
-# the same check through the letters-as-a-glob pattern is not merely slower —
-# on an adversarial spelling (`npm` gives it `n…p…m` shapes across every
+# The in-order check for one word, as a regex: its letters joined by a bounded
+# gap, each escaped so a word holding `-`, `/` or `[` is letters and not syntax.
+# Measured: the same check through the letters-as-a-glob pattern is not merely
+# slower — on an adversarial spelling (`npm` gives it `n…p…m` shapes across every
 # `--header` of a 1KB URL, and an `aaaa…` word *thirty-two* rounds past the
 # escaped letter count) the glob engine does not come back on a keystroke at
 # all, while the same text answers as a regex in ~0 s. There is no operator
 # for it in zsh that is both this fast and safe, so it is spelled as one.
+#
+# The gap is bounded (`.{0,N}`), where it used to be `.*`, and the bound is what
+# makes the fuzzy tier honest. `forestt` typed into a history of long URLs used
+# to come back with aria2c lines, because f, o, r, e, s, t and t really are all
+# *somewhere* in a 200-character URL, in order — a fact about arithmetic, not
+# about anything the user remembered. Letters that are typed within a few
+# characters of each other are one misspelled word; letters scattered across a
+# line are a coincidence, and the matcher no longer votes for coincidences.
+# `gst` still reads across `git status` (gaps 0, 0, 0), and a transposition
+# still matches (`uninsall` reads across `uninstall` across a gap of two).
+#
+# Both builders answer in _TAI_RE_OUT rather than on stdout: they run inside the
+# scan, where `$()` around a call was a fork per word per query for a string a
+# variable already carries.
 _tai_word_re() {
   local w="$1" re="" c
   local -i i
@@ -353,23 +466,61 @@ _tai_word_re() {
       *) c="\\$c" ;;
     esac
     re+="$c"
-    [[ $i -lt ${#w} ]] && re+=".*"
+    [[ $i -lt ${#w} ]] && re+=".{0,$_TAI_LOOSE_MAX_GAP}"
   done
-  print -r -- "$re"
+  _TAI_RE_OUT="$re"
+}
+
+# The one-edit check for a word, as one regex: every spelling the word has with
+# a single character removed, alternated. A line holding any of them verbatim is
+# one keystroke away from the word typed — `forestt` holds `forest`, and the
+# lines that mention `forest` are the answer the user meant, ranked ahead of
+# anything the gap matcher can argue for. Deletion only, because that is the
+# typo a glance cannot see: an extra letter in the middle of a word the user
+# otherwise spelled exactly. Transpositions are the gap matcher's job (they pass
+# it at a gap of two); substitutions usually leave the rest of the word
+# verbatim, and one of the deletions above lands in it.
+#
+# A variant is only a witness when it is still a word: four characters or more.
+# `forestt` loses its doubled t and reads across every line that mentions
+# `forest`; a three-letter witness matches half a history, and a match that
+# wide says nothing.
+_tai_word_variants_re() {
+  local w="$1" re="" v c esc
+  local -i i j
+  local -A seen
+  for (( i = 1; i <= ${#w}; i++ )); do
+    v="${w[1,i-1]}${w[i+1,-1]}"
+    [[ -n "$v" && ${#v} -ge 4 && -z "${seen[$v]}" ]] || continue
+    seen[$v]=1
+    esc=""
+    for (( j = 1; j <= ${#v}; j++ )); do
+      c="${v[j]}"
+      case "$c" in
+        [a-z0-9_-]) ;;
+        *) c="\\$c" ;;
+      esac
+      esc+="$c"
+    done
+    [[ -n "$re" ]] && re+="|"
+    re+="$esc"
+  done
+  _TAI_RE_OUT="$re"
 }
 
 
 _tai_loose() {
   local prefix="${1:l}"
-  local -a want rxs exact fuzzy
-  local w line ll rx ok fuzzy_used
-  local -i k
+  local -a want rxs_c exact_lw var_lw fuzz_lw rest3 hits_lw scan_ll
+  local w line ll rxc rxb ok
+  local -i k n_exact=0
   # A pasted command is not a half-remembered one. Checked before the cache key
   # and before any line is read, so the answer is nothing and the cost is one
   # comparison.
   if (( ${#prefix} > _TAI_LOOSE_MAX_LINE )); then
     _TAI_LOOSE_LINES=(); _TAI_LOOSE_CACHED=()
     _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
+    _TAI_LOOSE_PAR=""; _TAI_LOOSE_PAR_IDX=()
     return
   fi
   # The same question twice has the same answer: ZLE redraws without the buffer
@@ -407,76 +558,181 @@ _tai_loose() {
     fi
   done
   want=( "${want_plain[@]}" "${want_glob[@]}" )
-  rxs=()
+  rxs_c=()
   for w in "${want[@]}"; do
     if (( ${#w} < 3 || ${#w} > _TAI_LOOSE_MAX_WORD )); then
-      rxs+=( "" )
+      rxs_c+=( "" )
     else
-      rxs+=( "$(_tai_word_re "$w")" )
+      _tai_word_re "$w"
+      rxs_c+=( "$_TAI_RE_OUT" )
+    fi
+  done
+  # The one-edit patterns are built for the second pass only, and only when that
+  # pass runs — see below. A word qualifies for one when it is long enough that
+  # a deletion of it is still a witness (five characters, so the deleted spelling
+  # is four or more — `forestt` loses a t and reads `forest`, while `tzzx` losing
+  # its last letter would read across half a history of `tzz…` lines), and when
+  # it ends like a word: a query that ends in `/` or `-` is a path being
+  # completed, not a word being mistyped, and `tzz_dir/` is not one letter away
+  # from `tzz_dir` in any way that means something.
+  local -a rxs_b
+  local -i want_b=0
+  rxs_b=()
+  for (( k = 1; k <= ${#want}; k++ )); do
+    w=${want[k]}
+    if (( ${#w} >= 5 && ${#w} <= _TAI_LOOSE_MAX_WORD )) && [[ "$w" == *[a-z0-9] ]]; then
+      rxs_b+=( "?" )
+      want_b=1
+    else
+      rxs_b+=( "" )
     fi
   done
   # Lowercase of every learned line, built once per index load and not once per
-  # keystroke: measured, it was the bulk of each loose pass itself. The two
-  # arrays stay parallel so the scan visits both by the same position.
+  # keystroke: measured, it was the bulk of each loose pass itself. The scan
+  # runs on the lowercase copy — the query is lowercased to meet it — and the
+  # map back to the line the user actually ran is built beside it, once, for
+  # the ranked answer to read.
   if (( _TAI_LOOSE_SNAP != _TAI_LOOSE_GEN )); then
     _TAI_LOOSE_KEYS=( "${(@k)_TAI_SCORE[@]}" )
     _TAI_LOOSE_LOW=()
-    local line
-    for line in "${_TAI_LOOSE_KEYS[@]}"; do
-      _TAI_LOOSE_LOW+=( "${line:l}" )
+    local line2
+    for line2 in "${_TAI_LOOSE_KEYS[@]}"; do
+      _TAI_LOOSE_LOW+=( "${line2:l}" )
+    done
+    _TAI_LOOSE_LINE_OF=()
+    local -i _i
+    for (( _i = 1; _i <= ${#_TAI_LOOSE_KEYS}; _i++ )); do
+      _TAI_LOOSE_LINE_OF[${_TAI_LOOSE_LOW[_i]}]=${_TAI_LOOSE_KEYS[_i]}
     done
     _TAI_LOOSE_SNAP=$_TAI_LOOSE_GEN
+    _TAI_LOOSE_PAR=""
+    _TAI_LOOSE_PAR_LOW=()
   fi
-  local -i n_k=${#_TAI_LOOSE_KEYS[@]}
-  integer -i i_l
-  for (( i_l = 1; i_l <= n_k; i_l++ )); do
-    line=${_TAI_LOOSE_KEYS[i_l]}
-    ll=${_TAI_LOOSE_LOW[i_l]}
-    ok=1; fuzzy_used=0
-    for (( k = 1; k <= ${#want}; k++ )); do
-      w=$want[k]; rx=$rxs[k]
-      # A word cannot occur in a line shorter than itself, and the test for that
-      # is arithmetic. It is also the whole cost of a long token: asked about
-      # 7k lines one at a time, the substring comparison of a 6KB word is
-      # skipped for every line that could not possibly hold it.
-      (( ${#w} > ${#ll} )) && { ok=0; break }
-      [[ "$ll" == *"$w"* ]] && continue
-      [[ -n "$rx" ]] || { ok=0; break }
-      # The in-order witness, straight: a letters-as-a-glob pattern was
-      # exponential on this index's long URL lines, and the per-letter
-      # strstr prefilter it replaced spent more time screening than the
-      # pattern spends deciding, measured on every keystroke bug it is.
-      [[ "$ll" =~ $rx ]] || { ok=0; break }
-      fuzzy_used=1
-    done
-    (( ok )) || continue
-    if (( fuzzy_used )); then
-      fuzzy+=("$line")
-    else
-      exact+=("$line")
-    fi
+  # What the scan walks: every learned line, or — when this prefix *extends* the
+  # prefix the last scan answered — only the lines that last scan matched. Every
+  # tier is monotone under adding letters to the last word: a line that holds
+  # the longer word verbatim holds the shorter; a line holding a one-letter
+  # deletion of the longer word holds one of the shorter; and the shorter
+  # word's letters sit between the longer word's letters, so an in-order match
+  # survives too. A line the parent rejected therefore cannot match the child,
+  # and the scan may skip it. Typing a word out ends up paying for one full pass
+  # — the word's first letter — and a bounded pass over that pass's few matches
+  # for every letter after it.
+  local -a scan_ll
+  if [[ -n "$_TAI_LOOSE_PAR" && "$_TAI_LOOSE_PAR_GEN" == "$_TAI_LOOSE_GEN" \
+        && "$prefix" != "$_TAI_LOOSE_PAR" && "$prefix" == "$_TAI_LOOSE_PAR"* ]]; then
+    scan_ll=( "${_TAI_LOOSE_PAR_LOW[@]}" )
+  else
+    scan_ll=( "${_TAI_LOOSE_LOW[@]}" )
+  fi
+  # Pass one — verbatim, one C-level filter per word over the whole set, and no
+  # shell loop at all. This is the tier the glimpse answers from on an ordinary
+  # prefix, and where the old code walked every line with a pattern test per
+  # word, the filter does the same work inside parameter expansion. The words
+  # are pattern-escaped, so a typed `foo[bar` is a literal substring and not a
+  # broken class.
+  local -a exact_lw var_lw fuzz_lw rest3
+  exact_lw=( "${scan_ll[@]}" )
+  for w in "${want[@]}"; do
+    (( ${#exact_lw[@]} )) || break
+    exact_lw=( "${(@M)exact_lw:#*${(b)w}*}" )
   done
-  # Two tiers: a line holding every typed word verbatim outranks one that only
-  # holds their letters in order. Without the tiers, `forest` was answered by
-  # whichever high-scoring line happened to have an f … o … r … e … s … t in it,
-  # and the line the user meant — the one with `forest` in it — ranked below
-  # the junk on score. Typo tolerance still applies, it just comes second.
-  # Same ranking the rest of the index already uses, per tier: highest score
-  # first, capped. Insertion into a list that is bounded, so the cost stays
-  # constant. Exact lines fill the list first; fuzzy lines only ever reach the
-  # tail.
+  n_exact=${#exact_lw[@]}
+  # Pass two — the one-edit tier, over the lines pass one rejected, and only
+  # when verbatim answered nothing at all: a word the history holds verbatim is
+  # the answer, and a second tier of guesses under it is noise, not memory.
+  # `forestt` lands here — nothing holds it verbatim, and the gap matcher is
+  # not allowed to argue — and reads across every line that mentions `forest`,
+  # one deletion away. One regex per word, hot in zsh's compile cache because
+  # the pass runs it alone.
+  if (( want_b && n_exact == 0 && ${#scan_ll[@]} > 0 )); then
+    for (( k = 1; k <= ${#want}; k++ )); do
+      [[ "${rxs_b[k]}" == "?" ]] || continue
+      _tai_word_variants_re "${want[k]}"
+      rxs_b[k]="$_TAI_RE_OUT"
+    done
+    for ll in "${scan_ll[@]}"; do
+      ok=1
+      for (( k = 1; k <= ${#want}; k++ )); do
+        w=$want[k]; rxb=$rxs_b[k]
+        (( ${#w} > ${#ll} )) && { ok=0; break }
+        [[ "$ll" == *"$w"* ]] && continue
+        [[ -n "$rxb" && "$ll" =~ $rxb ]] && continue
+        ok=0; break
+      done
+      if (( ok )); then
+        var_lw+=( "$ll" )
+      else
+        rest3+=( "$ll" )
+      fi
+    done
+  else
+    rest3=( "${scan_ll[@]}" )
+  fi
+  # Pass three — the bounded-gap tier. It only speaks when nothing else did:
+  # a line the verbatim or one-edit tier answered is the answer, and lines of
+  # letters-scattered arithmetic under it were the junk this tier existed to
+  # serve. With the tiers above it silent, what it finds is the closest thing
+  # to a memory the typed letters have — and with them silent, the pass has
+  # nothing to be ranked under, so nothing is lost by its caution.
+  if (( n_exact == 0 && ${#var_lw[@]} == 0 && ${#rest3[@]} > 0 )); then
+    typeset -gA _TAI_LOOSE_CLAIMED
+    _TAI_LOOSE_CLAIMED=()
+    for ll in "${exact_lw[@]}"; do _TAI_LOOSE_CLAIMED[$ll]=1; done
+    for ll in "${rest3[@]}"; do
+      [[ -z "${_TAI_LOOSE_CLAIMED[$ll]:-}" ]] || continue
+      ok=1
+      for (( k = 1; k <= ${#want}; k++ )); do
+        w=$want[k]; rxc=$rxs_c[k]
+        (( ${#w} > ${#ll} )) && { ok=0; break }
+        [[ "$ll" == *"$w"* ]] && continue
+        [[ -n "$rxc" && "$ll" =~ $rxc ]] && continue
+        ok=0; break
+      done
+      (( ok )) && fuzz_lw+=( "$ll" )
+    done
+  fi
+  # Every tier's matches, back into the lines the user ran, ranked best first
+  # within the tier. Three tiers, ranked in that order: a line holding every
+  # typed word verbatim outranks one holding a one-letter-away spelling, which
+  # outranks one that only holds their letters in order. Without the tiers,
+  # `forest` was answered by whichever high-scoring line happened to have an
+  # f … o … r … e … s … t in it, and the line the user meant — the one with
+  # `forest` in it — ranked below the junk on score. Same ranking the rest of
+  # the index already uses, per tier: highest score first, capped. Insertion
+  # into a list that is bounded, so the cost stays constant. Exact lines fill
+  # the list first; the edit tier comes second; the scatter tier only ever
+  # reaches the tail.
+  hits_lw=( "${exact_lw[@]}" "${var_lw[@]}" "${fuzz_lw[@]}" )
   _TAI_RANKED=()
-  for line in "${exact[@]}"; do _TAI_RANK_LINE="$line"; _tai_ranked_insert; done
+  for ll in "${exact_lw[@]}"; do
+    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
+    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  done
   _TAI_RANKED_EXACT=( "${_TAI_RANKED[@]}" )
   _TAI_RANKED=()
-  for line in "${fuzzy[@]}"; do _TAI_RANK_LINE="$line"; _tai_ranked_insert; done
-  ranked=( "${_TAI_RANKED_EXACT[@]}" "${_TAI_RANKED[@]}" )
+  for ll in "${var_lw[@]}"; do
+    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
+    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  done
+  _TAI_RANKED_VAR=( "${_TAI_RANKED[@]}" )
+  _TAI_RANKED=()
+  for ll in "${fuzz_lw[@]}"; do
+    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
+    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  done
+  local -a ranked
+  ranked=( "${_TAI_RANKED_EXACT[@]}" "${_TAI_RANKED_VAR[@]}" "${_TAI_RANKED[@]}" )
   (( ${#ranked} > $_TAI_LOOSE_CAP )) && \
     ranked=( "${ranked[@]:0:$_TAI_LOOSE_CAP}" )
+  local c
   _TAI_LOOSE_LINES=()
   for c in "${ranked[@]}"; do _tai_clean "$c" && _TAI_LOOSE_LINES+=( "$c" ); done
   _TAI_LOOSE_CACHED=( "${_TAI_LOOSE_LINES[@]}" )
   _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
+  _TAI_LOOSE_PAR="$prefix"
+  _TAI_LOOSE_PAR_GEN="$_TAI_LOOSE_GEN"
+  _TAI_LOOSE_PAR_LOW=( "${hits_lw[@]}" )
 }
 
 # One line into the bounded, best-first list _TAI_RANKED, by _TAI_SCORE. The
@@ -489,6 +745,7 @@ _tai_loose() {
 # keystroke.
 typeset -ga _TAI_RANKED=()
 typeset -ga _TAI_RANKED_EXACT=()
+typeset -ga _TAI_RANKED_VAR=()
 typeset -g _TAI_RANK_LINE=""
 
 _tai_ranked_insert() {
@@ -525,4 +782,25 @@ typeset -ga _TAI_LOOSE_CACHED=()
 # before: the first redraw after a reload pays for it.
 typeset -gi _TAI_LOOSE_SNAP=-1
 typeset -ga _TAI_LOOSE_KEYS=()
+typeset -ga _TAI_LOOSE_LOW=()
+# Every line's position in the scan copy, built with it: what a scan walks when
+# no narrower scan set applies.
+# The parent state: the prefix the last scan answered, the generation it was
+# scanned under, and the lowercase lines it matched. A prefix that extends the
+# parent's scans the parent's matches instead of every line — every match tier
+# is monotone under adding letters to the last word, so the lines the parent
+# rejected cannot match the child. This is what makes typing a word out cost
+# one full pass instead of one per keystroke.
+typeset -g _TAI_LOOSE_PAR=""
+typeset -gi _TAI_LOOSE_PAR_GEN=-1
+typeset -ga _TAI_LOOSE_PAR_LOW=()
+# The lowercase line back to the line the user actually ran, built beside the
+# lowercase scan copy: the scan runs on the lowercase copy, and the ranked
+# answer has to be the text the history holds.
+typeset -gA _TAI_LOOSE_LINE_OF=()
+# How many characters one fuzzy-tier letter may sit from the previous one. The
+# bound is what keeps the scatter tier honest: letters scattered across a long
+# URL are arithmetic, not memory. Three covers a transposition and a doubled
+# keystroke; a URL's gaps do not survive it.
+typeset -gi _TAI_LOOSE_MAX_GAP=3
 

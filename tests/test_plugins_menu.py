@@ -406,16 +406,22 @@ def test_zsh_menu_stem() -> None:
     check("and closes the menu", (size, idx), (0, 0))
     s.write("\x15")
 
-    # The other boundary, and the only one a menu can reach with anything but a
-    # path: two file names that share a whole *word*. The word being typed is
-    # `note`, what the entries share is `note `, and the rows are what each name
-    # adds — the stem is what they share, not what was typed.
+    # Two file names that share a whole *word* — `wombat book.txt` and
+    # `wombat cards.txt` under a word typed as `womb`. What they share,
+    # `wombat `, runs past what was typed, and the rule above clamps it: the
+    # rows are drawn whole, because a row that reads `book.txt` beside a line
+    # reading `womb` asks the reader to glue two fragments into a name neither
+    # of them spells. The stem is a reminder of text that is already on
+    # screen; anything longer than the word is information taken away.
     s.send("womb")
     s.write(TAB)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
-    check("entries sharing a word are drawn without it",
-          menu_entries(drawn), ["book.txt", "cards.txt"])
+    # menu_entries reads a run of spaces as a column gap, and these names hold
+    # a space of their own, so the assertion is on the drawn text itself.
+    flat = drawn.replace("\\n", " ")
+    check("entries sharing a word past the word are drawn whole",
+          ("wombat book.txt" in flat and "wombat cards.txt" in flat), True)
     check("and the line still says what was typed", line, "womb")
     s.write(ENTER)
     s.settle()
@@ -748,12 +754,120 @@ def test_unpaintable_rows_are_never_drawn() -> None:
         write_index()
 
 
+
+def test_stem_never_cuts_untyped_text() -> None:
+    """A stem may only cut what the line already shows.
+
+    The reported case: `cd tm` in a home directory where every learned
+    destination sits under `tmp/`. The menu held `tmp/vllm`, `tmp/fun-game/`
+    and the directory `tmp/` itself — every entry shared `tmp/`, the boundary
+    cut handed that back as the stem, and the rows were drawn as `vllm`,
+    `fun-game/`, under a line reading `cd tm`. Nothing on the line says `tmp/`,
+    so the list read as completions of `tmvllm` — names nobody typed and
+    nothing offers. The stem is a reminder of text that is already on screen;
+    anything longer than the typed word is information taken away.
+
+    Two halves are asserted: the untyped prefix stays on every row (`cd tm`),
+    and a prefix the user *did* type is still cut (`cd tmp/`), because that is
+    the half the original stem rule exists for.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh menu stem stays inside the typed word")
+    tmp_dir = MENU_DIR / "tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    (tmp_dir / "vllm").mkdir(parents=True)
+    (tmp_dir / "x").mkdir(parents=True)
+    try:
+        write_index(commands=COMMANDS + ["cd tmp/vllm", "cd tmp/x", "cd tmp/"])
+        s = Session("zsh")
+        s.run(f"cd {MENU_DIR}")
+
+        s.send("cd tm")
+        s.write(LIST)
+        s.settle()
+        line, drawn, size, idx = s.menu(clear=False)
+        entries = menu_entries(drawn)
+        check("the untyped root is on every row", "tmp/vllm" in entries, True)
+        check("and on the directory row", "tmp/" in entries, True)
+        check("the word was not erased from the rows",
+              any(e == "vllm" or e == "x" for e in entries), False)
+        s.write("\x15")
+
+        # The half the stem rule is for: the prefix the user typed is drawn
+        # once, by the line, and the rows carry only what it adds.
+        s.send("cd tmp/")
+        s.write(LIST)
+        s.settle()
+        line, drawn, size, idx = s.menu(clear=False)
+        entries = menu_entries(drawn)
+        check("a typed stem is still cut from the rows", "vllm" in entries, True)
+        check("and the line still says what was typed", line, "cd tmp/")
+        s.write("\x15")
+        check("no noise from the clamped stem", s.noise(), [])
+        s.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        write_index()
+
+
+def test_loose_tiers() -> None:
+    """The glimpse ranks what the history holds verbatim, then one edit away.
+
+    The reported case: `forest` answered with the lines that mention it, and
+    `forestt` — one keystroke of typo — answered with aria2c URLs, because the
+    old gap matcher let f, o, r, e, s, t and t be *anywhere* in a line, in
+    order. The tiers now read: verbatim first, one deletion away second, and
+    the bounded-gap matcher only when both of those are silent.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh loose glimpse tiers")
+    junk = ("aria2c -x 15 https://files.example.com/"
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    try:
+        write_index(commands=COMMANDS + ["cd tmp/fun-game/beauty-forest", junk])
+        s = Session("zsh")
+
+        # A typo of a word the history holds: the one-edit tier answers with
+        # the forest line, and the scatter matcher is not allowed to argue.
+        s.send("forestt")
+        line, drawn, size, idx = s.menu(clear=False)
+        check("a typo is answered by the line it is one letter from",
+              "beauty-forest" in drawn, True)
+        check("a typo is not answered by scattered letters",
+              "aria2c" in drawn, False)
+        s.write("\x15")
+
+        # A word the history holds verbatim: the exact tier, and nothing
+        # guessed underneath it.
+        s.send("forest")
+        line, drawn, size, idx = s.menu(clear=False)
+        check("the verbatim word is the answer", "beauty-forest" in drawn, True)
+        check("verbatim leaves no room for guesses", "aria2c" in drawn, False)
+        s.write("\x15")
+
+        # The gap matcher still reads across the words a person remembers:
+        # g, s, t sit in `git status` a few characters apart.
+        s.send("gst")
+        line, drawn, size, idx = s.menu(clear=False)
+        check("in-order letters still find git status",
+              "git status" in drawn, True)
+        s.write("\x15")
+        check("no noise from the tiers", s.noise(), [])
+        s.close()
+    finally:
+        write_index()
+
+
 def main() -> int:
     setup()
     test_bash_menu()
     test_zsh_menu()
     test_zsh_menu_stem()
     test_loose_menu()
+    test_stem_never_cuts_untyped_text()
+    test_loose_tiers()
     test_pasted_text_is_not_a_typo()
     test_unpaintable_rows_are_never_drawn()
     check_fixture_intact("the run")

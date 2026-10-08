@@ -249,6 +249,24 @@ Each one exists because of a reported failure.
   not mean "ends with a space" the way it reads, and two tests that look like
   the same thing are the ones to suspect.
 
+- **The stem a menu cuts may only be text the line already shows.** A stem is
+  a reminder, not an abbreviation: `cd tm` with every entry under `tmp/` drew
+  `vllm` under a line reading `cd tm`, which is a name nobody typed. A stem
+  that runs past the typed word is clamped away, even when a boundary makes it
+  look cuttable (`wombat ` under `womb`).
+- **A fresh listing is a snapshot with a TTL, not a per-keystroke glob.** The
+  file answer reads each root's newest files from a one-second snapshot and
+  falls back to one direct listing when the snapshot answers nothing — a fresh
+  glob of a 5,000-entry home directory measured 6.3ms, on every keystroke.
+- **Keep every regex hot.** Alternating two `=~` patterns per line recompiles
+  both on every line that fails the first: a no-match query on 3,300 lines
+  went 6ms → 73ms. One tier per pass, one pattern per pass.
+- **A record may not wait a hundred records to be worth suggesting.** The
+  background rebuild also fires when the index on disk is older than the
+  newest stored row, past a short debounce — otherwise a command typed now
+  takes the next ninety-nine to reach the hint, which reads as "it is not
+  learning".
+
 ## Completion standard
 
 - **Unbounded per-line cost is a freeze on the keystroke path.** The loose

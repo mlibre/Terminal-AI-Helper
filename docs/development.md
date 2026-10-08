@@ -315,6 +315,28 @@ so an interrupted run cannot leave a checkout that will not import.
 its imports lazy, and its wrapper on `python3 -S -E` (stdlib only, so `site`
 is skipped).
 
+Measured shapes the keystroke path now relies on — a change here should
+re-measure, on a fixture big enough to feel:
+
+- **`_tai_lines` works in C-level parameter expansion.** One `(f)` split, one
+  `(M)` filter of the candidates by the typed line, one cap — where a
+  per-line shell walk over `_TAI_FIRST[git]` (2,600 lines on a real history)
+  cost ~1.9ms per keystroke. The one-key answer is score-ordered, so
+  `_tai_best` takes its head; the half-typed-name answer is one head per key,
+  and the argmax runs over at most `_TAI_PREFIX_KEYS` of those.
+- **The loose scan is three passes and one full scan.** Verbatim words are
+  C-filters over the lowercase array (`(M)…:#*word*`); the one-edit and
+  bounded-gap tiers are regex passes that only run when the tiers above them
+  found nothing. Every tier is monotone under adding letters to the last
+  word, so a prefix extends its parent's scan set and typing a word out pays
+  one full pass — the word's first letter — instead of one per keystroke.
+- **The file answer reads a snapshot, not the disk.** Each root's newest
+  files, mtime first, held for one second (`_TAI_SNAP_*`); the word filters
+  the snapshot; an empty answer falls back to one direct listing, because a
+  bounded snapshot is not the truth about a directory with older files.
+- **bash sorts the `_TAI_FIRST` keys once per index load** and binary-searches
+  the half-typed name, instead of scanning every key per keystroke.
+
 ## Documentation
 
 Documentation is part of the product.

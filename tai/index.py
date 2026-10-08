@@ -99,6 +99,20 @@ WORD_CANDIDATE_CAP = 20
 # the index and most of the startup cost.
 WORD_KEY_MAX_DEPTH = 8
 
+# A one-off that is one edit away from a habit is a typo of it, and it ranks
+# just below the habit instead of beside it. The report that found this: one
+# accidental `tai sintall` sat in the index beside `tai install`, and every
+# glance at `tai ` offered the typo first — fixed once, typed right a dozen
+# times after, and still the ghost said `sintall`, because one run scored like
+# one run. Three rules bound the demotion: the rare line ran at most
+# TYPO_FREQ_MAX times, the habit it shadows ran at least TYPO_FREQ_RATIO times
+# as often, and the two are within one edit — a substitution, a transposition,
+# an insertion or a deletion — of each other, compared whole-line with the same
+# first word. Both lines stay in the index: nothing is deleted, the typo is
+# simply not allowed to outrank what it is a typo of.
+TYPO_FREQ_MAX = 2
+TYPO_FREQ_RATIO = 3
+
 
 def index_path() -> Path:
     from tai.paths import data_dir
@@ -134,6 +148,77 @@ def _word_value(values: list[str]) -> str:
     unreachable: `9router --p` asks for `9router`, not for a word key.
     """
     return chr(10).join(values[:WORD_CANDIDATE_CAP])
+
+
+def _dam1(a: str, b: str) -> bool:
+    """True when `a` and `b` are within one Damerau-Levenshtein edit.
+
+    Substitution, transposition, insertion or deletion — the shapes a typo
+    takes on a keyboard. Early exits on the length difference, because a
+    caller compares pairs it has already length-filtered and the short paths
+    answer most of them.
+    """
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diff = [i for i in range(la) if a[i] != b[i]]
+        if len(diff) == 1:
+            return True
+        return (len(diff) == 2 and diff[1] == diff[0] + 1
+                and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]])
+    if la > lb:
+        a, b, la, lb = b, a, lb, la
+    # `a` is shorter by exactly one: one alignment pass, skipping at most one
+    # position of the longer string.
+    i = j = 0
+    skipped = False
+    while i < la and j < lb:
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            j += 1
+    return True
+
+
+def _typo_demotions(eng: Engine, score_of: dict[str, int],
+                    from_history: set[str]) -> dict[str, str]:
+    """Rare commands that are one edit from a much more frequent one.
+
+    Grouped by first word, because a typo of a command starts with almost the
+    same word — and the group makes the comparison a handful of pairs per rare
+    command instead of a walk over the whole index. Only commands the user
+    actually ran are candidates: a corpus convention is not a typo, and the
+    habit it shadows is not asked to be one either.
+    """
+    by_first: dict[str, list[str]] = {}
+    for cmd in score_of:
+        by_first.setdefault(cmd.split(" ", 1)[0], []).append(cmd)
+    out: dict[str, str] = {}
+    for cmd, st in eng.cmds.items():
+        if cmd not in from_history or st.freq > TYPO_FREQ_MAX:
+            continue
+        first = cmd.split(" ", 1)[0]
+        best: str | None = None
+        for other in by_first.get(first, ()):  # same first word
+            if other == cmd or abs(len(other) - len(cmd)) > 1:
+                continue
+            ost = eng.cmds[other]
+            if ost.freq < TYPO_FREQ_RATIO * max(st.freq, 1):
+                continue
+            if not _dam1(cmd, other):
+                continue
+            if best is None or score_of.get(other, 0) > score_of.get(best, 0):
+                best = other
+        if best is not None:
+            out[cmd] = best
+    return out
 
 
 def build(max_commands: int = 20000) -> int:
@@ -294,6 +379,15 @@ def build(max_commands: int = 20000) -> int:
             score *= COLD_FACTOR
         # Integer milli-score keeps comparisons native and process-free in zsh/bash.
         scored.append((int(round(score * 1000)), cmd))
+    # One-off typos rank just below the habit they shadow — see the constants.
+    # Applied before the destination re-rank, so every later reader of the
+    # order (the lists the plugins walk, the scores they compare) sees it.
+    score_of = {cmd: s for s, cmd in scored}
+    for typo, partner in _typo_demotions(eng, score_of, from_history).items():
+        cap = score_of.get(partner, 0) - 1
+        if score_of[typo] > cap:
+            score_of[typo] = cap
+    scored = [(score_of[cmd], cmd) for _, cmd in scored]
     ranked = destinations_first(scored)
     ranked.sort(reverse=True)
     ranked = ranked[:max_commands]

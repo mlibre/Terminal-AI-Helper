@@ -74,7 +74,10 @@ directory colour, and its `/` stays normal. Shared text renders once, above:
 cd media/mlibre/B/<Ctrl-Space>   Clip/   Movies/   Projects/   Teb/
 ```
 
-Each entry shows only what it *adds*; `Enter` writes the whole path. In
+Each entry shows only what it *adds* — and only what the line already shows is
+ever cut: `cd tm` in a home where everything lives under `tmp/` still lists
+`tmp/vllm`, because a row that reads `vllm` under `cd tm` is a name neither
+you nor the shell typed. `Enter` writes the whole path. In
 **bash** the ranking is identical, but readline cannot draw a list below the
 line or ghost text — `→` and `Ctrl-F` write plain characters, and `Tab`
 completes directly; by default only after `tai`, or after every command with
@@ -154,7 +157,27 @@ subdirectories: descending made `chmod +x` answer a `.pyc`. More via
 `TAI_FILE_ROOTS=~/tmp:~/scratch`.
 
 A path with a directory in it stays yours to type: `chmod +x ~/Down` reads
-that one; `chmod +x Down` is not answered from `~/Downloads`.
+that one; `chmod +x Down` is not answered from `~/Downloads`. And a word that
+names a directory is completed by what is inside it — `cat ~/tmp` reads
+`~/tmp/x`, not `~tmpx`.
+
+### systemctl completes its units
+
+`sudo systemctl restart her<Tab>` cycles the real unit files, like Manjaro's
+own completion — from a list read once a day, then held in the shell: no
+process on the keystroke path. `--user` completes user units; a verb still
+being typed (`resta`) completes nothing, because a unit after it would be a
+guess.
+
+### A typo is answered by what it is a typo of
+
+When nothing extends the line, the glimpse shows the learned lines that hold
+every word you typed. A word one letter from a word the history holds verbatim
+(`forestt` → the `beauty-forest` lines) is answered *as that word*; lines whose
+letters merely appear scattered across a long URL are no longer candidates.
+And a one-off that shadows a habit — `tai sintall` typed right once beside
+`tai install` typed a dozen times — is ranked below the habit in the index
+itself, so it stops winning.
 
 ### A tool you have never run still gets an answer
 

@@ -73,6 +73,42 @@ _tai_keep_fresh() {
   _TAI_FRESH_MTIME=( "${_TAI_FRESH_MTIME[@]:0:m}" "$mtime" "${_TAI_FRESH_MTIME[@]:m}" )
 }
 
+# One snapshot per directory the file answer reads: the newest files, mtime
+# first, held until they are a second old. `ls -t` is one process per root per
+# call, and the file answer runs on every keystroke that extends a path
+# argument — the snapshot makes that one process per root per *second*, and
+# every keystroke after the first filters a list the shell already holds. A
+# snapshot that answers nothing is not the truth about the directory — the
+# word typed may be older than the newest few it kept — so the callers fall
+# back to one direct listing when it comes back empty.
+#
+# The key is the expanded directory; the "." root is stored under $PWD, or a
+# snapshot taken in one directory would answer for another after a cd.
+declare -gA _TAI_SNAP_NAMES _TAI_SNAP_REAL _TAI_SNAP_AT
+_TAI_SNAP_TTL=1      # seconds one snapshot may answer for
+_TAI_SNAP_MAX=256    # newest files one snapshot holds
+
+_tai_snap_get() {
+  local key="$1" line
+  local -i age now=$SECONDS
+  age=$(( now - ${_TAI_SNAP_AT[$key]:--9} ))
+  if (( age <= _TAI_SNAP_TTL )); then
+    return 0
+  fi
+  local -a nm=() rt=()
+  while IFS= read -r -d '' line; do
+    [[ -f "$line" ]] || continue
+    nm+=( "${line##*/}" ); rt+=( "$line" )
+    (( ${#nm[@]} >= _TAI_SNAP_MAX )) && break
+  done < <(ls -t -1 --zero -N -- "$key"/* 2>/dev/null)
+  # Newline-joined, not space-joined: a file named `my file.txt` in a
+  # space-joined snapshot is two entries, and neither is the file.
+  _TAI_SNAP_NAMES[$key]="$(printf '%s\n' "${nm[@]}")"
+  _TAI_SNAP_REAL[$key]="$(printf '%s\n' "${rt[@]}")"
+  _TAI_SNAP_AT[$key]=$now
+  return 0
+}
+
 _tai_fresh_files() {
   local word="$1" dir as c real line skip glob
   local -a dirs prefixes
@@ -88,18 +124,55 @@ _tai_fresh_files() {
   #     so the `~` the user typed is the `~` they get back;
   #   * a bare name is the search, and that is the case this feature is for.
   glob="${word/#\~/$HOME}"
-  # A word naming a directory lists what is in it. Without this, `~` globs as
-  # `~*` — every *sibling* of the home directory — which matches nothing.
-  [[ -d "$glob" ]] && glob="${glob%/}/"
-  if [[ "$glob" == /* || "$glob" == */* ]]; then
-    # `ls -t` for the ordering, for the same reason as _tai_keep_root below: a
-    # name-ordered glob caps on the alphabet and drops the newest file.
+  # What the word names decides what the rows read as. A word naming a
+  # directory is completed by what is inside it — `~/tmp` into `~/tmp/x` — and
+  # the slash that separates them is added here: gluing a name straight onto
+  # the word gave `cat ~` the answer `~x`, a path nothing on the disk answers
+  # to.
+  if [[ -d "$glob" ]]; then
+    local headform="$word" dirkey="$glob"
+    [[ "$word" != */ ]] && headform="$word/"
+    [[ -z "${dirkey%/}" ]] && dirkey="/" || dirkey="${dirkey%/}"
+    _tai_snap_get "$dirkey"
+    local -a nm rt
+    mapfile -t nm <<< "${_TAI_SNAP_NAMES[$dirkey]}"
+    mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
+    local -i i
+    for (( i = 0; i < ${#nm[@]}; i++ )); do
+      [[ "${nm[i]}" == "${word##*/}"* ]] || continue
+      _tai_keep_fresh "${headform}${nm[i]}" "${rt[i]}"
+      (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
+    done
+    (( n > 0 )) && return 0
+    # The snapshot keeps the newest few, and the name typed may be older than
+    # all of them. One direct listing of just this component answers honestly;
+    # the memoised query means it runs once per word, not once per redraw.
     while IFS= read -r -d '' c; do
       [[ -f "$c" ]] || continue
-      real="$c"
-      _tai_keep_fresh "$word${c#$glob}" "$real"
+      _tai_keep_fresh "${headform}${c##*/}" "$c"
       (( ++n >= _TAI_FILE_PER_ROOT )) && break
-    done < <(ls -t -1 --zero -N -- ${glob}* 2>/dev/null)
+    done < <(ls -t -1 --zero -N -- "$dirkey/${word##*/}"* 2>/dev/null)
+    return 0
+  fi
+  if [[ "$glob" == /* || "$glob" == */* ]]; then
+    local dirkey="${glob%/*}" headform="${word%"${word##*/}"}"
+    [[ -z "$dirkey" ]] && dirkey="/"
+    _tai_snap_get "$dirkey"
+    local -a nm rt
+    mapfile -t nm <<< "${_TAI_SNAP_NAMES[$dirkey]}"
+    mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
+    local tailcomp="${word##*/}" i
+    for (( i = 0; i < ${#nm[@]}; i++ )); do
+      [[ "${nm[i]}" == "$tailcomp"* ]] || continue
+      _tai_keep_fresh "${headform}${nm[i]}" "${rt[i]}"
+      (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
+    done
+    (( n > 0 )) && return 0
+    while IFS= read -r -d '' c; do
+      [[ -f "$c" ]] || continue
+      _tai_keep_fresh "${headform}${c##*/}" "$c"
+      (( ++n >= _TAI_FILE_PER_ROOT )) && break
+    done < <(ls -t -1 --zero -N -- "$dirkey/$tailcomp"* 2>/dev/null)
     return 0
   fi
   dirs=( "." ); prefixes=( "" )
@@ -133,7 +206,7 @@ _tai_fresh_files() {
     (( ${#dirs} >= _TAI_FILE_ROOTS_MAX )) && break
   done
   for (( i = 0; i < ${#dirs[@]}; i++ )); do
-    _tai_keep_root "${dirs[i]}" "${prefixes[i]}" "$glob"
+    _tai_keep_root "${dirs[i]}" "${prefixes[i]}" "$word"
   done
   return 0
 }
@@ -141,25 +214,24 @@ _tai_fresh_files() {
 # One root's files, newest first, into _TAI_FRESH. Each root reads at most
 # _TAI_FILE_PER_ROOT: a directory of eight files already ranked by mtime must not
 # use up the whole answer, or `chmod +x ` in a busy project would never reach
-# ~/Downloads.
+# ~/Downloads. Read through the directory's snapshot — see _tai_snap_get — with
+# one direct listing as the fallback for a name the newest few cannot answer for.
 _tai_keep_root() {
-  local dir="$1" as="$2" glob="$3" c
-  local -i n=0
-  # The current directory is globbed without a `./` prefix, because a completion
-  # is a word: `./notes.txt` in a menu beside `~/Downloads/x` would be the same
-  # file written two ways, and readline would insert the `./` too.
-  #
-  # bash has no mtime-ordered glob — zsh's is `(om)`, and this is the same rule
-  # asked for again. A plain glob is sorted by name, so capping *it* took the
-  # alphabetically first eight files and dropped the AppImage that had just been
-  # downloaded from a folder of `aaa*.mp4` — the one case this whole path exists
-  # for. So the order comes from `ls -t`, which is one fork for the whole root
-  # and replaces the per-file `stat` below for the purpose of *ordering*.
-  # `--zero` and `-N` are what make it safe: NUL-separated, so a newline in a
-  # filename is not a row break, and literal, so quoting is never applied to a
-  # name. Both are coreutils, the same dependency `stat -c` below already is.
-  local pattern="$glob"
-  [[ "$dir" != "." ]] && pattern="$dir/$glob"
+  local dir="$1" as="$2" word="$3" c dirkey
+  local -i n=0 i
+  [[ "$dir" == "." ]] && dirkey="$PWD" || dirkey="${dir%/}"
+  _tai_snap_get "$dirkey"
+  local -a nm rt
+  mapfile -t nm <<< "${_TAI_SNAP_NAMES[$dirkey]}"
+  mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
+  for (( i = 0; i < ${#nm[@]}; i++ )); do
+    [[ "${nm[i]}" == "$word"* ]] || continue
+    _tai_keep_fresh "$as${nm[i]}" "${rt[i]}"
+    (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
+  done
+  (( n > 0 )) && return 0
+  local pattern="$word"
+  [[ "$dir" != "." ]] && pattern="$dir/$word"
   while IFS= read -r -d '' c; do
     [[ -f "$c" ]] || continue
     if [[ "$dir" == "." ]]; then

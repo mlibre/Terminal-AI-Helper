@@ -197,9 +197,50 @@ def cmd_update(a) -> int:
 def _auto_maintain(total: int) -> None:
     """Rebuild at 100-command boundaries without blocking the shell."""
     if total % 100:
+        _rebuild_when_stale()
         return
     from tai.maintenance import _rebuild_quietly
     _rebuild_quietly()
+
+
+# A record may not wait a hundred records to be worth suggesting. The index is
+# what the shells read, and a rebuild every 100th command meant a command typed
+# now could take the next ninety-nine to reach it — long enough that the user
+# stopped believing the suggestions were learning anything. So every record
+# also asks one cheap question (one stat, one indexed MAX), and when the index
+# on disk is older than the newest row by more than the debounce window, the
+# background rebuild runs. The window keeps a burst of records from stacking
+# rebuilds on top of each other; the rebuild itself still takes the maintenance
+# lock, so two shells recording at once produce at most one build.
+_REBUILD_MIN_INTERVAL = 5.0
+
+
+def _rebuild_when_stale() -> None:
+    import sqlite3
+    import time
+
+    from tai.index import index_path
+    from tai.maintenance import _rebuild_quietly
+    from tai.store import db_path
+
+    idx = index_path()
+    if not idx.exists():
+        _rebuild_quietly()
+        return
+    mtime = idx.stat().st_mtime
+    if time.time() - mtime < _REBUILD_MIN_INTERVAL:
+        return
+    try:
+        con = sqlite3.connect(str(db_path()))
+        try:
+            row = con.execute("SELECT MAX(ts) FROM commands").fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return
+    newest = row[0] if row and row[0] else 0
+    if newest and newest > mtime:
+        _rebuild_quietly()
 
 
 def _learn_on_use(command: str) -> None:

@@ -482,3 +482,51 @@ assert "cd .." in picks and "cd -" in picks, \
 assert eng4.suggest("cd .", limit=3)["choice"] == "cd ..", eng4.suggest("cd .")
 print("OK — stale paths excluded by the caller; an echo never wins.")
 print("OK — `cd ` answers with a destination; `cd ..` is ranked, not removed.")
+
+# A one-off that is one edit away from a habit is a typo of it, and it ranks
+# just below the habit instead of beside it. The reported case: one accidental
+# `tai sintall` haunted the `tai ` hint forever, because one run scored like
+# one run. The index builder demotes the typo under the command it shadows;
+# nothing is deleted, and a typo with no more-frequent neighbour is left alone.
+from tai.index import build, TYPO_FREQ_MAX, TYPO_FREQ_RATIO  # noqa: E402
+from tai.store import append_and_count  # noqa: E402
+
+for cmd, n in (("tai install", 6), ("tai uninstall", 4), ("tai sintall", 1),
+               ("git status", 5), ("git stash", 1)):
+    for _ in range(n):
+        ok, _total = append_and_count(cmd)
+        assert ok, cmd
+built = build()
+assert built >= 5, built
+scores = {}
+for line in pathlib.Path(SCRATCH_INDEX).read_text().splitlines():
+    if line.startswith("_TAI_SCORE+=("):
+        # _TAI_SCORE+=('cmd' 1234)
+        head = line[len("_TAI_SCORE+=("):-1]
+        cmd, _, num = head.rpartition(" ")
+        scores[cmd.strip("'")] = int(num)
+assert scores["tai sintall"] < scores["tai install"], \
+    (scores["tai sintall"], scores["tai install"])
+assert scores["tai sintall"] < scores["tai uninstall"]
+assert scores["git stash"] > 0, "an unrelated one-off is not demoted"
+# The habit itself is never demoted for shadowing something rarer.
+assert scores["tai install"] > scores["tai sintall"]
+print("OK — a one-off typo ranks below the habit it shadows, and stays indexed.")
+
+# A record reaches the index without waiting a hundred records: when the index
+# on disk is older than the newest row, past a short debounce, the background
+# rebuild runs — and when the index is fresh, it does not.
+import os as _os  # noqa: E402
+from tai.cli import _rebuild_when_stale  # noqa: E402
+
+idx_path = pathlib.Path(SCRATCH_INDEX)
+idx_path.write_text("# tai embedded zsh index; generated, do not edit\nSENTINEL\n")
+old = time.time() - 60
+os.utime(idx_path, (old, old))
+_rebuild_when_stale()
+rebuilt = idx_path.read_text()
+assert "SENTINEL" not in rebuilt and rebuilt.startswith("# tai embedded zsh index"), \
+    "a stale index must be rebuilt"
+_rebuild_when_stale()
+assert idx_path.read_text() == rebuilt, "a fresh index must be left alone"
+print("OK — a record reaches the index on the next prompt, not a hundred later.")

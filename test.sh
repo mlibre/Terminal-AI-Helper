@@ -64,7 +64,7 @@ if (( ! fast )); then
   # One entry point per theme, all sharing plugin_env/plugin_screen/plugin_pty.
   # Order is cheapest-first: plain lookups, then the menu, then what is drawn,
   # then the filesystem, and last the index lifecycle, which rebuilds fixtures.
-  for part in lookups menu draw files wide index; do
+  for part in lookups menu draw files wide index units; do
     case "$part" in
       lookups) entry=tests/test_plugins.py ;;
       *)       entry="tests/test_plugins_$part.py" ;;

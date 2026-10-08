@@ -17,34 +17,78 @@
 # 754-key index, of which the scan is about half and the word with no match the
 # whole loop, since only a match can stop it early.
 _tai_first_values() {
-  local word="$1" values="" k n=0
-  # An empty key is a hard error in bash ("bad array subscript"), not a miss, and
-  # an empty command name is not a thing a line can hold anyway.
-  [[ -n "$word" ]] || { _TAI_VALUES=""; return 0; }
+  local word="$1" values="" k n=0 v head lo hi mid
+  [[ -n "$word" ]] || { _TAI_VALUES=""; _TAI_VALUES_ONE=0; return 0; }
   values="${_TAI_FIRST[$word]:-}"
+  if [[ -n "$values" ]]; then
+    _TAI_VALUES="$values"
+    _TAI_VALUES_ONE=1
+    return 0
+  fi
+  _TAI_VALUES=""; _TAI_VALUES_ONE=0
   # A glob character in the word would make the test mean something other than
   # "begins with the word", and no command is spelled with one.
-  if [[ -z "$values" && "$word" != *[\*\?\[]* ]]; then
-    for k in "${!_TAI_FIRST[@]}"; do
-      [[ "$k" == "$word"* ]] || continue
-      values+="${_TAI_FIRST[$k]}"$'\n'
-      (( ++n >= _TAI_PREFIX_KEYS )) && break
+  [[ "$word" != *[\*\?\[]* ]] || return 0
+  # Half-typed name. The keys were sorted once, at load, so the ones that begin
+  # with the word are a contiguous run found by binary search — a scan of every
+  # key here was most of a millisecond per keystroke on a real index, paid
+  # again on every letter of a first word being typed. From each key the answer
+  # takes only its *head*, which is that key's best line: the winner is the best
+  # of the heads, by score, in _tai_best — provably the same winner a scan of
+  # every line would find, because each key's head is the best of that key.
+  lo=0; hi=${#_TAI_FIRST_KEYS[@]}
+  while (( lo < hi )); do
+    mid=$(( (lo + hi) / 2 ))
+    if [[ "${_TAI_FIRST_KEYS[mid]}" < "$word" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
+  done
+  while (( lo < ${#_TAI_FIRST_KEYS[@]} )); do
+    k="${_TAI_FIRST_KEYS[lo]}"
+    [[ "$k" == "$word"* ]] || break
+    v="${_TAI_FIRST[$k]}"
+    while [[ -n "$v" ]]; do
+      head="${v%%$'\n'*}"
+      if [[ ! "$head" =~ [[:cntrl:]] ]]; then
+        values+="$head"$'\n'
+        (( ++n >= _TAI_PREFIX_KEYS )) && break 2
+      fi
+      [[ "$v" == *$'\n'* ]] || break
+      v="${v#*$'\n'}"
     done
-    values="${values%$'\n'}"
-  fi
-  # The answer travels in a global, not on stdout. Everything on this path runs
-  # under `bind -x`, where a function's stdout goes to the terminal — so the
-  # `$( )` that used to wrap every one of these calls was doing two jobs: keeping
-  # the printed answer off the screen, and costing a fork per keypress for the
-  # privilege. Answering in a global does both for free.
+    (( ++lo ))
+  done
+  values="${values%$'\n'}"
   _TAI_VALUES="$values"
+  return 0
 }
+
+# 1 when _TAI_VALUES is one key's own score-ordered list (the head of it is the
+# winner), 0 when it is one head per key and _tai_best must rank by score.
+_TAI_VALUES_ONE=0
 
 # A candidate identical to what is already typed is skipped: it can never be
 # shown, and letting it win only hides the candidate that could have extended
 # the line (`ls -l` must not beat `ls -la`).
+#
+# When _TAI_VALUES_ONE is set, the values came from one key's own list in the
+# score order the generator wrote — so the first line that extends the prefix is
+# the winner, and the ranking loop does not run at all. That is the shape of
+# every ordinary keystroke past a complete command name, and on a real index it
+# replaces a walk over 2,600 lines with two or three tests.
 _tai_best() {
   local values="$1" prefix="$2" best="" best_score=-1 c s
+  if [[ "${_TAI_VALUES_ONE:-0}" == "1" ]]; then
+    while IFS= read -r c; do
+      [[ -n "$c" && "$c" == "$prefix"* && "$c" != "$prefix" ]] || continue
+      # The store refuses control bytes at record time, but this shell sources
+      # what it finds, and a byte that slips through is an escape sequence on
+      # someone's terminal.
+      [[ "$c" =~ [[:cntrl:]] ]] && continue
+      best="$c"
+      break
+    done <<< "$values"
+    _TAI_BEST_LINE="$best"
+    return 0
+  fi
   while IFS= read -r c; do
     [[ -z "$c" || "$c" == "$prefix" || "$c" != "$prefix"* ]] && continue
     # A stored command whose text holds a raw control byte is unpaintable as
@@ -86,7 +130,7 @@ _tai_wrapped() {
   # what made `sudo git ` answer nothing, and a test fixture built the other way
   # round hid it.
   local values="" out
-  if [[ "$key" == *" "* ]]; then values="${_TAI_WORD[$key]:-}"; else _tai_first_values "$key"; values="$_TAI_VALUES"; fi
+  if [[ "$key" == *" "* ]]; then values="${_TAI_WORD[$key]:-}"; _TAI_VALUES_ONE=1; else _tai_first_values "$key"; values="$_TAI_VALUES"; fi
   _tai_best "$values" "$rest"
   out="$_TAI_BEST_LINE"
   [[ -n "$out" ]] || return 0
@@ -110,7 +154,14 @@ _tai_query() {
   local prefix="$1" last="$2" first word values="" out
   if [[ -z "$prefix" ]]; then
     out=""
-    [[ -n "$last" ]] && { _tai_best "${_TAI_SEQ[$last]:-}" ""; out="$_TAI_BEST_LINE"; }
+    if [[ -n "$last" ]]; then
+      # The sequence key's values are score-ordered like every other list the
+      # generator writes, so the head of it is the prediction — the same shape
+      # the exact-key lookup answers in.
+      _TAI_VALUES_ONE=1
+      _tai_best "${_TAI_SEQ[$last]:-}" ""
+      out="$_TAI_BEST_LINE"
+    fi
     _TAI_OUT="$out"
     return 0
   fi
@@ -123,6 +174,7 @@ _tai_query() {
     # a line of nothing but spaces never reaches either branch.
     if [[ "$word" == *" "* ]]; then
       values="${_TAI_WORD[$word]:-}"
+      _TAI_VALUES_ONE=1
     else
       _tai_first_values "$word"
       values="$_TAI_VALUES"
@@ -156,6 +208,17 @@ _tai_query() {
       # itself, so it has to do it — see _tai_quote.
       _tai_quote "$file"
       out="$join$_TAI_QUOTED"
+    fi
+  fi
+  # A systemctl line is answered by its units, from the cached list — the same
+  # hook the zsh ghost makes. It never forks: an empty cache answers nothing
+  # here, and the prompt hook's preload fills it after a systemctl command.
+  if [[ -z "$out" ]] && _tai_unit_word "$prefix"; then
+    local uw="$_TAI_UNIT_WORD" ujoin="$prefix"
+    [[ -n "$uw" ]] && ujoin="${prefix%"$uw"}"
+    if _tai_unit_matches "$uw"; then
+      out="$ujoin${_TAI_UNIT_MS[0]}"
+      [[ "$out" == "$prefix"* && "$out" != "$prefix" ]] || out=""
     fi
   fi
   if [[ -z "$out" ]]; then

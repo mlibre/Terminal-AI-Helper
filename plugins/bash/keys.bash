@@ -17,6 +17,12 @@ _tai_prompt() {
   last_cmd="${raw#"${raw%%[![:space:]]*}"}"  # drop the space after it
   if [[ -n "$last_cmd" && "$last_cmd" != "$_TAI_LAST" ]]; then
     _TAI_LAST="$last_cmd"
+    # The unit cache pre-loads itself in the background after a command that
+    # mentions systemctl has run — the next Tab or hint on a systemctl line
+    # then answers from an array instead of forking. Off the critical path.
+    if [[ "$last_cmd" == *systemctl* ]]; then
+      ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) &
+    fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions
     # but skips the durable write. Read per prompt so it can be set per command.
     [[ "${TAI_NO_AUTO_RECORD:-0}" == "1" ]] || \
@@ -98,6 +104,13 @@ _tai_complete() {
     values=""
   fi
   COMPREPLY=()
+  # Units first for a systemctl line: the cached unit list IS the vocabulary
+  # there, and files and learned words around it would be noise. Loaded on
+  # first use — the one fork a completion press pays, once.
+  if _tai_unit_word "$line" && _tai_unit_matches "$_TAI_UNIT_WORD"; then
+    for c in "${_TAI_UNIT_MS[@]}"; do _tai_reply "$c"; done
+    return 0
+  fi
   # Files first for a line that ends in one: the filesystem is the vocabulary for
   # a path, and what is on disk beats a name from the history that may not be
   # there at all. Read through the same lookup _tai_query makes, so bash and

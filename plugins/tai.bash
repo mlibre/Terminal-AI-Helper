@@ -5,13 +5,14 @@
 # Install: tai refresh && source this file
 # Refresh after learning more history: tai refresh
 #
-# This file is the entry point and nothing else. The plugin is four parts in
+# This file is the entry point and nothing else. The plugin is five parts in
 # plugins/bash/, sourced here in dependency order:
 #
 #   index.bash   the index file, the state, every limit. The only part that does
 #                anything at source time.
 #   lookup.bash  a line to candidates, and the ranking.
 #   files.bash   path arguments, answered by the filesystem.
+#   units.bash   systemctl unit names, answered from a cached list.
 #   keys.bash    what the keys do, and the recording hook on every prompt.
 #
 # Split from one 570-line file: the parts have different jobs, and a change to
@@ -23,7 +24,7 @@
 # installer wrote into ~/.bashrc — none of which is this directory.
 _TAI_PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TAI_PART_MISSING=""
-for _tai_part in index lookup files keys; do
+for _tai_part in index lookup files units keys; do
   if [[ -r "$_TAI_PLUGIN_DIR/bash/$_tai_part.bash" ]]; then
     source "$_TAI_PLUGIN_DIR/bash/$_tai_part.bash"
   else

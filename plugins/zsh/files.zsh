@@ -138,8 +138,54 @@ _tai_quote() {
 # process on the keypress path for the sake of one string.
 typeset -g _TAI_QUOTED=""
 
+# One snapshot per directory the file answer reads: the newest files, mtime
+# first, held until they are a second old. The snapshot exists because a fresh
+# glob of the home directory measured 6.3ms on a 5,000-entry directory and the
+# file answer runs on every keystroke that extends a path argument: the first
+# keystroke pays the glob, and every keystroke after it filters the snapshot,
+# which is arithmetic on a list the shell already holds. A snapshot that answers
+# nothing is not the truth about the directory — the word typed may be older
+# than the newest few it kept — so the callers fall back to one direct glob when
+# it comes back empty, which is once per word rather than once per keystroke.
+#
+# Two associative arrays hold the lists, keyed by directory and newline-joined,
+# because zsh has no array of arrays; a filename with a newline in it splits
+# into two entries, and the second is control bytes that nothing paints. The
+# key is the expanded directory — the "." root is stored under $PWD, or a
+# snapshot taken in one directory would answer for another after a cd.
+typeset -gA _TAI_SNAP_NAMES _TAI_SNAP_REAL _TAI_SNAP_AT
+: ${_TAI_SNAP_TTL:=1}        # seconds one snapshot may answer for
+: ${_TAI_SNAP_MAX:=256}      # newest files one snapshot holds
+
+# The snapshot for one directory, into _TAI_SNAP_RET_A (names) and
+# _TAI_SNAP_RETM_A (real paths), newest first. `$SECONDS` is the shell's own
+# clock, so the freshness test is one arithmetic expansion and no fork.
+_tai_snap_get() {
+  local key="$1" now=$SECONDS at c
+  local -i age
+  at="${_TAI_SNAP_AT[$key]:--9}"
+  (( age = now - at ))
+  if (( age <= _TAI_SNAP_TTL )); then
+    _TAI_SNAP_RET_A=( "${(@f)_TAI_SNAP_NAMES[$key]}" )
+    _TAI_SNAP_RETM_A=( "${(@f)_TAI_SNAP_REAL[$key]}" )
+    return 0
+  fi
+  local -a nm rt
+  nm=(); rt=()
+  for c in "$key"/*(omN); do
+    [[ -f "$c" ]] || continue
+    nm+=( "${c##*/}" ); rt+=( "$c" )
+    (( ${#nm[@]} >= _TAI_SNAP_MAX )) && break
+  done
+  _TAI_SNAP_NAMES[$key]="${(pj:\n:)nm}"
+  _TAI_SNAP_REAL[$key]="${(pj:\n:)rt}"
+  _TAI_SNAP_AT[$key]=$now
+  _TAI_SNAP_RET_A=( "${nm[@]}" )
+  _TAI_SNAP_RETM_A=( "${rt[@]}" )
+}
+
 _tai_fresh_files() {
-  local word="$1" dir as c real glob
+  local word="$1" dir as c real glob headform tailcomp dirkey
   local -i i n=0
   _TAI_FRESH=(); _TAI_FRESH_MTIME=()
   _tai_globable "$word" || return 0
@@ -155,28 +201,50 @@ _tai_fresh_files() {
   #   * a bare name is the search, and that is the case this feature is for.
   glob="${word/#\~/$HOME}"
   if [[ "$glob" == /* || "$glob" == */* ]]; then
-    local -i n=0
-    # A word naming a directory lists what is in it. Without this, `~` globs as
-    # `~*` — every *sibling* of the home directory — which matches nothing, so
-    # `cat ~<Tab>` offered nothing at all in the one place a person is certain
-    # there are files. The trailing slash is added, not the name, so the answer
-    # is `~/Downloads/…` and stays inside what was typed.
-    [[ -d "$glob" ]] && glob="${glob%/}/"
-    # `(om)` orders the glob by mtime, newest first, so `_TAI_FILE_PER_ROOT`
-    # counts the newest that many rather than the alphabetically first that
-    # many. A plain glob is sorted by name, so a downloads folder full of
-    # `aaa*.mp4` kept eight of those and dropped the AppImage that had just
-    # arrived — which is the only thing this function exists to offer.
-    for c in ${~glob}*(omN); do
-      [[ -f "$c" ]] || continue
-      _tai_keep_fresh "$word${c#$glob}" "$c"
+    # What the word names decides what the rows read as. A word naming a
+    # directory is completed by what is inside it — `~/tmp` into `~/tmp/x` —
+    # and the slash that separates them is added here, not taken for granted:
+    # gluing a name straight onto the word gave `cat ~` the answer `~x`, a
+    # path nothing on the disk answers to. A partial name keeps the word whole
+    # and extends it, so the `~` the user typed is the `~` they get back.
+    if [[ -d "$glob" ]]; then
+      tailcomp=""
+      headform="$word"
+      [[ "$word" != */ ]] && headform="$word/"
+      dirkey="${glob%/}"
+      [[ -z "$dirkey" ]] && dirkey="/"
+    else
+      tailcomp="${glob##*/}"
+      headform="${word%$tailcomp}"
+      dirkey="${glob%/*}"
+      [[ -z "$dirkey" ]] && dirkey="/"
+    fi
+    # `(om)` — ordered by mtime, newest first — so the cap takes the newest
+    # that many rather than the alphabetically first. The snapshot holds that
+    # order; the filter below is the component being typed.
+    _tai_snap_get "$dirkey"
+    for (( i = 1; i <= ${#_TAI_SNAP_RET_A}; i++ )); do
+      c="${_TAI_SNAP_RET_A[i]}"
+      [[ "$c" == "$tailcomp"* ]] || continue
+      _tai_keep_fresh "${headform}${c}" "${_TAI_SNAP_RETM_A[i]}"
       (( ++n >= _TAI_FILE_PER_ROOT )) && break
     done
+    if (( n == 0 )); then
+      # The snapshot keeps the newest few, and the name typed may be older
+      # than all of them. One direct glob of just this component answers
+      # honestly; the memoised query means it runs once per word, not once
+      # per redraw.
+      for c in "$dirkey/${~tailcomp}"*(omN); do
+        [[ -f "$c" ]] || continue
+        _tai_keep_fresh "${headform}${c##*/}" "$c"
+        (( ++n >= _TAI_FILE_PER_ROOT )) && break
+      done
+    fi
     return 0
   fi
   _tai_file_roots
   for (( i = 1; i <= ${#_TAI_ROOT_DIR}; i++ )); do
-    _tai_keep_root "${_TAI_ROOT_DIR[i]}" "${_TAI_ROOT_AS[i]}" "$glob"
+    _tai_keep_root "${_TAI_ROOT_DIR[i]}" "${_TAI_ROOT_AS[i]}" "$word"
   done
   return 0
 }
@@ -185,27 +253,35 @@ _tai_fresh_files() {
 # written in the line, and each root reads at most _TAI_FILE_PER_ROOT: a
 # directory of eight files already ranked by mtime must not use up the whole
 # answer, or `chmod +x ` in a busy project would never reach ~/Downloads.
+# Read through the directory's snapshot — see _tai_snap_get — with one direct
+# glob as the fallback for a name the newest few cannot answer for.
 _tai_keep_root() {
-  local dir="$1" as="$2" glob="$3" c
-  local -i n=0
-  # `(om)` — ordered by mtime, newest first — so the cap takes the newest
-  # _TAI_FILE_PER_ROOT rather than the alphabetically first that many. zsh does
-  # the sort inside the glob with no process, so this is free, and it is the
-  # whole point of the function: `chmod +x ` has to name the file that just
-  # landed, and a name-ordered glob in a folder of `aaa*` files never would.
-  if [[ "$dir" == "." ]]; then
-    for c in ${~glob}*(omN); do
-      [[ -f "$c" ]] || continue
+  local dir="$1" as="$2" word="$3" c dirkey
+  local -i n=0 i
+  [[ "$dir" == "." ]] && dirkey="$PWD" || dirkey="${dir%/}"
+  _tai_snap_get "$dirkey"
+  for (( i = 1; i <= ${#_TAI_SNAP_RET_A}; i++ )); do
+    c="${_TAI_SNAP_RET_A[i]}"
+    [[ "$c" == "$word"* ]] || continue
+    if [[ "$dir" == "." ]]; then
       _tai_keep_fresh "$as$c" "$c"
-      (( ++n >= _TAI_FILE_PER_ROOT )) && break
-    done
-  else
-    for c in "$dir"/${~glob}*(omN); do
-      [[ -f "$c" ]] || continue
-      _tai_keep_fresh "$as${c#$dir/}" "$c"
-      (( ++n >= _TAI_FILE_PER_ROOT )) && break
-    done
-  fi
+    else
+      _tai_keep_fresh "$as$c" "$dir/$c"
+    fi
+    (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
+  done
+  (( n )) && return 0
+  local pattern="$word"
+  [[ "$dir" != "." ]] && pattern="$dir/$word"
+  for c in ${~pattern}*(omN); do
+    [[ -f "$c" ]] || continue
+    if [[ "$dir" == "." ]]; then
+      _tai_keep_fresh "$as$c" "$c"
+    else
+      _tai_keep_fresh "$as${c#"$dir"/}" "$c"
+    fi
+    (( ++n >= _TAI_FILE_PER_ROOT )) && break
+  done
 }
 
 # Where files are looked for, most relevant first: `(directory, how to write it)`.
