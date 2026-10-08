@@ -436,8 +436,7 @@ def test_zsh_menu_stem() -> None:
     # A shared *fragment* is not a stem, however long it is. These seven share
     # `tzz_`, and `tzz_` is not a word — cutting there would leave `a`, `b`, `dir/`
     # and every other name reduced to its own tail, which is a menu answering a
-    # different question. LIST rather than Tab, because there is a hint here and
-    # Tab is the key that takes it.
+    # different question.
     s.send("tzz_")
     s.write(LIST)
     s.settle()

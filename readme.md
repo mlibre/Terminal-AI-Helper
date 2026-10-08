@@ -8,10 +8,10 @@ background service on the keystroke path. Offline, stdlib only.
 
 Type `docker` → grey hint `compose up -d`; `→` or `Ctrl-F` takes it, `Alt-F`
 takes one word. An empty prompt predicts the command after your last. `Tab`
-takes the hint; `Ctrl-Space` opens a list to look at first:
+cycles files, folders and options; `Ctrl-Space` opens a list to look at first:
 
 ```text
-git <Tab>          git pull --rebase        ← the hint, taken
+git <→>            git pull --rebase        ← the hint, taken
 git <Ctrl-Space>   pull      status          ← the list, below the line
 git <Ctrl-Space> <Enter>   git pull         ← one entry chosen, line is there
 ```
@@ -48,7 +48,7 @@ bash** runs.
 
 | key                     | what it does                                                      |
 | ----------------------- | ----------------------------------------------------------------- |
-| `Tab`                   | take the hint; list it when there is none                         |
+| `Tab`                   | cycle files, folders and options; never the hint                   |
 | `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection |
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line  |
 | `→`                     | take the hint at the end of the line, else move right             |
@@ -56,8 +56,9 @@ bash** runs.
 | `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type           |
 | `Alt-G`                 | the command that followed the last one (bash)                     |
 
-One question per key. `Ctrl-Space` opens the list when you want to look rather
-than commit; it also sits on `Ctrl-T` (xterm sends NUL for `Ctrl-Space`).
+One question per key. `Tab` moves through the completions, `Ctrl-Space` opens
+the list when you want to look rather than commit; it also sits on `Ctrl-T`
+(xterm sends NUL for `Ctrl-Space`). The hint is `→`'s, never `Tab`'s.
 
 Taking a directory from a list is not a request to go there — you may want the
 rest of the path or another argument — so `Enter` takes and stops;
@@ -174,7 +175,7 @@ per prefix, 64 verbs and 96 flags per tool.
 
 `POSTDISPLAY` is one slot, shared with plugins like
 [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions).
-**Both hints work** — `Tab`, `→` and `Alt-F` take whatever is on screen,
+**Both hints work** — `→`, `Ctrl-F` and `Alt-F` take whatever is on screen,
 and tai never overwrites a hint it did not draw.
 
 Only one hint is visible at a time, decided by who writes last —

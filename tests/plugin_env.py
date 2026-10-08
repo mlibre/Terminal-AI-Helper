@@ -188,8 +188,9 @@ RIGHT_APP = "\x1bOC"  # right arrow, application cursor-key mode: what konsole a
 TAB = "\t"
 ENTER = "\r"         # what a terminal sends for Enter; zsh reads it as ^M
 CTRL_F = "\x06"
-# The key that opens the list on purpose, whatever the hint says. Tab takes the
-# hint when there is one, so a test that wants a menu has to ask for one.
+# The key that opens the list on purpose, whatever is on screen. Both do the
+# same thing now that Tab cycles the list rather than taking the hint, so tests
+# that want a list read the more deliberate key.
 LIST = "\x14"           # Ctrl-T: the list, asked for directly
 CTRL_SPACE = "\x00"     # Ctrl-Space: the same widget, and the key to press
 CTRL_RIGHT = "\x1b[1;5C"  # Ctrl-Right: one word of the hint

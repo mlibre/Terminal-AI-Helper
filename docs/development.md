@@ -312,8 +312,9 @@ Autocomplete changes:
 - a partial word that extends another candidate, such as `ls -l` → `ls -la`
 - the right arrow takes the hint in **both** cursor-key modes, and still moves
   the cursor mid-line in both — `ESC [ C` and `ESC O C` sent on purpose
-- `Tab` takes the hint, and `Ctrl-Space` (or `Ctrl-T`) lists it — including with
-  a hint on screen, and including the `--help` fallback, where `Tab` still lists
+- `Tab` opens the list, hint or no hint, and moves through it on later presses
+  — it never takes the hint; including the `--help` fallback, where `Tab` still
+  lists
 - one word of the hint on `Ctrl-Right` (`Alt-F` in zsh — bash keeps `Alt-F` as
   readline's `forward-word`), and nothing invented when there is no hint
 - the menu is on a line of its own, and a long prompt and a right prompt survive
@@ -343,8 +344,9 @@ Autocomplete changes:
   line; a second `Enter` runs it
 - typing any other key puts the menu away
 - `Tab` on a word nothing completes for leaves the line alone and does not crash
-- `Tab` with nothing to offer falls back to the hint, then to the shell's own
-  completion
+- `Tab` with nothing to offer falls back to the shell's own completion
+- the loose list (the learned lines that mention what was typed, when nothing
+  extends it) shows at most three lines, each about twenty characters wide
 - a name on `PATH` that cannot be run is not offered as a command
 - `TAI_NO_MENU=1` puts `Tab` back the way it was
 - an installed command with no history, which must offer `tool --help`

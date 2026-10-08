@@ -65,11 +65,12 @@ def test_zsh_foreign_hint() -> None:
 
     # And Tab, which no longer answers the question the hint answers, does
     # not swallow it: the list over a foreign hint is the rare case, but the
-    # list is what Tab asks for, whatever drew the text it overlaps.
-    typed_and_hinted("nan")
+    # list is what Tab asks for, whatever drew the text it overlaps. A prefix
+    # nothing completes, so expand-or-complete has nothing to write either.
+    typed_and_hinted(NOT_INSTALLED)
     s.write(TAB)
     s.settle()
-    check("Tab does not take it", s.line(), "nan")
+    check("Tab does not take it", s.line(), NOT_INSTALLED)
     s.write("\x15")
 
     # The other two keys that take hints, for the same reason.
@@ -139,19 +140,19 @@ def test_zsh_tab_and_list() -> None:
     check("and leaves the line alone", line, "git ")
     s.write("\x15")
 
-    # The one completion the hint was already saying: Tab writes it, because
+    # The one completion the hint was already showing: Tab writes it, because
     # a list of one is a question that has answered itself.
-    s.send("docker")
+    s.send("cat tzz_dir")
     s.write(TAB)
     s.settle()
     line, drawn, size, idx = s.menu()
     check("one completion is taken, not listed",
-          (line, size), ("docker ps", 0))
+          (line, size), ("cat tzz_dir/", 0))
     s.send("docker")
     s.write(RIGHT)
     s.settle()
     line, drawn, size, idx = s.menu()
-    check("and the arrow takes the same hint",
+    check("and the arrow takes the hint",
           (line, size), ("docker ps", 0))
 
     # The same key with no hint is the list, which is what every shell does

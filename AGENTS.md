@@ -304,15 +304,17 @@ They exist because each one was a reported failure.
   a `PATH` directory *offers*, not of commands that can be run: a file with no
   execute bit and a directory are both in it, and `whence` calls neither a
   command. Ask about the path, not the name.
-- **One key, one question.** `Tab` took the hint and opened the list, so what it
-  did depended on what happened to be on screen, and a readable hint with a menu
-  opened over it was the system asking a question it had already answered. `Tab`
-  completes; `Ctrl-Space` lists, hint or no hint. The one exception is the
-  `--help` fallback for a command the history has never seen: that is tai
-  guessing at what you meant from no evidence, so `docker <Tab>` still lists
-  files. The test that matters is the pair — `Tab` takes `docker ps` for
-  `docker`, and `Tab` on `true` opens a list — because either half alone passes
-  a plugin that made the wrong rule.
+- **One key, one question.** `Tab` took the hint *and* opened the list, so what
+  it did depended on what happened to be on screen, and a readable hint with a
+  menu opened over it was the system asking a question it had already answered.
+  The question a key asks must not depend on the screen: `→` takes the hint,
+  `Ctrl-Space` opens the list, and `Tab` cycles — files, folders, options — and
+  never touches the hint. The one exception is the `--help` fallback for a
+  command the history has never seen: that is tai guessing at what you meant from
+  no evidence, so the hint is drawn (for `→`) and `Tab` answers the *typed* word
+  with the honest menu. The test that matters is the pair — `docker ` lists, and
+  `git <Tab>` lists `pull` and `status` without writing a hint — because either
+  half alone passes a plugin that made the wrong rule.
 - **The list and the hint are the same lookup.** A word the hint would suggest is
   a word the list can offer, so both read `_tai_lines`. Duplicating the index
   lookup in a second place is how a wrapper rule or an `--help` fallback ends up

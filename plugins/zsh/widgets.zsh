@@ -403,7 +403,8 @@ zle -N tai-accept-or-complete
 
 tai-accept-word() {
   (( _TAI_MENU_IDX )) && _tai_menu_close
-  # Whatever drew the hint, for the same reason Tab does: _tai_shown_hint.
+  # Whatever drew the hint, for the same reason the arrow does:
+  # _tai_shown_hint.
   if _tai_shown_hint; then
     local rest="$_TAI_HINT"
     # A file name is one word however it is written, so `cat My` takes the whole
