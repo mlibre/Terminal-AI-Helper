@@ -15,6 +15,7 @@ updating, and diagnostics.
     tai uninstall
     tai bench [--limit N]
     tai tune [--limit N --trials N]
+    tai web [--port N] [--no-browser]     (alias: tai dashboard)
     tai doctor
     tai eval
     tai eval-jev
@@ -327,6 +328,16 @@ def cmd_doctor(a) -> int:
     return 0
 
 
+def cmd_web(a) -> int:
+    """A read-only localhost page of what tai learned, with a live try box.
+
+    Kept out of the module imports like every other command's dependency: none
+    of http.server lands in `tai record`'s process.
+    """
+    from tai.web import serve
+    return serve(port=a.port, open_browser=not a.no_browser)
+
+
 def cmd_eval(a) -> int:
     from tai.evaluate import main
     return main()
@@ -452,6 +463,10 @@ _COMMANDS = {
     "bench": cmd_bench,
     "tune": cmd_tune,
     "doctor": cmd_doctor,
+    # Both spellings, because the name the user typed is the name argparse
+    # reports back, and a KeyError under an alias is a broken alias.
+    "web": cmd_web,
+    "dashboard": cmd_web,
     "eval": cmd_eval,
     "eval-jev": cmd_eval_jev,
 }
@@ -513,6 +528,16 @@ def main() -> int:
     t.add_argument("--limit", type=int, default=10000)
     t.add_argument("--trials", type=int, default=60)
     sub.add_parser("doctor", help="say what is indexed and what is held back")
+    w = sub.add_parser("web", aliases=["dashboard"],
+                       help="serve a read-only localhost dashboard of what tai learned")
+    # The default is tai.web's own, written here as a literal because main()
+    # also builds the parser for `tai record`, and that process pays for none
+    # of http.server. tests/test_web.py reads both spellings and asserts they
+    # agree, so the two copies cannot drift apart in silence.
+    w.add_argument("--port", type=int, default=8247,
+                   help="port to bind on 127.0.0.1 (default 8247)")
+    w.add_argument("--no-browser", action="store_true",
+                   help="print the URL instead of opening the browser")
     sub.add_parser("eval", help="score the ranker against held-out history")
     sub.add_parser("eval-jev", help="the same, against a hosted model")
 

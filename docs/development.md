@@ -12,6 +12,7 @@ tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`
 tai/store.py        SQLite log (WAL), schema, oldest-first loader, history import
 tai/paths.py        path liveness, `cd` destinations, "does this line end in a file"
 tai/fresh.py        the files a path argument could be — the one-shot half
+tai/web.py          the read-only localhost dashboard: one page, two GET routes
 tai/knowledge.py    read-only CLI discovery from --help / man / __complete
 tai/helptext.py     what a tool's help text is read into: verbs, flags, one probe
 tai/maintenance.py  the rebuild lock, reclaimable by pid, boot id and age
@@ -21,7 +22,7 @@ tai/decisions.py    bounded Choice/Noul decision contract and the safety gate
 tai/jev.py          optional hosted Jev adapter (batched; never generates)
 tai/predictor.py    one-shot suggest: engine plus the path-liveness policy
 tai/cli.py          suggest | jev | record | refresh | update | discover | purge
-                    | uninstall | bench | tune | doctor | eval | eval-jev
+                    | uninstall | bench | tune | web | doctor | eval | eval-jev
 tai/bench.py        latency, memory, index and stale-path diagnostics
 tai/tune.py         coordinate search over the weights (writes engine.py)
 tai/evaluate.py     labeled candidate evaluation

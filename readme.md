@@ -202,12 +202,24 @@ per prefix, 64 verbs and 96 flags per tool.
 `POSTDISPLAY` is one slot, shared with plugins like
 [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions).
 **Both hints work** — `→`, `Ctrl-F` and `Alt-F` take whatever is on screen,
-and tai never overwrites a hint it did not draw.
+and tai never overwrites a hint it did not draw. Only one is visible at a
+time, decided by who writes last; the installer pauses autosuggestions when
+found, and `tai uninstall` gives it back. Keep both via
+`TAI_KEEP_AUTOSUGGEST=1 ./install.sh`.
 
-Only one hint is visible at a time, decided by who writes last —
-autosuggestions fetches asynchronously, so it writes after tai's redraw. The
-installer pauses it when found, and `tai uninstall` gives it back. Keep both
-via `TAI_KEEP_AUTOSUGGEST=1 ./install.sh`.
+## A dashboard of what it learned
+
+```sh
+tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
+```
+
+One page, served by the tool itself: a box where typing a prefix answers
+exactly what the prompt would answer — through the same engine, not a copy of
+it — plus the most-run commands with their counts, the latest recorded rows,
+and the state of the store and both indexes. It binds `127.0.0.1` only,
+answers GETs only, and can write nothing: the database is your shell history,
+and a dashboard that can mutate its subject is a second control surface to
+defend. `--port N` moves it; `--no-browser` skips the auto-open.
 
 ## Commands
 
@@ -216,6 +228,7 @@ tai refresh     # import new history rows, then rebuild the indexes
 tai discover    # learn --help from installed tools (cached, ~5-35s)
 tai doctor      # what is indexed, and what is held back
 tai bench       # build time, latency, memory, and what each shell pays to read the index
+tai web         # a read-only localhost dashboard of what tai learned (alias: tai dashboard)
 tai eval        # candidate coverage against your own history
 tai update      # pull the newest version and reinstall
 tai purge       # drop unusable rows, then rebuild

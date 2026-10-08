@@ -60,6 +60,7 @@ step "smoke"         python3 tests/test_smoke.py
 step "smoke cli"     python3 tests/test_smoke_cli.py
 step "smoke install" python3 tests/test_smoke_install.py
 step "jev"           python3 tests/test_jev.py
+step "web"           python3 tests/test_web.py
 if (( ! fast )); then
   # One entry point per theme, all sharing plugin_env/plugin_screen/plugin_pty.
   # Order is cheapest-first: plain lookups, then the menu, then what is drawn,

@@ -25,7 +25,10 @@ Build **simple, fast, smart, delightful software** that works immediately.
 `tai` is an embedded terminal autocomplete system for zsh and bash.
 
 - Native shell lookup on the keystroke path.
-- No daemon, socket, server, or per-keystroke Python process.
+- No daemon, socket, server, or per-keystroke Python process. The one server
+  is `tai web`: launched by the user, bound to 127.0.0.1, GET-only and
+  read-only, answering through the same engine as the prompt — never on the
+  keystroke path, never started by the plugins.
 - Learn from command history and local CLI `--help`/`man` data.
 - Use bounded Jev-like decisions for optional semantic reranking and safety.
 - Candidate generation may propose commands; code owns execution and safety.
