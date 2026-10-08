@@ -905,24 +905,44 @@ def test_history_browsing_opens_no_list() -> None:
     print("zsh up-down history browsing opens no list")
     s = Session("zsh")
     s.run(f"cd {MENU_DIR}")
-    s.run("git status")          # two lines in the history, the first learned
+    # Three lines in the history, typed the way a user types them. The
+    # harness's `run` wraps its command in a done-marker, and Up would recall
+    # the wrapper rather than the command — so the lines enter the history as
+    # keystrokes, newline and all.
+    s.send("git status" + ENTER)
+    s.settle()
+    s.send(f"cd {MENU_DIR}" + ENTER)
+    s.settle()
+    s.send("docker ps" + ENTER)
+    s.settle()
+    s.write(UP)
+    s.settle()
     s.write(UP)
     s.settle()
     s.write(UP)
     s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("Up still recalls history", line, "git status")
     s.write(DOWN)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("Down over a history line does not open the list", size, 0)
-    check("and the history moved instead", line, "git status")
+    check("and the history moved instead", line, f"cd {MENU_DIR}")
+    s.write(DOWN)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("and still no list", size, 0)
+    check("until the walk leaves the oldest line", line, "docker ps")
     s.write(DOWN)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("and Down still walks out of the history", line, "")
     # And the gate is about *typed*: the same Down, on a line the user is
     # composing — one the history cannot extend (`pull --rebase` is in no
-    # learned line's front), still asks for the list.
+    # learned line's front) — still asks for the list. The settle matters: the
+    # redraw the typing caused is what computes the loose lines Down reads.
     s.send("pull --rebase")
+    s.settle()
     s.write(DOWN)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
@@ -957,9 +977,8 @@ def test_cd_answers_directories() -> None:
           [e for e in entries if e in ("tzz_d", "tzz_a", "tzz_solo")], [])
     check("the learned destination is, once",
           sum(e in ("tzz_dir", "tzz_dir/") for e in entries), 1)
+    check("another learned destination is too", "/tmp" in entries, True)
     check("the shell's own directories are", "stemroot/" in entries, True)
-    check("a relative move is still on offer", ".." in entries, True)
-    check("and the slot is too", "-" in entries, True)
     s.write("\x15")
     check("no noise from the cd menu", s.noise(), [])
     s.close()

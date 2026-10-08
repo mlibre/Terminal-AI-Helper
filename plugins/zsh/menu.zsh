@@ -207,13 +207,6 @@ _tai_menu_open() {
   term=${COLUMNS:-0}
   (( term > 0 )) || term=80
 
-  # A directory argument changes what the word can be. After `cd` and `pushd`
-  # a file is an error the user has to notice and retype, so every source
-  # below is filtered for it: no file answer, no --help, a dirs-only glob,
-  # and a learned destination has to be a directory *from here*.
-  local -i dir_arg=0
-  _tai_dirarg "$before" && dir_arg=1
-
   # The word the cursor is on, and the line in front of it. The index is keyed
   # on whole lines, so a lookup needs both.
   if [[ "$BUFFER" == *' ' ]]; then
@@ -223,6 +216,15 @@ _tai_menu_open() {
     word=${BUFFER##*' '}; before=${BUFFER%"$word"}
     _TAI_MENU_TO=$len; _TAI_MENU_FROM=$(( len - ${#word} + 1 ))
   fi
+
+  # A directory argument changes what the word can be. After `cd` and `pushd`
+  # a file is an error the user has to notice and retype, so every source
+  # below is filtered for it: no file answer, no --help, a dirs-only glob,
+  # and a learned destination has to be a directory *from here*. Read after
+  # `before` exists — a directory argument is a fact about the line, and the
+  # line has to be split before its head can be asked about.
+  local -i dir_arg=0
+  _tai_dirarg "$before" && dir_arg=1
 
   # 0a. Units, when the line is a systemctl unit argument: the cached unit list
   #    IS the vocabulary there, and files, command names and the directory
