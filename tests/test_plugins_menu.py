@@ -222,10 +222,10 @@ def test_zsh_menu() -> None:
     check("while `cd .` still completes to it — ranked, not removed",
           s.suggestion().split(" PD=")[0], "SUG=[.]")
     # Re-sent because reading the hint ends the line in zsh (the dump widget is
-    # followed by ^C). Tab then *takes* the hint rather than opening a list,
-    # because there is exactly one thing the word can become — the rule demoted
-    # `cd ..` in the ranking, it did not take it off the menu, and the proof is
-    # that the key still writes it.
+    # followed by ^C). Tab then *takes* the completion rather than opening a
+    # list, because there is exactly one thing the word can become — the rule
+    # demoted `cd ..` in the ranking, it did not take it off the menu, and the
+    # proof is that the key still writes it.
     s.send("cd .")
     s.write(TAB)
     s.settle()
