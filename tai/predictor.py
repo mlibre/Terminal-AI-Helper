@@ -84,14 +84,17 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     return res
 
 
-def explain(prefix: str, cmd: str, cwd: str = "",
-            last_commands: list | None = None) -> dict | None:
+def explain(prefix: str, cmd: str, cwd: str = "", repo: str = "",
+            branch: str = "", last_commands: list | None = None) -> dict | None:
     """Why `cmd` ranks what it ranks for `prefix` — the dashboard's why.
 
     Same engine, same path-liveness policy: a command hidden as stale is
     reported as hidden rather than scored, because the honest answer to "why
-    don't I see it" is not its arithmetic. Returns None for a line the store
-    never recorded.
+    don't I see it" is not its arithmetic. repo and branch ride along like
+    suggest's do — the shell asks every question with the git context of the
+    directory it runs in, and an explain that dropped them would score the
+    repository and branch factors at zero for a question the prompt would
+    have scored. Returns None for a line the store never recorded.
     """
     global _E, _STALE
     if _E is None:
@@ -99,7 +102,7 @@ def explain(prefix: str, cmd: str, cwd: str = "",
         from tai.store import db_path
         _E = get(db_path(), _build_engine)
         _STALE = _stale_for(_E)
-    out = _E.explain(prefix or "", cmd, cwd=cwd,
+    out = _E.explain(prefix or "", cmd, cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [])
     if out is None:
         return None

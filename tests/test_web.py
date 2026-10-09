@@ -155,6 +155,95 @@ code, body = get("/api/explain?q=" + "x" * 600 + "&cmd=" + "y" * 600)
 assert code == 200, "an over-long explain question is cut, not an error"
 print("OK — /api/explain names the factors, and its total is the panel's score.")
 
+# --- the directory question: the panel asks about the cwd box ------------------
+# "this directory" scored 0.000 for a user whose command had run three times
+# in the very directory they were asking from — because the page never sent a
+# directory: the cwd box started empty and nothing filled it, and the engine
+# answered "no directory asked" honestly, every time. The factor is pinned
+# here from both sides: with a directory the arithmetic is the shell's own,
+# without one the zero says itself in words.
+code, body = get("/")
+page = body.decode()
+assert "auto-fills from your latest record" in page, "the cwd box says what fills it"
+assert "ask this directory" in page, "a recorded cwd is clickable as a question"
+assert "auto-refresh" in page, "the state grid answers how often tai refreshes itself"
+
+GAME = pathlib.Path("/tmp/tai/whygame/fun")
+TWIN = pathlib.Path("/tmp/tai/whyelewhere/fun")   # same basename, different tree
+GAME.mkdir(parents=True, exist_ok=True)
+TWIN.mkdir(parents=True, exist_ok=True)
+for _ in range(3):
+    ok, _, _ = append_and_count("godot .", cwd=str(GAME))
+    assert ok, "the directory fixture was not stored"
+
+def factor(exp, label):
+    return next(f for f in exp["factors"] if f["label"] == label)
+
+q = urllib.parse.urlencode({"q": "godot .", "cmd": "godot .", "cwd": str(GAME)})
+exp = json.loads(get("/api/explain?" + q)[1])
+assert exp["found"] and exp["asked_cwd"] == str(GAME), exp
+f = factor(exp, "this directory")
+assert f["detail"] == "3 of 3 runs in this directory", f
+assert abs(f["contrib"] - 2.2) < 0.001, f          # W_CWD, full credit
+q = urllib.parse.urlencode({"q": "godot .", "cmd": "godot ."})
+exp = json.loads(get("/api/explain?" + q)[1])
+f = factor(exp, "this directory")
+assert f["contrib"] == 0 and "no directory asked" in f["detail"], f
+q = urllib.parse.urlencode({"q": "godot .", "cmd": "godot .", "cwd": str(TWIN)})
+exp = json.loads(get("/api/explain?" + q)[1])
+f = factor(exp, "this directory")
+assert "half credit" in f["detail"] and abs(f["contrib"] - 1.1) < 0.001, f
+print("OK — the panel asks about the cwd box: full credit, honest zero, half credit.")
+
+# --- the repository question: git context derived from the cwd ------------------
+# The shell asks every question with --git/--branch of the directory it runs
+# in; a dashboard asked about a directory derives the same answer, or the
+# repository and branch rows read zero for a command the prompt would have
+# scored. Real git, real toplevel, real branch name.
+RE = pathlib.Path("/tmp/tai/whyrepo")
+RE.mkdir(parents=True, exist_ok=True)
+subprocess.run(["git", "init", "-q"], cwd=RE, capture_output=True, timeout=30)
+subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                "commit", "--allow-empty", "-q", "-m", "seed"],
+               cwd=RE, capture_output=True, timeout=30)
+top = subprocess.run(["git", "-C", str(RE), "rev-parse", "--show-toplevel"],
+                     capture_output=True, text=True, timeout=30).stdout.strip()
+br = subprocess.run(["git", "-C", str(RE), "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, timeout=30).stdout.strip()
+assert top and pathlib.Path(top).resolve() == RE.resolve(), (top, RE)
+assert br, "the fixture repository has a branch"
+for _ in range(2):
+    ok, _, _ = append_and_count("make test", cwd=str(RE), repo=top, branch=br)
+    assert ok, "the repository fixture was not stored"
+
+q = urllib.parse.urlencode({"q": "make t", "cmd": "make test", "cwd": str(RE)})
+exp = json.loads(get("/api/explain?" + q)[1])
+assert exp["found"], exp
+assert exp["asked_repo"] == top and exp["asked_branch"] == br, exp
+assert factor(exp, "repository")["detail"] == "2 of 2 runs in this repository", exp
+assert factor(exp, "git branch")["detail"] == "2 of 2 runs on this branch", exp
+assert abs(sum(f["contrib"] for f in exp["factors"]) - exp["score"]) < 0.01
+q = urllib.parse.urlencode({"q": "godot .", "cmd": "godot .", "cwd": str(GAME)})
+exp = json.loads(get("/api/explain?" + q)[1])
+assert exp["asked_repo"] == "" and "no repository asked" in factor(exp, "repository")["detail"]
+print("OK — git context is derived from the cwd box, and its absence says so.")
+
+# --- a long-running dashboard sees new rows -------------------------------------
+# The server is a thread in this process with a warmed engine; a row written
+# between two state polls must reach `learned` too, not only the tables that
+# read the store directly — a dashboard that froze at startup kept explaining
+# yesterday's history while its own tables moved.
+code, body = get("/api/state")
+s = json.loads(body)
+assert s["auto_refresh"] == {"debounce_s": 5.0, "every": 100}, s.get("auto_refresh")
+before = s["learned"]["commands"]
+append_and_count("freshness probe", cwd="/home/u/proj")
+code, body = get("/api/state")
+after = json.loads(body)
+assert after["learned"]["commands"] == before + 1, (before, after["learned"])
+assert any(r["cmd"] == "freshness probe" for r in after["recent"])
+print("OK — a long-running dashboard rebuilds its engine when the store moves.")
+
 # --- read-only, full stop ------------------------------------------------------
 assert post("/") == 405, "a POST must meet an explicit read-only refusal"
 try:

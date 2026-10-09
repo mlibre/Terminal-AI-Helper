@@ -17,6 +17,7 @@ subject is a second control surface that has to be defended.
 """
 import json
 import os
+import subprocess
 import threading
 import time
 import webbrowser
@@ -30,6 +31,98 @@ DEFAULT_PORT = 8247
 # can ask at once; a dashboard that races its own engine into two builds is
 # slower, not faster, and the answer never needed parallelism to be right.
 _LOCK = threading.Lock()
+
+# The store the warmed engine was built from, as the (size, mtime_ns) the
+# engine disk cache keys on. A dashboard server is long-lived; without this
+# key its engine froze at startup and the panel went on explaining
+# yesterday's history while the tables below it moved.
+_DB_KEY: tuple | None = None
+
+
+def _fresh_engine() -> None:
+    """Drop the warmed engine when the store has changed underneath it.
+
+    Called under the lock from every route that answers through the engine,
+    so the rebuild cannot race another tab's question. The key is the same
+    one tai.engcache uses, so a record invalidates the engine the moment its
+    write lands, and the next question pays one rebuild — the same price the
+    shell pays once per store change, never per keystroke.
+    """
+    global _DB_KEY
+    from tai import predictor
+    from tai.store import db_path
+    try:
+        st = db_path().stat()
+        key = (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return                      # no store yet: nothing to be fresh about
+    if key != _DB_KEY:
+        predictor._E = None
+        predictor._STALE = frozenset()
+        _DB_KEY = key
+
+
+# The git context of the cwd box, derived the way the shell plugin derives
+# its own: toplevel and branch of the directory asked about. The shell hands
+# the engine `--git … --branch …` with every question; a dashboard asked
+# about a directory should ask the same question, or the repository and
+# branch factors read zero for a command the prompt would have scored.
+_GIT_TTL = 10.0
+_GIT_CACHE: dict[str, tuple[float, str, str]] = {}
+
+
+def _git_of(cwd: str) -> tuple[str, str]:
+    """(repo, branch) for `cwd`, cached briefly.
+
+    Cached because suggest runs per keystroke and a subprocess per keystroke
+    is a dashboard that lags its own typing; the TTL is what lets a user
+    switch branches and see the panel follow within seconds rather than at
+    the next page load. An empty answer caches like any other — a directory
+    that is not a repository stays one for the TTL.
+    """
+    if not cwd:
+        return "", ""
+    now = time.time()
+    hit = _GIT_CACHE.get(cwd)
+    if hit and now - hit[0] < _GIT_TTL:
+        return hit[1], hit[2]
+    if len(_GIT_CACHE) > 64:        # a page that wanders many directories
+        _GIT_CACHE.clear()
+    repo = branch = ""
+    if os.path.isdir(cwd):
+        try:
+            r = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                               capture_output=True, text=True, timeout=2)
+            if r.returncode == 0:
+                repo = r.stdout.strip()
+                b = subprocess.run(
+                    ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, timeout=2)
+                if b.returncode == 0:
+                    branch = b.stdout.strip()
+        except Exception:
+            pass                    # no git, or a dying subprocess: score without it
+    _GIT_CACHE[cwd] = (now, repo, branch)
+    return repo, branch
+
+
+def _question(qs: dict) -> dict:
+    """Parse the question the page asked, with the git context of its cwd.
+
+    The one place the panel's question is assembled, shared by suggest and
+    explain — the two must ask identically or the explained number and the
+    displayed number part ways.
+    """
+    cwd = os.path.expanduser((qs.get("cwd", [""])[0] or "")[:4096])
+    repo, branch = _git_of(cwd)
+    return {
+        "prefix": (qs.get("q", [""])[0] or "")[:500],
+        "cwd": cwd,
+        "repo": repo,
+        "branch": branch,
+        "last": [s.strip() for s in (qs.get("last", [""])[0] or "").split(";")
+                 if s.strip()][:3],
+    }
 
 
 def _clean(value, cap: int = 120) -> str:
@@ -56,6 +149,17 @@ def _state() -> dict:
 
     broken = schema_note()
     rows_n, distinct = count()
+
+    # The record path's own self-refresh policy, quoted here rather than
+    # restated: how far behind new commands the shell index may lag, and the
+    # belt-and-braces rebuild every so many recorded commands. It is the
+    # answer to the question every new user asks — "does tai refresh
+    # itself?" — read from the constants that actually run.
+    try:
+        from tai.cli import AUTO_REBUILD_EVERY, _REBUILD_MIN_INTERVAL
+        auto = {"debounce_s": _REBUILD_MIN_INTERVAL, "every": AUTO_REBUILD_EVERY}
+    except Exception:
+        auto = None
 
     # Warm the predictor's engine once; after this the /api/suggest box and
     # this state share the same object, which is the promise of the page.
@@ -96,6 +200,7 @@ def _state() -> dict:
                     "bash": {"path": str(b), "exists": b.exists(),
                              "age_s": _age(b)}},
         "learned": learned,
+        "auto_refresh": auto,
         "path_check_enabled": enabled(),
         "top": [{"cmd": _clean(c), "n": n} for c, n in top],
         "recent": [{"cmd": _clean(c), "cwd": _clean(w, 80), "exit": x, "ts": t}
@@ -105,11 +210,11 @@ def _state() -> dict:
 
 def _suggest(qs: dict) -> dict:
     from tai import predictor
-    prefix = (qs.get("q", [""])[0] or "")[:500]
-    cwd = (qs.get("cwd", [""])[0] or "")[:4096]
-    last = [s.strip() for s in (qs.get("last", [""])[0] or "").split(";") if s.strip()]
+    q = _question(qs)
     with _LOCK:
-        return predictor.suggest(prefix=prefix, cwd=cwd, last_commands=last[:3],
+        _fresh_engine()
+        return predictor.suggest(prefix=q["prefix"], cwd=q["cwd"], repo=q["repo"],
+                                 branch=q["branch"], last_commands=q["last"],
                                  limit=6)
 
 
@@ -122,19 +227,26 @@ def _explain(qs: dict) -> dict:
     could have drifted while the user typed.
     """
     from tai import predictor
-    prefix = (qs.get("q", [""])[0] or "")[:500]
+    q = _question(qs)
     cmd = (qs.get("cmd", [""])[0] or "")[:500]
-    cwd = (qs.get("cwd", [""])[0] or "")[:4096]
-    last = [s.strip() for s in (qs.get("last", [""])[0] or "").split(";") if s.strip()]
     if not cmd:
-        return {"cmd": cmd, "prefix": prefix, "found": False}
+        return {"cmd": cmd, "prefix": q["prefix"], "found": False}
     with _LOCK:
-        res = predictor.suggest(prefix=prefix, cwd=cwd, last_commands=last[:3],
+        _fresh_engine()
+        res = predictor.suggest(prefix=q["prefix"], cwd=q["cwd"], repo=q["repo"],
+                                branch=q["branch"], last_commands=q["last"],
                                 limit=6)
-        exp = predictor.explain(prefix, cmd, cwd=cwd, last_commands=last[:3])
+        exp = predictor.explain(q["prefix"], cmd, cwd=q["cwd"], repo=q["repo"],
+                                branch=q["branch"], last_commands=q["last"])
     if exp is None:
-        return {"cmd": cmd, "prefix": prefix, "found": False}
+        return {"cmd": cmd, "prefix": q["prefix"], "found": False}
     exp["found"] = True
+    # What was actually asked, so the panel can show the directory (and the
+    # repository behind it) the answer is about — a breakdown that quotes a
+    # directory the reader cannot see is a breakdown they cannot check.
+    exp["asked_cwd"] = q["cwd"]
+    exp["asked_repo"] = q["repo"]
+    exp["asked_branch"] = q["branch"]
     exp["prob"] = None
     exp["rank"] = None
     for i, c in enumerate(res.get("choices", []), 1):
@@ -147,6 +259,7 @@ def _explain(qs: dict) -> dict:
 
 def _state_locked() -> dict:
     with _LOCK:
+        _fresh_engine()             # the learned counts answer through the engine too
         return _state()
 
 
@@ -272,6 +385,7 @@ _PAGE = r"""<!doctype html>
   input::placeholder{color:var(--dim)}
   .cwd{margin-top:9px;display:flex;align-items:center;gap:9px;color:var(--dim);font-size:12px}
   .cwd input{font-size:12.5px;padding:6px 10px}
+  #cwdhint{flex:none;font-size:11px;white-space:nowrap}
   .ans{margin-top:14px}
   .top{font:16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .top .ghost{color:var(--dim)}
@@ -328,7 +442,8 @@ _PAGE = r"""<!doctype html>
 <h2>try a prefix</h2>
 <div class="card">
   <input id="q" placeholder="git st…" autofocus spellcheck="false" autocomplete="off">
-  <div class="cwd">cwd <input id="cwd" placeholder="(empty = here)" spellcheck="false" autocomplete="off"></div>
+  <div class="cwd">cwd <input id="cwd" placeholder="auto-fills from your latest record"
+       spellcheck="false" autocomplete="off"><span id="cwdhint" class="dim"></span></div>
   <div class="ans" id="ans"></div>
 </div>
 
@@ -343,8 +458,10 @@ _PAGE = r"""<!doctype html>
 
 <div class="foot">the server binds 127.0.0.1 only and answers GETs alone;
 nothing on this page can write to the store. Feed it the way you feed the
-prompt: just keep using the shell, or <code>tai refresh</code> in a terminal.
-Click a suggestion to copy it; <code>why</code> opens its arithmetic.</div>
+prompt: just keep using the shell — the shell index rebuilds itself within
+seconds of new commands — or <code>tai refresh</code> in a terminal.
+Click a suggestion to copy it; click a cwd below to ask about that directory;
+<code>why</code> opens its arithmetic.</div>
 </div>
 <div id="toast"></div>
 
@@ -412,6 +529,11 @@ function why(btn, cmd) {
       if (x.stale)
         head.appendChild(document.createTextNode("  ·  hidden as stale (its path is gone)"));
       td.appendChild(head);
+      // The directory the question was asked about — the same one the shell
+      // would have asked from, filled from your latest record. A breakdown
+      // that quotes a directory you cannot see is one you cannot check.
+      if (x.asked_cwd)
+        head.appendChild(document.createTextNode("  ·  in " + x.asked_cwd));
       const t = document.createElement("table"); t.className = "xt";
       x.factors.forEach(f => {
         const r2 = document.createElement("tr");
@@ -425,7 +547,9 @@ function why(btn, cmd) {
       td.appendChild(t);
       const foot = document.createElement("div"); foot.className = "k";
       foot.style.marginTop = "7px";
-      foot.textContent = "the % is this score beside every other candidate's (softmax over the panel)";
+      foot.textContent = x.asked_cwd ?
+        "the % is this score beside every other candidate's (softmax over the panel)" :
+        "no directory in the question — the cwd box above would ask one";
       td.appendChild(foot);
     }
     row.appendChild(td); tr.after(row);
@@ -447,9 +571,28 @@ function card(k, v) {
 // A failed poll shows the banner and keeps the last good page on screen —
 // a dashboard that blanks itself on one dropped request is a dashboard the
 // user cannot trust to come back.
+
+// The cwd box is the panel's directory question. A browser has no shell, so
+// "here" arrives from the history itself: the latest record's cwd, filled
+// once, until you edit the box — your edit always wins.
+let cwdTouched = false, cwdFilled = false;
+function askCwd(path, why) {
+  $("cwd").value = path;
+  cwdFilled = true;
+  $("cwdhint").textContent = why || "";
+  suggest();
+}
+$("cwd").addEventListener("input", () => {
+  cwdTouched = true;
+  $("cwdhint").textContent = "";
+  suggest();
+});
+
 function state() {
   fetch("/api/state").then(r => r.json()).then(s => {
     $("net").style.display = "none";
+    if (!cwdTouched && !cwdFilled && s.recent.length && s.recent[0].cwd)
+      askCwd(s.recent[0].cwd, "from your latest record — edit to ask elsewhere");
     const L = s.learned || {};
     $("state").innerHTML =
       card("rows", s.db.rows.toLocaleString() + ` <small>(${s.db.distinct} distinct)</small>`) +
@@ -459,6 +602,8 @@ function state() {
       card("hidden as stale", L.stale_hidden != null ? L.stale_hidden : "—") +
       card("zsh index", s.indexes.zsh.exists ? "built <small>" + ago(s.indexes.zsh.age_s) + " ago</small>" : "none") +
       card("bash index", s.indexes.bash.exists ? "built <small>" + ago(s.indexes.bash.age_s) + " ago</small>" : "none") +
+      card("auto-refresh", s.auto_refresh ?
+        `≤ ${s.auto_refresh.debounce_s}s <small>behind new commands · full rebuild every ${s.auto_refresh.every}th</small>` : "—") +
       card("store", s.db.broken ? `<span class="err">broken</span>` : `<span class="ok">healthy</span>`) +
       (s.db.broken ? card("store error", `<span class="err">${E(s.db.broken)}</span>`) : "");
     const mx = s.top.length ? s.top[0].n : 1;
@@ -467,14 +612,20 @@ function state() {
       `<span><span class="k n">${r.n}</span><span class="bar" style="display:block;width:${Math.max(3, 100 * r.n / mx)}%"></span></span></div>`).join("") :
       `<div class="k">nothing recorded yet — run commands in the shell</div>`;
     const now = (Date.now() / 1000) | 0;
+    // The cwd rides in a side array like the commands do — innerHTML escaping
+    // does not touch quotes, and a quoted path in an attribute would break out.
+    const cwds = s.recent.map(r => r.cwd);
     $("recent").innerHTML = s.recent.length ?
       "<thead><tr><th>when</th><th>command</th><th>cwd</th><th>exit</th></tr></thead><tbody>" +
-      s.recent.map(r =>
+      s.recent.map((r, i) =>
         `<tr><td class="dim" title="${new Date(r.ts * 1000).toLocaleString()}">${ago(Math.max(0, now - r.ts))}</td>` +
-        `<td class="cmd">${E(r.cmd)}</td><td class="cwd dim">${E(r.cwd)}</td>` +
+        `<td class="cmd">${E(r.cmd)}</td>` +
+        `<td class="cwd dim" data-i="${i}" title="ask this directory" style="cursor:pointer">${E(r.cwd)}</td>` +
         `<td>${r.exit ? `<span class="badge warn">${r.exit}</span>` : `<span class="badge ok">0</span>`}</td></tr>`).join("") +
       "</tbody>" :
       `<tbody><tr><td class="k">no rows</td></tr></tbody>`;
+    $("recent").querySelectorAll("td.cwd[data-i]").forEach(td =>
+      td.addEventListener("click", () => askCwd(cwds[+td.dataset.i], "from your latest records — edit to ask elsewhere")));
   }).catch(() => { $("net").style.display = "block"; });
 }
 
@@ -515,7 +666,6 @@ function suggest() {
   }, 120);
 }
 $("q").addEventListener("input", suggest);
-$("cwd").addEventListener("input", suggest);
 
 state(); setInterval(state, 5000);
 </script></body></html>

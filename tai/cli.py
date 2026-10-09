@@ -196,9 +196,17 @@ def cmd_update(a) -> int:
     return subprocess.run(["bash", str(installer)]).returncode
 
 
+# The two knobs of the record path's self-refresh, named where the web page
+# can quote them: a rebuild at most once per this many seconds (bursts of
+# records coalesce into one background build), and one unconditional build
+# every this many recorded commands.
+_REBUILD_MIN_INTERVAL = 5.0
+AUTO_REBUILD_EVERY = 100
+
+
 def _auto_maintain(total: int, newest_ts: int = 0) -> None:
     """Rebuild at 100-command boundaries without blocking the shell."""
-    if total % 100:
+    if total % AUTO_REBUILD_EVERY:
         _rebuild_when_stale(newest_ts)
         return
     from tai.maintenance import _rebuild_quietly
@@ -214,7 +222,6 @@ def _auto_maintain(total: int, newest_ts: int = 0) -> None:
 # background rebuild runs. The window keeps a burst of records from stacking
 # rebuilds on top of each other; the rebuild itself still takes the maintenance
 # lock, so two shells recording at once produce at most one build.
-_REBUILD_MIN_INTERVAL = 5.0
 
 
 def _rebuild_when_stale(newest_ts: int | None = None) -> None:

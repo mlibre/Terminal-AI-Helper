@@ -202,12 +202,36 @@ def test_half_typed_command() -> None:
     if not SHELLS["bash"]:
         return
     print("a command name that is still being typed (bash completion)")
-    # No trailing space: tai's own completion is registered with `-o nospace`, and
-    # the shell's, which does add one, is only reached when tai has no answer —
-    # which is the next case.
-    probe("bash", TAB, "doc", "docker")
-    probe("bash", CTRL_E + CTRL_F, "doc", "docker ps")
-    probe("bash", CTRL_E + CTRL_F, "cdt", "cdt")
+    # Tab is the shell's own first-word completion here — tai sits on Tab only
+    # under TAI_COMPLETE_ALL=1, which the menu suite covers — so what this
+    # probe answers with is the machine's executable vocabulary, and it used
+    # to be whatever that happened to be. A machine that gained a `docx2txt`
+    # — a pip tool nothing in this repository ever asked for — saw the matches'
+    # common prefix fall from `docker` back to `doc`, readline lists instead of
+    # inserting then, and the assertion was measuring the machine's binary zoo
+    # rather than anything tai does. The PATH below is the test's own: two
+    # `doc*` executables that share the `docker` prefix, so the answer is the
+    # prefix, unambiguous per what was authored, and nothing else.
+    STUB = pathlib.Path("/tmp/tai/tai_stub_bin")
+    STUB.mkdir(exist_ok=True)
+    for name in ("docker", "dockerd"):
+        shim = STUB / name
+        if not shim.exists():
+            shim.write_text("#!/bin/sh\nexit 0\n")
+            shim.chmod(0o755)
+    # The plugin locates its own directory with `dirname` at source time and
+    # sorts the index keys and the learned lines with `sort` — the very path
+    # the accept key below reads — and the harness's own line-dump editor runs
+    # `cp`, so the stub carries those real binaries and nothing else.
+    need = {"cp", "dirname", "sort"}
+    for name in need:
+        real = shutil.which(name)
+        if real and not (STUB / name).exists():
+            os.symlink(real, STUB / name)
+    hermetic = {"PATH": str(STUB)}
+    probe("bash", TAB, "doc", "docker", env=hermetic)
+    probe("bash", CTRL_E + CTRL_F, "doc", "docker ps", env=hermetic)
+    probe("bash", CTRL_E + CTRL_F, "cdt", "cdt", env=hermetic)
 
 
 def test_fixture_matches_generator() -> None:

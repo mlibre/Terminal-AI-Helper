@@ -533,11 +533,13 @@ class Engine:
 
         repo_s = min((st.repo.get(repo, 0) if repo else 0) / max(st.freq, 1), 1.0)
         add("repository", W_REPO, repo_s,
-            f"{st.repo.get(repo, 0)} of {st.freq} runs in this repository")
+            (f"{st.repo.get(repo, 0)} of {st.freq} runs in this repository"
+             if repo else f"{st.freq} runs recorded, no repository asked"))
 
         branch_s = min((st.branch.get(branch, 0) if branch else 0) / max(st.freq, 1), 1.0)
         add("git branch", W_BRANCH, branch_s,
-            f"{st.branch.get(branch, 0)} of {st.freq} runs on this branch")
+            (f"{st.branch.get(branch, 0)} of {st.freq} runs on this branch"
+             if branch else f"{st.freq} runs recorded, no branch asked"))
 
         success_s = max(-0.5, min(1.0, (st.success - st.fail * 0.5) / max(st.freq, 1))) * 0.5 + 0.5
         add("success", W_SUCCESS, success_s,
