@@ -9,7 +9,8 @@ updating, and diagnostics.
     tai jev "<prefix>" --candidate "cmd" [--candidate "cmd" ...]
     tai record "<cmd>" [--cwd X --git Y --branch B --exit 0]
     tai refresh [--quiet]
-    tai update
+    tai update | upgrade   pull the latest version from GitHub and reinstall
+    tai version            print the release this install is running
     tai discover [tool ...]
     tai purge [--stale] [--rebuild/--no-rebuild]
     tai uninstall
@@ -195,10 +196,10 @@ def cmd_update(a) -> int:
     return subprocess.run(["bash", str(installer)]).returncode
 
 
-def _auto_maintain(total: int) -> None:
+def _auto_maintain(total: int, newest_ts: int = 0) -> None:
     """Rebuild at 100-command boundaries without blocking the shell."""
     if total % 100:
-        _rebuild_when_stale()
+        _rebuild_when_stale(newest_ts)
         return
     from tai.maintenance import _rebuild_quietly
     _rebuild_quietly()
@@ -216,13 +217,11 @@ def _auto_maintain(total: int) -> None:
 _REBUILD_MIN_INTERVAL = 5.0
 
 
-def _rebuild_when_stale() -> None:
-    import sqlite3
+def _rebuild_when_stale(newest_ts: int | None = None) -> None:
     import time
 
     from tai.index import index_path
     from tai.maintenance import _rebuild_quietly
-    from tai.store import db_path
 
     idx = index_path()
     if not idx.exists():
@@ -231,15 +230,24 @@ def _rebuild_when_stale() -> None:
     mtime = idx.stat().st_mtime
     if time.time() - mtime < _REBUILD_MIN_INTERVAL:
         return
-    try:
-        con = sqlite3.connect(str(db_path()))
+    # The newest row's timestamp arrives from the same connection that did the
+    # insert; asking the database again here would be a whole second connection
+    # per recorded command. The one caller that has no timestamp is the
+    # missing-index case above, which rebuilds before ever reading it.
+    newest = newest_ts
+    if newest is None:
+        import sqlite3
+
+        from tai.store import db_path
         try:
-            row = con.execute("SELECT MAX(ts) FROM commands").fetchone()
-        finally:
-            con.close()
-    except Exception:
-        return
-    newest = row[0] if row and row[0] else 0
+            con = sqlite3.connect(str(db_path()))
+            try:
+                row = con.execute("SELECT MAX(ts) FROM commands").fetchone()
+            finally:
+                con.close()
+        except Exception:
+            return
+        newest = row[0] if row and row[0] else 0
     if newest and newest > mtime:
         _rebuild_quietly()
 
@@ -286,8 +294,8 @@ def cmd_record(a) -> int:
     absent on purpose.
     """
     from tai.store import append_and_count
-    ok, total = append_and_count(a.command, cwd=a.cwd, repo=a.git,
-                                 branch=a.branch, exit_code=a.exit)
+    ok, total, newest = append_and_count(a.command, cwd=a.cwd, repo=a.git,
+                                         branch=a.branch, exit_code=a.exit)
     if not ok:
         if not (a.command or "").strip():
             print("tai: nothing to record — no command was given")
@@ -298,7 +306,7 @@ def cmd_record(a) -> int:
             print(f"tai: not recorded — {shown!r} looks like a secret or a "
                   "session-harness wrapper")
         return 1
-    _auto_maintain(total)
+    _auto_maintain(total, newest)
     _learn_on_use(a.command)
     print("✓ recorded")
     return 0
@@ -451,12 +459,30 @@ def cmd_jev(a) -> int:
     return 0
 
 
+def cmd_version(a) -> int:
+    """Say which release this is."""
+    version = _read_version()
+    print(f"tai {version}")
+    return 0
+
+
+def _read_version() -> str:
+    """The release version, from the VERSION file beside the checkout."""
+    try:
+        return (Path(__file__).resolve().parent.parent / "VERSION").read_text(
+            encoding="utf-8").strip()
+    except OSError:
+        return "(unknown)"
+
+
 _COMMANDS = {
     "suggest": cmd_suggest,
     "jev": cmd_jev,
     "record": cmd_record,
     "refresh": cmd_refresh,
     "update": cmd_update,
+    "upgrade": cmd_update,
+    "version": cmd_version,
     "discover": cmd_discover,
     "purge": cmd_purge,
     "uninstall": cmd_uninstall,
@@ -472,7 +498,47 @@ _COMMANDS = {
 }
 
 
+def _fast_record(argv: list[str]):
+    """Hand-parse `tai record …`'s five flags, so record skips argparse.
+
+    record runs once per command the user types for the life of an install, and
+    importing argparse costs about as much as the store write itself. This is
+    the same subset of parsing the record subparser accepts — anything else
+    (``--help``, a misspelled flag) falls through to argparse, which reports it
+    properly.
+    """
+    class _A: pass
+    a = _A()
+    a.command = ""
+    a.cwd = a.git = a.branch = ""
+    a.exit = 0
+    words: list[str] = []
+    it = iter(argv)
+    for tok in it:
+        if tok == "--cwd":
+            a.cwd = next(it, "")
+        elif tok == "--git":
+            a.git = next(it, "")
+        elif tok == "--branch":
+            a.branch = next(it, "")
+        elif tok == "--exit":
+            try:
+                a.exit = int(next(it, "0"))
+            except ValueError:
+                a.exit = 0
+        else:
+            words.append(tok)
+    a.command = " ".join(words)
+    return a
+
+
 def main() -> int:
+    argv = sys.argv[1:]
+    # `record` is the one command typed by proxy once per user command, so it
+    # answers before argparse is even imported. A word it does not recognise
+    # (--help, a typo) drops through to the real parser, which names the problem.
+    if argv and argv[0] == "record" and "--help" not in argv and "-h" not in argv:
+        return cmd_record(_fast_record(argv[1:]))
     p = argparse.ArgumentParser(
         prog="tai",
         description="learn the commands you run and suggest them as you type")
@@ -518,7 +584,8 @@ def main() -> int:
     rf = sub.add_parser("refresh",
                         help="import new history rows and rebuild the indexes")
     rf.add_argument("--quiet", action="store_true", help="print nothing on success")
-    sub.add_parser("update", help="pull the latest version and reinstall")
+    sub.add_parser("update", aliases=["upgrade"],
+                   help="pull the latest version and reinstall")
     d = sub.add_parser("discover", help="read a tool's --help and cache its vocabulary")
     d.add_argument("tools", nargs="*")
 
@@ -540,6 +607,7 @@ def main() -> int:
                    help="print the URL instead of opening the browser")
     sub.add_parser("eval", help="score the ranker against held-out history")
     sub.add_parser("eval-jev", help="the same, against a hosted model")
+    sub.add_parser("version", help="print the release this install is running")
 
     a = p.parse_args()
     # A subcommand the table does not know is a KeyError at the worst possible

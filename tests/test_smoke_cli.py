@@ -444,7 +444,7 @@ try:
     for _shell, _plugin in (("zsh", "plugins/tai.zsh"), ("bash", "plugins/tai.bash")):
         # A bash-only machine skips the zsh half rather than failing here; the
         # rest of this suite has already run, which is the point of the suite.
-        if _shell == "zsh" and not shutil.which("zsh"):
+        if _shell == "zsh" and not zsh_bin():
             continue
         _env = dict(os.environ, TAI_INDEX=_gen_index, TAI_HISTORY_FILES="")
         # zsh needs `-f` (no rc) and bash must not read a profile; both take the
@@ -502,3 +502,73 @@ assert _refused.returncode == 1, f"a tune that changed nothing reported success:
 assert "W_RECENCY" in _refused.stdout and "not written" in _refused.stdout, _refused.stdout
 assert _engine.read_text() == _before, "engine.py was rewritten by a run that could not tune it"
 print("OK — tune: writes only what it changed, and says so when it changed nothing.")
+
+# The one-shot paths are answered from a pickled engine keyed on the store
+# file, so a fresh process loads instead of rebuilding. Two properties matter:
+# a store that gained a row is reflected the moment the next process asks, and
+# a stale-or-disabled cache only ever costs time, never correctness.
+import tai.predictor as predictor  # noqa: E402
+from tai import engcache  # noqa: E402
+
+_predict_env = dict(os.environ, TAI_DB=os.environ["TAI_DB"],
+                    TAI_INDEX=os.environ["TAI_INDEX"], PYTHONPATH=str(REPO),
+                    TAI_NO_LEARN="1")
+_ok, _total, _newest = tai_store.append_and_count("git status --short", cwd="/tmp")
+assert _ok and _total and _newest > 0, "append_and_count must report the newest row's timestamp"
+predictor._E = None
+_first = predictor.suggest("git status --s")
+assert _first["choice"] == "git status --short", _first
+# The cache file is beside the store, named for it.
+assert engcache._cache_path(pathlib.Path(os.environ["TAI_DB"])).exists(), \
+    "a primed one-shot run must leave its engine cache beside the store"
+# A row the cache has never seen is answered by the *next* process: invalidate,
+# fork, ask. The new line must be the answer even though the pickle predates it.
+tai_store.append_and_count("git status -sb", cwd="/tmp")
+_fresh = subprocess.run(
+    [sys.executable, "-c",
+     "import sys; sys.path.insert(0, r'%s'); from tai.predictor import suggest; "
+     "print(suggest('git status -s')['choice'])" % REPO],
+    env=_predict_env, capture_output=True, text=True, timeout=120)
+assert "git status -sb" in _fresh.stdout, (_fresh.stdout, _fresh.stderr)
+# The cache is used, not just tolerated: with it armed, a patched builder that
+# would raise is never called.
+predictor._E = None
+_real_build = predictor._build_engine
+def _must_not_build():
+    raise AssertionError("the engine was rebuilt with a current cache present")
+predictor._build_engine = _must_not_build
+try:
+    _warm = predictor.suggest("git status --s")
+    assert _warm["choice"] == "git status --short", _warm
+finally:
+    predictor._build_engine = _real_build
+# And the opt-out switch rebuilds by hand the old way.
+predictor._E = None
+os.environ["TAI_NO_ENGINE_CACHE"] = "1"
+try:
+    _hand = predictor.suggest("git status --s")
+    assert _hand["choice"] == "git status --short", _hand
+finally:
+    os.environ.pop("TAI_NO_ENGINE_CACHE")
+    predictor._E = None
+print("OK — the engine disk cache: primed, invalidated by new rows, and optional.")
+
+# `record` parses its own five flags without argparse (it runs once per command
+# typed, forever), and anything it does not recognise falls through to the real
+# parser. Both are exercised through the CLI exactly as the plugins call it.
+_rec = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"),
+                       "record", "echo fast-path", "--cwd", "/tmp", "--exit", "0"],
+                      env=_predict_env, capture_output=True, text=True, timeout=60)
+assert "recorded" in _rec.stdout, (_rec.stdout, _rec.stderr)
+_help = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"),
+                        "record", "--help"],
+                       env=_predict_env, capture_output=True, text=True, timeout=60)
+assert _help.returncode == 0 and "--exit" in _help.stdout, _help.stdout
+assert tai_store.count()[0] > 0
+_ver = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"), "version"],
+                      env=_predict_env, capture_output=True, text=True, timeout=60)
+assert _ver.stdout.strip() == f"tai {(REPO / 'VERSION').read_text().strip()}", _ver.stdout
+_alias = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"), "--help"],
+                        env=_predict_env, capture_output=True, text=True, timeout=60)
+assert "upgrade" in _alias.stdout, "the `tai upgrade` alias is missing from --help"
+print("OK — record answers without argparse; version and the upgrade alias report.")

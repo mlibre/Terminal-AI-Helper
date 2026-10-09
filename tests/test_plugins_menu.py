@@ -914,7 +914,13 @@ def test_history_browsing_opens_no_list() -> None:
     s.settle()
     s.send(f"cd {MENU_DIR}" + ENTER)
     s.settle()
-    s.send("docker ps" + ENTER)
+    # A builtin line, not `docker ps`: this line is EXECUTED as it is typed
+    # (that is how it reaches the history), and the noise check below reads
+    # everything the session printed. A command that may not exist on the
+    # machine running the suite — docker is preinstalled on the GitHub CI
+    # image but is not a fact of every machine — would print
+    # "command not found" here and be noise the walk itself never caused.
+    s.send("print tzz-walk-end" + ENTER)
     s.settle()
     s.write(UP)
     s.settle()
@@ -933,7 +939,7 @@ def test_history_browsing_opens_no_list() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("and still no list", size, 0)
-    check("until the walk leaves the oldest line", line, "docker ps")
+    check("until the walk leaves the oldest line", line, "print tzz-walk-end")
     s.write(DOWN)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)

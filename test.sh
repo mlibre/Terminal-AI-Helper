@@ -46,9 +46,12 @@ syntax_check() {
   python3 -m py_compile tai/*.py tests/*.py &&
   bash -n plugins/tai.bash &&
   for f in plugins/bash/*.bash; do bash -n "$f" || return 1; done &&
-  if command -v zsh >/dev/null; then
-    zsh -n plugins/tai.zsh &&
-    for f in plugins/zsh/*.zsh; do zsh -n "$f" || return 1; done &&
+  # The bundled zsh in tests/bin is the floor: a machine with no system zsh
+  # still parses the plugins, exactly as the pty suite still runs.
+  local zsh_bin; zsh_bin="$(command -v zsh || { [[ -x tests/bin/zsh ]] && echo tests/bin/zsh; })"
+  if [[ -n "$zsh_bin" ]]; then
+    "$zsh_bin" -n plugins/tai.zsh &&
+    for f in plugins/zsh/*.zsh; do "$zsh_bin" -n "$f" || return 1; done &&
     echo "  ok   python, zsh and bash parse"
   else
     echo "  ok   python and bash parse (zsh absent, its checks are skipped)"
@@ -59,6 +62,7 @@ step "syntax"        syntax_check
 step "smoke"         python3 tests/test_smoke.py
 step "smoke cli"     python3 tests/test_smoke_cli.py
 step "smoke install" python3 tests/test_smoke_install.py
+step "deb"           python3 tests/test_deb.py
 step "jev"           python3 tests/test_jev.py
 step "web"           python3 tests/test_web.py
 if (( ! fast )); then

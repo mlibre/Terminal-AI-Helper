@@ -7,17 +7,12 @@ what to verify for a change: [docs/development.md](docs/development.md).
 
 Build **simple, fast, smart, delightful software** that works immediately.
 
-- Prefer embedded/local operation over daemons or servers.
-- No setup, manual configuration, or unnecessary dependencies.
-- Optimize for the common path: it should just work.
-- Keep the fast path fast and the smart path optional.
-- Prefer clear architecture over clever complexity.
-- Ship safe defaults and complete functionality out of the box.
-- Make failure recoverable and preserve the last good state.
-- Write clean, small, understandable code.
-- Omit information that does not help users decide, act, or recover. Implementation
-  details, disclaimers and negative claims belong only where they change
-  expectations or prevent misuse.
+- Embedded/local over daemons or servers; no setup, config, or dependencies.
+- Optimize the common path; keep the fast path fast and the smart path optional.
+- Clear architecture over clever complexity; safe defaults; complete out of the box.
+- Make failure recoverable and preserve the last good state; write clean, small,
+  understandable code; omit information that does not help users decide, act,
+  or recover.
 - **No cosmetic git commands.**
 
 ## Project direction
@@ -25,255 +20,199 @@ Build **simple, fast, smart, delightful software** that works immediately.
 `tai` is an embedded terminal autocomplete system for zsh and bash.
 
 - Native shell lookup on the keystroke path.
-- No daemon, socket, server, or per-keystroke Python process. The one server
-  is `tai web`: launched by the user, bound to 127.0.0.1, GET-only and
-  read-only, answering through the same engine as the prompt — never on the
-  keystroke path, never started by the plugins.
-- Learn from command history and local CLI `--help`/`man` data.
-- Use bounded Jev-like decisions for optional semantic reranking and safety.
-- Candidate generation may propose commands; code owns execution and safety.
+- Learn from command history and local CLI `--help`/`man` data; use bounded
+  Jev-like decisions for optional semantic reranking and safety; candidate
+  generation may propose commands, code owns execution and safety.
 - Keep the local experience fast, private, and useful without an account.
 
 ## Architecture rules
 
-- Keep the normal autocomplete path embedded and process-free.
-- Use SQLite for durable local data and generated native shell indexes for lookup.
+- Keep the normal autocomplete path embedded and process-free. No daemon,
+  socket, server, or per-keystroke Python process. The one server is `tai
+  web`: launched by the user, bound to 127.0.0.1, GET-only, read-only,
+  answering through the same engine as the prompt — never on the keystroke
+  path, never started by the plugins.
+- SQLite for durable local data; generated native shell indexes for lookup.
 - Rebuild indexes atomically; never leave the shell with a partial index.
-- A lock must record its holder and be reclaimable when that holder is gone.
-  The pid says whether the process is running, the boot id says whether that
-  pid can still mean the same process, and the age settles what neither can.
-- Batch bounded model questions. Never use an LLM on every keystroke.
-- Treat model output as uncertain input; validate, rank, and gate it in code.
-  Safety is decided by `decisions.unsafe_score`, never by the model's own
-  `destructive` score, which is the model grading its own homework.
+- A lock must record its holder and be reclaimable when that holder is gone:
+  the pid says whether the process is running, the boot id says whether that
+  pid can still mean the same process, the age settles the rest.
+- Batch bounded model questions; never an LLM on every keystroke. Treat model
+  output as uncertain input — validate, rank, and gate it in code. Safety is
+  decided by `decisions.unsafe_score`, never by the model's own `destructive`
+  score, which is the model grading its own homework.
 - Do not execute commands during discovery, indexing, or evaluation.
-- Add capabilities only when they preserve the fast path and low memory usage.
+- Add capabilities only when they preserve the fast path and low memory.
 - Avoid background services unless the user explicitly requests one.
-- **Read failures raise; read absence returns empty.** An unreadable store is
-  indistinguishable from a fresh install when `load_rows` returns `[]` on any
-  error, so let errors raise and refuse to publish over a good index when the
-  store is unreadable.
+- **Read failures raise; read absence returns empty.** An unreadable store
+  looks like a fresh install when `load_rows` returns `[]` on any error, so
+  let errors raise and refuse to publish over a good index.
 - **An index the shell has read is replaced, not merged.** The arrays are
-  emptied first, in both plugins, which is what makes the file the whole truth
-  rather than a growing superset of every index that shell has ever read.
+  emptied first, in both plugins — that is what makes the file the whole truth.
 
 ## Suggestion rules
 
-Ranking answers *what to show*; these rules answer *what is allowed to be shown*.
-Each one exists because of a reported failure.
+Ranking answers *what to show*; these answer *what is allowed to be shown*.
+Each exists because of a reported failure.
 
 - **A suggestion must extend the line.** A candidate identical to the typed
-  prefix is not an answer and must never win, in the shell plugins or in the
-  engine. Look candidates up by the longest *complete* word of the line, not by
-  the line itself: the shorter key holds a superset, and the exact key is a
-  recall trap (`ls -l` suggests nothing queried as its own key).
+  prefix is never an answer, in the plugins or the engine. Look candidates up
+  by the longest *complete* word of the line, not the line: the shorter key
+  holds a superset; the exact key is a recall trap.
 - **A suggestion must exist.** A candidate whose path is gone is dropped from
-  the index, and the check is conservative by design: a token that cannot be
-  read statically is *unknown*, and unknown never removes anything. Only `cd`
-  and `pushd`, only the first argument, and never a leading dash are judged as
-  paths — `cd -` is "go back".
+  the index, conservatively: a token that cannot be read statically is
+  *unknown*, and unknown never removes anything. Only `cd`/`pushd`, only the
+  first argument, never a leading dash — `cd -` is "go back".
 - **A directory argument is answered by directories that exist here.** After
-  `cd`/`pushd` no file is ever offered (the shell answers "not a directory"),
-  and a relative destination learned somewhere else is tested from the
-  directory the user stands in — one builtin stat in the plugins, the same
-  rule in the ghost, the menu, the loose glimpse and the completion.
-- **A buffer that arrived from the history is not typed.** The loose list is
-  for a line the user is composing: Up-then-Down through the history moves
+  `cd`/`pushd` no file is ever offered, and a relative destination learned
+  elsewhere is tested from the directory the user stands in — one builtin
+  stat, the same rule in the ghost, the menu, the loose glimpse, the
+  completion.
+- **A buffer that arrived from the history is not typed.** Up-then-Down moves
   history, and the arrows clear the typed flag on their way to the fallback.
   Opening the list on a recalled line armed it with itself as its only row —
   the reported "stuck in a list".
 - **The shell plugin and the Python path must agree.** `_tai_query`,
   `tai suggest`, and the file-root rule in `plugins/zsh/files.zsh`,
-  `plugins/bash/files.bash`, and `tai/fresh.py` are three implementations of
-  one rule set: change them together, and keep a case in both test suites.
-  A fourth copy of the rule is a test that runs the other three, not a fourth
-  copy.
+  `plugins/bash/files.bash`, `tai/fresh.py` are three implementations of one
+  rule set: change them together, keep a case in both test suites. A fourth
+  copy of a rule is a test that runs the other three.
 - **One decision, one function — and a shared environment variable means one
-  name, not one per consumer.** `TAI_INDEX` is one variable with one meaning,
-  and each consumer reading it as its own file is a silent split.
+  name.** `TAI_INDEX` is one variable with one meaning; each consumer reading
+  it as its own file is a silent split.
 - **Generated vocabulary ranks below observed usage.** A convention's score is
   *only* its rank in the corpus, in a band below anything the history saw —
-  never a bonus added on top of a real score, which is not a tiebreak but a
-  promotion. The band cannot grow into the observed range, and a test asserts it
-  on real built scores.
+  never a bonus on top, which is a promotion, not a tiebreak. A test asserts
+  the band on real built scores.
 - **A relative move is not a destination.** `..`, `.`, `-` rank below every
   real destination and are never removed; with no destination in the history
-  the rule stands aside, because ranking a candidate below nothing would invent
-  an order rather than express one.
+  the rule stands aside.
 - **An installed command always has an answer.** `tool --help` for a tool the
-  history has never seen is honest; inventing a flag is not. Unused tools are
-  not indexed — the plugin already answers them, and an index copy would cost
-  startup time for an answer the shell produces for free.
+  history never saw is honest; inventing a flag is not. Unused tools are not
+  indexed — the plugin answers them for free.
 - **A wrapper must not hide what is behind it.** A closed list — `sudo`,
   `doas`, `nohup`, `time`, `nice`, `ionice`, `stdbuf`, `command` — is
-  transparent: rank the line behind the wrapper, put the wrapper back. Keep
-  `env`, `xargs`, and `sudo FOO=1 cmd` out, and try the wrapper *before* the
-  installed-name `--help` fallback.
+  transparent: rank the line behind it, put the wrapper back. Keep `env`,
+  `xargs`, and `sudo FOO=1 cmd` out; try the wrapper before the installed-name
+  `--help` fallback.
 - **Learning has to show up where the user is.** A plugin re-reads the index
-  when the file is newer than its stamp, and that is asserted through a real
-  prompt, not by re-sourcing.
+  when the file is newer than its stamp, asserted through a real prompt.
 - **Do not rank what you cannot measure.** Generated vocabulary keeps the
-  order the help lists it in, capped, and a real command outranks it. **A
-  regular expression is code** — check the class you wrote is the class you
-  meant, and check what a transformation reads from the value it just replaced.
-- **How the list is drawn.** Four rules, each a reported failure, all in "How
-  the menu is drawn" in [docs/development.md](docs/development.md). Assert all
-  four on an emulated screen that keeps attributes, not on the plugin's
-  arrays — the text is right whether or not the colour is.
-- **A candidate from the filesystem is raw text; a candidate from the history
-  is shell text, and they are written by the same key.** The quoting flag
-  travels with the candidate (`_TAI_FILES_Q`, `_TAI_MENU_Q`, bash's one
-  `_tai_quote` at the accept site), and the hint on screen stays unquoted —
-  a preview should look like the file, not like a quoting rule. A learned line
-  is already shell text; quoting it again corrupts it.
-- **A guard placed after the thing it guards cannot fire.** Ask the question
-  of the state *before* the build-up: `from_history - stale`.
-- **An answer a shell prints with no newline is printed onto the prompt.**
-  Suggestions end with a newline; a command substitution strips it anyway, so
-  the omission only ever breaks the terminal it printed to.
+  help's own order, capped. **A regular expression is code**: check the class
+  you wrote is the class you meant, and what a transformation reads from the
+  value it just replaced.
+- **How the list is drawn.** Four rules, each a reported failure, in "How the
+  menu is drawn" in [docs/development.md](docs/development.md). Assert on an
+  emulated screen that keeps attributes, not on the plugin's arrays.
+- **A candidate from the filesystem is raw text; one from the history is shell
+  text, and they are written by the same key.** The quoting flag travels with
+  the candidate (`_TAI_FILES_Q`, `_TAI_MENU_Q`, bash's one `_tai_quote`), and
+  the hint on screen stays unquoted. A learned line is already shell text;
+  quoting it again corrupts it.
+- **A guard placed after the thing it guards cannot fire.** Ask the question of
+  the state *before* the build-up: `from_history - stale`.
+- **An answer a shell prints with no newline lands on the prompt.** Suggestions
+  end with a newline; a command substitution strips it anyway.
 - **A file the shell sources is code, so check whose it is before running it.**
   Read the writer's first line plus the shape of the first data line and refuse
-  on mismatch, with one line naming the file and `tai refresh`. The writer
-  `os.replace`s a temporary file, so a torn index cannot exist. **A guard is
-  only as good as the state it inspects.**
-- **A safety gate has to cover the spellings of what it covers, not one of
-  them.** `rm -rf`, `rm -fr`, `rm --recursive --force` are one intent; so are
-  `kill 1234` and `docker system prune -af`. The rules stay blunt: a positive
-  costs a suggestion, a negative offers `rm -rf /`, so `echo 'rm -rf /'`
-  scoring 1.0 is correct and must not be "fixed".
+  on mismatch, naming the file and `tai refresh`. The writer `os.replace`s a
+  temporary file, so a torn index cannot exist. **A guard is only as good as
+  the state it inspects.**
+- **A safety gate must cover the spellings of what it covers.** `rm -rf`,
+  `rm -fr`, `rm --recursive --force` are one intent; so are `kill 1234` and
+  `docker system prune -af`. A positive costs a suggestion, a negative offers
+  `rm -rf /`; `echo 'rm -rf /'` scoring 1.0 is correct and must not be "fixed".
 - **A diagnostic must not invent the failure it exists to report.** A first
-  run, an empty store, and a broken store are different facts — `sqlite3.connect`
-  creating the file it inspects is how they get conflated.
+  run, an empty store, and a broken store are different facts;
+  `sqlite3.connect` creating the file it inspects is how they get conflated.
 - **A plugin loaded from an rc file must not change the shell's errexit.**
-  Suspend it across the sources, and restoring is the part that matters — a
-  guard that leaves `set -e` off is worse than the bug it prevents. Bash's
-  statements were measured to succeed with `set -e` on and get no guard.
-  **A sourced file is a guest: anything it does to the shell's options outlives
-  the load, and anything it lets fail outlives the file.**
+  Suspend it across the sources and restore after — a guard that leaves
+  `set -e` off is worse than the bug it prevents. **A sourced file is a
+  guest: its effect on the shell's options outlives the load.**
 - **The command a user runs when something is broken has to be able to say
-  what.** The error path is the one a person reads at their worst moment, so it
-  is the path written for a person.
+  what.** The error path is written for a person.
 - **A suggestion has to be reachable by the key, in the mode the terminal is
-  in — and a key nobody can find is a feature nobody has.** ZLE emits terminfo's
-  `smkx`, so `→` sends `ESC O C` in an active prompt; the plugin replaces the
-  `forward-char` widget (both byte modes), with `zle .forward-char` as the
-  fallback. The test that catches it sends `ESC O C`. Ask which keys the user
-  actually presses, keep a second binding for keys terminals disagree about
-  (`Ctrl-Space` is NUL everywhere, so also `Ctrl-T`), and drive every candidate
-  key through a real pty before offering it — `bindkey` wants `'^T'` or
-  `$'\e[Z'`, not a raw control byte.
-- **The key that fills in a completion must not also run it.** Taking a
-  completion and executing it are two decisions. `Enter` takes; a second
-  `Enter` runs. It was asked for after it shipped the other way — do not
-  "fix" it back without being asked.
-- **One completion is not a list.** A single entry is taken, not drawn:
-  there is nothing to choose between. The previous rule drew a one-entry
-  menu whenever the name was not already in front of the user, so `exe`
-  — a script a PATH matched but the history never saw — was drawn where
-  every other shell simply completes; the user can read one entry. Read the hint out of `POSTDISPLAY`, not out of
-  `_TAI_BEST`: the promise being read may be another plugin's. A learned
-  name and a path of the same name are one entry — de-duplicate on the name
-  without its trailing slash, learned form winning.
+  in — and a key nobody can find is a feature nobody has.** ZLE emits
+  terminfo's `smkx`, so `→` sends `ESC O C` in an active prompt; the plugin
+  replaces the `forward-char` widget (both byte modes) with `zle .forward-char`
+  as fallback, and keeps a second binding for keys terminals disagree about
+  (`Ctrl-Space` is NUL, so also `Ctrl-T`). Drive every key through a real pty
+  first — `bindkey` wants `'^T'` or `$'\e[Z'`, not a raw control byte.
+- **The key that fills in a completion must not also run it.** `Enter` takes; a
+  second `Enter` runs. It was asked for after it shipped the other way — do
+  not "fix" it back without being asked.
+- **One completion is not a list.** A single entry is taken, not drawn — the
+  previous rule drew a one-entry menu for a PATH match the history never saw,
+  where every shell simply completes. Read the hint out of `POSTDISPLAY`, not
+  `_TAI_BEST`: the promise may be another plugin's. A learned name and a path
+  of the same name are one entry — de-duplicate on the name without its
+  trailing slash, learned form winning.
 - **A `Tab` press is not the keystroke path, but it is not free either.** A
   glob and a hash expansion are fine; testing every name on `PATH` to display
-  ten was measured at tens of milliseconds. `$commands` is what a `PATH`
-  directory *offers*, not what can run — ask about the path, not the name.
+  ten was tens of milliseconds. `$commands` is what a `PATH` directory
+  *offers* — ask about the path, not the name.
 - **One key, one question.** `→` takes the hint, `Ctrl-Space` opens the list,
-  `Tab` cycles files/folders/options and never touches the hint. The one
-  exception is the `--help` fallback for a command the history has never seen:
-  the hint is drawn for `→`, and `Tab` answers the typed word with the honest
-  menu. The test that matters is the pair — `docker` lists, `git <Tab>` lists
-  without writing a hint.
+  `Tab` cycles and never touches the hint. The one exception is the `--help`
+  fallback for an unseen command: the hint is drawn for `→`, and `Tab` answers
+  the typed word with the honest menu.
 - **The list and the hint are the same lookup.** Both read `_tai_lines`;
-  duplicating the index lookup is how a rule ends up working in one and not
+  duplicating the lookup is how a rule ends up working in one shell and not
   the other.
-- **A fixture that passes proves only that its inputs match its expectations.**
-  The plugin fixture imports `WORD_KEY_MAX_DEPTH` and `WORD_CANDIDATE_CAP`
-  from `tai.index` instead of restating them, and
-  `test_fixture_matches_generator` asserts the two writers agree — the fixture
-  is the generator's own output, not a stand-in.
-- **A test nobody calls is not a test.** Splitting the pty suite gave every
-  test a `main()`, and the one that had never had one failed on its first run.
-  The runner is part of the test.
-- **Shared harness state is a fourth implementation of every rule.** Each pty
-  session names its own dump file (`$TAI_TEST_DUMP`) so a shell left over from
-  a killed run cannot answer for the current one, and the pty is given the
-  size `Screen` emulates. A read from shared state is a claim about every
-  writer, and only a path no other shell was handed is a claim about one.
-- **Before believing a screen assertion, ask what the screen would have to be
-  wrong about for the plugin to be innocent.** A double-width character takes
-  two columns, the second a continuation: occupied, so a region reaching it is
-  seen, and invisible in `lines()`, because the character to its left is the
-  whole story.
 - **Rank first, then cap.** "Newest first" capped with `sorted(glob(...))[:N]`
-  was capped alphabetically before mtime was considered, and answered without
-  the newest file. zsh gets it free with `(om)`; bash pays one
-  `ls -t -1 --zero -N` per root.
-- **A quoted subscript range on an array is one element, not N.**
-  `ranked=( "${ranked[1,$cap]}" )` joins the list into one cell; the safe
+  was capped alphabetically before mtime was considered. zsh gets it free with
+  `(om)`; bash pays one `ls -t -1 --zero -N` per root.
+- **A quoted subscript range on an array is one element, not N.** The safe
   spelling is the offset form `"${arr[@]:0:$cap}"`.
 - **The remembered line the user means goes above the remembered line that
   nearly is.** A line holding every typed word verbatim ranks first; the
-  in-order fuzzy match — the typo tolerance — is the tail it falls into when
-  no exact line exists.
+  in-order fuzzy match is the tail it falls into when no exact line exists.
 - **`~word` is git's revision syntax as often as it is a home directory.**
-  Judge a token a path only when `~` is alone, followed by `/`, or names a
-  real account; every other `~word` is UNKNOWN, which removes nothing. Ask of
-  any resolver: what did the *shell* do with this token?
+  Judge a token a path only when `~` is alone, followed by `/`, or names a real
+  account; every other `~word` is UNKNOWN, which removes nothing. Ask of any
+  resolver: what did the *shell* do with this token?
 - **Filter what a rule removes from every place it is read, not the one you
   found.** A stale command must not follow a live one, and must not be a key;
   a key with no answer left is not written at all.
 - **Coerce at the boundary.** A `Path` bound into SQLite raises, and the
-  `except` reports "not stored" — so `cwd` is coerced before binding, not
-  trusted to the annotation.
+  `except` reports "not stored" — so `cwd` is coerced before binding.
 - **Measure the index's own load time; it is a startup cost.** A 10k-line
-  history's index took 572ms to source; pair appends, no dead keys, and bounded
-  key depth cut it to ~222ms. `tai bench` prints `index source` per shell with
-  the file's size — what is written down is the measurement, because the
-  number rebuilds stale. Two savings were measured and deliberately not taken;
-  neither is worth a format change in the part of the system with the least
-  margin.
-- **A shell parameter is not an environment variable, and a plugin is the only
-  thing that can bridge that.** `HISTFILE` is not exported, so `tai refresh`
-  saw nothing; the plugins export `TAI_HISTORY_FILES` at load time. A tool that
-  needs to know something only the interactive shell knows must be told at
-  startup.
+  history's index took 572ms to source; pair appends, no dead keys, and
+  bounded key depth cut it to ~222ms. `tai bench` prints `index source` per
+  shell with the file's size — what is written down is the measurement.
+- **A shell parameter is not an environment variable; a plugin is the only
+  bridge.** `HISTFILE` is not exported, so the plugins export
+  `TAI_HISTORY_FILES` at load time.
 - **Never write to a shared slot to silence yourself, and never read your own
   copy of what the user can see.** tai does not clear `POSTDISPLAY` it did not
-  draw (`_TAI_DREW` is whose), and the keys that take hints read
-  `_tai_shown_hint`. Making tai's hints the visible ones is a configuration
-  change — `~/.zshrc`, the installer, and `tai uninstall`, which gives back
-  whatever it took. On Manjaro there is no line to comment out: the plugin is
-  sourced by a system file, so "is it loaded" has to ask zsh.
+  draw (`_TAI_DREW` is whose), and the hint keys read `_tai_shown_hint`.
+  Making tai's hints the visible ones is a configuration change — `~/.zshrc`,
+  the installer, and `tai uninstall`, which gives back whatever it took; on
+  Manjaro "is it loaded" has to ask zsh.
 - **A command name is a word being written, so the lookup answers it
-  unfinished.** `_TAI_FIRST` is keyed by the whole first word, so an unfinished
-  name is a miss; the plugins take the exact name first, then the names that
+  unfinished.** The plugins take the exact name first, then the names that
   begin with it (zsh `(I)`, bash a loop), bounded by `_TAI_PREFIX_KEYS`. A
   word nothing begins with stays silent rather than reaching for the nearest
   name, and a glob character is not a prefix. Check the other implementation
   before writing down why two things differ.
 - **A path is answered by the filesystem, because the history cannot know it.**
   A learned argument that is still a file here keeps the top place; the roots
-  are the current directory and the download directories and not their
+  are the current directory and the download directories, not their
   subdirectories; a file that does not start with the word being typed is not
-  an answer to it; a line ends in a file when the command means one — and a
-  bare name is unreadable by shape, while a history row carries no directory.
+  an answer to it; a line ends in a file when the command means one.
 - **`[[ x == *"*" ]]` is a different question in bash and zsh.** `*' '` does
-  not mean "ends with a space" the way it reads, and two tests that look like
-  the same thing are the ones to suspect.
-
+  not mean "ends with a space" the way it reads; two tests that look like the
+  same thing are the ones to suspect.
 - **The stem a menu cuts may only be text the line already shows.** A stem is
-  a reminder, not an abbreviation: `cd tm` with every entry under `tmp/` drew
-  `vllm` under a line reading `cd tm`, which is a name nobody typed. A stem
-  that runs past the typed word is clamped away, even when a boundary makes it
-  look cuttable (`wombat ` under `womb`).
-- **A fresh listing is a snapshot with a TTL, not a per-keystroke glob.** The
-  file answer reads each root's newest files from a one-second snapshot and
-  falls back to one direct listing when the snapshot answers nothing — a fresh
-  glob of a 5,000-entry home directory measured 6.3ms, on every keystroke.
+  a reminder, not an abbreviation — `cd tm` with every entry under `tmp/` drew
+  `vllm` under a line reading `cd tm`. A stem that runs past the typed word is
+  clamped away, even when a boundary makes it look cuttable (`wombat ` under
+  `womb`).
+- **A fresh listing is a snapshot with a TTL, not a per-keystroke glob.** Each
+  root's newest files are held for one second, with one direct listing as the
+  fallback — a fresh glob of a 5,000-entry home measured 6.3ms per keystroke.
 - **Keep every regex hot.** Alternating two `=~` patterns per line recompiles
-  both on every line that fails the first: a no-match query on 3,300 lines
-  went 6ms → 73ms. One tier per pass, one pattern per pass.
+  both on every line that fails the first: 6ms → 73ms on a 3,300-line no-match
+  query. One tier per pass, one pattern per pass.
 - **A record may not wait a hundred records to be worth suggesting.** The
   background rebuild also fires when the index on disk is older than the
   newest stored row, past a short debounce — otherwise a command typed now
@@ -284,38 +223,28 @@ Each one exists because of a reported failure.
 
 - **Unbounded per-line cost is a freeze on the keystroke path.** The loose
   glimpse's fuzzy match ran one letters-as-a-glob pattern per typed word
-  against every stored line, and zsh's glob evaluator on real learned lines —
-  long `aria2c` URLs, packing lists — turns that into minutes, once per
-  keystroke that the prefix lookup cannot answer. Measured: the same word set
-  on a real 7k-line history, >60s before, ~0 s after. Every literal of the
-  word must be present for the pattern to match, and a quoted substring test
-  is a C strstr, so run presence first; and run the words with no pattern at
-  all first of all, so the cheapest vetoes — `-g` on an npm install line,
-  a pasted path fragment — throw the line out before any pattern is
+  against every stored line, and on real learned lines — long `aria2c` URLs —
+  that was minutes, per keystroke. Run the cheapest vetoes first (presence
+  without a pattern is a C strstr; words with no pattern at all first of all),
+  and every literal of the word must be present before any pattern is
   compiled.
-- **A paste is not a query.** Text that arrives at once — wrapped in the
-  bracketed-paste envelope, or a paste-sized jump in one redraw — has not
-  been read by anyone, so the loose glimpse stays quiet under it until one
-  typed or removed character re-arms the list. `Down` still asks for it
-  directly. The ghost hint is not touched: a prefix answer is one line, not a
-  screen.
+- **A paste is not a query.** Text that arrives at once — the bracketed-paste
+  envelope, or a paste-sized jump in one redraw — has not been read by anyone,
+  so the loose glimpse stays quiet until one typed or removed character
+  re-arms the list. `Down` still asks for it directly; the ghost hint is not
+  touched.
 - **Answers travel in globals, never in `$( )`, on the keystroke path.** In
   zsh a fork is the one cost a redraw cannot pay; in bash `bind -x` makes a
-  function's stdout the terminal, so the `$( )` that used to wrap every lookup
-  was both a fork per keypress and the only thing keeping the answer off the
-  screen. The zsh question ("buffer, last command, index generation") is also
-  remembered beside its answer, so a redraw that did not change the line
-  restores it instead of recomputing it.
-- **What the plugin paints is terminal text, never the stored line.** A
-  stored command can carry raw control bytes — the real history held two
-  rows that were actually bracketed-paste envelopes — and POSTDISPLAY goes
-  to the terminal literally, so an ESC inside a glimpse was an escape
-  sequence on the wire. The store refuses them at record time, the engine
-  drops them at build, and both plugins filter at the candidate lists
-  (zsh `_tai_lines`/`_tai_loose`/`_tai_keep_fresh`, bash `_tai_best`/
-  `_tai_keep_fresh`), because a shell sources the index it *finds*, not
-  the one it should have. A candidate is only allowed to land on screen if
-  it is still text there.
+  function's stdout the terminal, so a `$( )` around a lookup was both a fork
+  per keypress and the only thing keeping the answer off the screen. The zsh
+  question is also remembered beside its answer, so a redraw that did not
+  change the line restores it instead of recomputing it.
+- **What the plugin paints is terminal text, never the stored line.** A stored
+  command can carry raw control bytes, and POSTDISPLAY goes to the terminal
+  literally, so an ESC inside a glimpse was an escape sequence on the wire.
+  The store refuses them at record time, the engine drops them at build, and
+  both plugins filter at the candidate lists — a candidate is only allowed to
+  land on screen if it is still text there.
 
 A change is ready when it is useful, understandable, safe, tested, documented,
 and does not make the default experience slower or harder.

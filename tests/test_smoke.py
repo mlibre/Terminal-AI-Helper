@@ -497,7 +497,7 @@ from tai.store import append_and_count  # noqa: E402
 for cmd, n in (("tai install", 6), ("tai uninstall", 4), ("tai sintall", 1),
                ("git status", 5), ("git stash", 1)):
     for _ in range(n):
-        ok, _total = append_and_count(cmd)
+        ok, _total, _newest = append_and_count(cmd)
         assert ok, cmd
 built = build()
 assert built >= 5, built

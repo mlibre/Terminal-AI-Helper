@@ -33,6 +33,25 @@ def _stale_for(eng: Engine) -> set:
     return stale_in(eng, os.getcwd())
 
 
+def _build_engine() -> Engine:
+    """Build the engine from the store, or the seed vocabulary on a broken one.
+
+    A broken store must not become an empty ranking here either, but this path
+    answers a question and cannot exit: it says what it could not do and falls
+    through to the seed vocabulary, which is the honest answer for a history
+    tai has not been able to read.
+    """
+    eng = Engine()
+    try:
+        eng.build_from_rows(load_rows(20000))
+    except Exception as e:
+        from tai.store import schema_note
+        import sys
+        print(f"tai: cannot read the history database: "
+              f"{schema_note() or e}", file=sys.stderr)
+    return eng
+
+
 def suggest(prefix: str = "", cwd: str = "", repo: str = "",
             last_commands: list | None = None, limit: int = 1,
             temp: float | None = None, branch: str = "") -> dict:
@@ -42,21 +61,16 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     # these, and a literal here meant a tuned temperature changed the engine and
     # not the one-shot path that calls it.
     from tai.engine import TEMP_DEFAULT
+    from tai.store import db_path
     if temp is None:
         temp = TEMP_DEFAULT
     if _E is None:
-        _E = Engine()
-        # A broken store must not become an empty ranking here either, but this
-        # path answers a question and cannot exit: it says what it could not do
-        # and falls through to the seed vocabulary, which is the honest answer
-        # for a history tai has not been able to read.
-        try:
-            _E.build_from_rows(load_rows(20000))
-        except Exception as e:
-            from tai.store import schema_note
-            import sys
-            print(f"tai: cannot read the history database: "
-                  f"{schema_note() or e}", file=sys.stderr)
+        # A fresh process rebuilds the engine from SQLite unless a disk cache
+        # taken by an earlier process is still current — see tai/engcache.py.
+        # The path-liveness set is deliberately NOT cached: it answers against
+        # the directory this process runs in, which changes call to call.
+        from tai.engcache import get
+        _E = get(db_path(), _build_engine)
         _STALE = _stale_for(_E)
     res = _E.suggest(prefix=prefix or "", cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [], limit=limit, temp=temp,

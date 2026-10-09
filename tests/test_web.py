@@ -24,7 +24,7 @@ from tai.store import append_and_count, count
 
 for _cmd, _n in (("git status", 3), ("docker ps", 2), ("ls -la", 1)):
     for _ in range(_n):
-        ok, _ = append_and_count(_cmd, cwd="/home/u/proj")
+        ok, _, _ = append_and_count(_cmd, cwd="/home/u/proj")
         assert ok, f"the fixture command was not stored: {_cmd}"
 _rows, _distinct = count()
 assert _rows == 6 and _distinct == 3, f"seed wrote {_rows}/{_distinct}"

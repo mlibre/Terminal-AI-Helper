@@ -39,6 +39,11 @@ pathlib.Path(SCRATCH_DB).parent.mkdir(parents=True, exist_ok=True)
 for _p in (SCRATCH_DB, SCRATCH_DB + "-wal", SCRATCH_DB + "-shm"):
     pathlib.Path(_p).unlink(missing_ok=True)
 
+# One shell resolver for both test families: the pty suites and the smoke
+# suites must answer "is there a zsh here?" the same way, or a machine with
+# only the bundled copy runs half its suites and skips the other half.
+from plugin_env import zsh_bin  # noqa: E402
+
 from tai.engine import Engine  # noqa: E402
 from tai.store import db_path  # noqa: E402
 import tai.store as tai_store  # noqa: E402

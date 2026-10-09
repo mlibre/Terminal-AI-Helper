@@ -20,7 +20,42 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))     # `_index_rows` reads tai.paths to mark file args
 PLUGINS = {"bash": REPO / "plugins" / "tai.bash", "zsh": REPO / "plugins" / "tai.zsh"}
-SHELLS = {"bash": shutil.which("bash"), "zsh": shutil.which("zsh")}
+
+
+def zsh_bin() -> str | None:
+    """The zsh this suite runs: TAI_ZSH, then the system's, then the bundled one.
+
+    `tests/bin/` carries a compiled, ready-to-use zsh (built with every module
+    builtin, curses linked statically — the only dynamic dependency is libc),
+    so the whole pty suite runs on a machine with no zsh installed and without
+    compiling or downloading one first. The system zsh wins when there is one:
+    it is the shell the product actually ships to, and CI keeps its apt
+    install. The bundled copy is the floor, not the ceiling.
+    """
+    custom = os.environ.get("TAI_ZSH", "").strip()
+    if custom and os.access(custom, os.X_OK):
+        return custom
+    found = shutil.which("zsh")
+    if found:
+        return found
+    machine = os.uname().machine
+    for name in (f"zsh-{sys.platform}-{machine}", "zsh"):
+        bundled = REPO / "tests" / "bin" / name
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            # Prepend so install.sh's own `command -v zsh` and the index
+            # zcompile see the same shell this suite answers to.
+            os.environ["PATH"] = f"{bundled.parent}{os.pathsep}{os.environ.get('PATH', '')}"
+            # The two hook helpers the plugins autoload ship beside the
+            # binary; a bundled zsh with no system around it has nowhere
+            # else to find them.
+            fns = REPO / "tests" / "bin" / "zsh-functions"
+            if fns.is_dir():
+                os.environ["FPATH"] = str(fns)
+            return str(bundled)
+    return None
+
+
+SHELLS = {"bash": shutil.which("bash"), "zsh": zsh_bin()}
 DB = pathlib.Path("/tmp/tai/tai_plugins_test.db")
 EDITOR = pathlib.Path("/tmp/tai/tai_dump_line.sh")
 # Where a bash test reads COMPREPLY back from. Its own file, not the dump

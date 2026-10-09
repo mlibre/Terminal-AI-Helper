@@ -2,8 +2,11 @@
 #
 # One main branch drives everything: each push that turns green gets its own
 # tag and a GitHub release marking the tree it shipped from. Tests run first;
-# a red tree never becomes a release. The tag is a single incrementing number
-# derived from main's history length, prepended with the date for meaning.
+# a red tree never becomes a release. The tag comes from the VERSION file at
+# the repo root — `v1.0.0`, not a date-with-a-hash — and when the same version
+# ships more than once, a build number is appended (`v1.0.0-2`), so a push is
+# never held up by a tag that already exists. Every release carries a ready to
+# install .deb built from exactly the tree that passed the tests.
 name: release
 
 on:
@@ -19,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # tag numbering counts main's history
+          fetch-depth: 0   # the tag dedup compares against existing tags
 
       - name: Install shells
         run: sudo apt-get update && sudo apt-get install -y zsh
@@ -27,14 +30,19 @@ jobs:
       - name: Run all test suites
         run: ./test.sh
 
+      - name: Build the .deb package
+        run: scripts/build_deb.sh
+
       - name: Create and push tag
         id: tag
         run: |
           set -e
-          count=$(git rev-list --count HEAD)
-          short=$(git rev-parse --short HEAD)
-          date=$(date -u +%Y.%m.%d)
-          tag="v${date}-${count}-${short}"
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v$version"
+          n=1
+          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+            n=$((n+1)); tag="v$version-$n"
+          done
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           git tag "$tag"
           git push origin "$tag"
@@ -44,5 +52,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "${{ steps.tag.outputs.tag }}"
+          name: "tai ${{ steps.tag.outputs.tag }}"
+          files: dist/*.deb
           generate_release_notes: true

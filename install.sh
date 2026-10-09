@@ -27,6 +27,17 @@ echo "→ learning from your history, building the index…"
 # previous index. `tai refresh` says so itself when it cannot rebuild.
 python3 "$REPO_DIR/tai/cli.py" refresh --quiet || true
 
+# Byte-compile the zsh plugins the same way the index builder compiles the
+# index: a `.zwc` beside a script halves zsh's parse cost at every startup,
+# and zsh falls back to the text file whenever the timestamps disagree, so a
+# stale or half-written compilation can never shadow new code. Best-effort
+# twice over: no zsh, or a read-only checkout, simply skips it.
+if command -v zsh >/dev/null 2>&1 && [ -w "$REPO_DIR/plugins/zsh" ]; then
+  for _f in "$REPO_DIR"/plugins/zsh/*.zsh; do
+    zsh -fc "zcompile $_f" >/dev/null 2>&1 || true
+  done
+fi
+
 # Whether zsh-autosuggestions is actually loaded in the user's zsh, asked of zsh
 # rather than guessed from the filesystem: on Manjaro the plugin is sourced by
 # /usr/share/zsh/manjaro-zsh-prompt, not by anything in ~/.zshrc, so there is no

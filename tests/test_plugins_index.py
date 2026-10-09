@@ -124,14 +124,25 @@ def test_recording() -> None:
             s = Session(shell, env)
             for cmd in typed:
                 s.send(cmd + "\n")   # newline submits, so it really runs
-            s.close()
-            # Recording runs detached, so the rows land some time after the shell
-            # exits. Wait for the expected rows rather than for a stopwatch, and
-            # only when recording is on.
+            # Recording runs detached, so the rows land some time after the
+            # prompt returns — and the detached process is a child of this
+            # session's terminal. Waiting for the rows while the session is
+            # still open is what makes the assertion about recording and not
+            # about the race between a python startup and the pty going away:
+            # close() tears down the master, and the kernel's SIGHUP to the
+            # session's group is then free to kill a record that has not
+            # exec'd yet. A session that exits NORMALLY never sends that
+            # SIGHUP, so the product never sees this race — only this
+            # harness could lose it.
             if disabled:
+                s.close()
+                # Recording is off, so nothing will ever land: the absence
+                # is checked after the session is gone, on the final state.
                 check(f"{shell} writes nothing when disabled", rows(db), [])
             else:
-                check(f"{shell} records when enabled", await_rows(db, typed), [])
+                missing = await_rows(db, typed)
+                s.close()
+                check(f"{shell} records when enabled", missing, [])
 
 
 

@@ -369,7 +369,7 @@ print("OK — install: two lines and one command, and no ✓ it cannot back up."
 # source the plugin in one. A machine without zsh skips from here instead of
 # failing — the rest of test.sh still runs, which is the deal test.sh offers a
 # bash-only box.
-if not shutil.which("zsh"):
+if not zsh_bin():
     print("SKIP — the remaining install checks need the zsh binary; none here.")
     sys.exit(0)
 

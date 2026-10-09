@@ -173,8 +173,8 @@ def schema_note() -> str:
 
 
 def append_and_count(cmd: str, cwd: str = "", repo: str = "", branch: str = "",
-                     exit_code: int = 0) -> tuple[bool, int]:
-    """Store one command, and return (inserted, total_rows).
+                     exit_code: int = 0) -> tuple[bool, int, int]:
+    """Store one command, and return (inserted, total_rows, newest_ts).
 
     `cwd` is stored whole. It used to be cut to 500 characters, which is the one
     field the path check reads as evidence. A cut path is either not a directory
@@ -182,10 +182,15 @@ def append_and_count(cmd: str, cwd: str = "", repo: str = "", branch: str = "",
     directory, and the command was then judged against a place the user was never
     in. PATH_MAX is 4096 anyway, so the bound bought nothing. `repo` and `branch`
     are labels rather than evidence, so those are still bounded.
+
+    `newest_ts` rides along on purpose. Every record used to open a *second*
+    connection afterwards to ask MAX(ts) — the freshness question the rebuild
+    debounce answers — which is a WAL open, a schema check and a query paid by
+    every command the user types, forever. One aggregate, one round trip.
     """
     cmd = (cmd or "").strip()
     if not is_recordable(cmd):
-        return False, count()[0]
+        return False, count()[0], 0
     # SQLite binds text and numbers and refuses everything else, and a `Path`
     # for `cwd` is an ordinary thing for a caller to pass — `REPO` in the tests
     # is one. It raised `ProgrammingError` inside the `except` below, which
@@ -200,10 +205,11 @@ def append_and_count(cmd: str, cwd: str = "", repo: str = "", branch: str = "",
                  int(time.time())),
             )
             con.commit()
-            total = con.execute("SELECT COUNT(*) FROM commands").fetchone()[0]
-        return True, total
+            row = con.execute(
+                "SELECT COUNT(*), MAX(ts) FROM commands").fetchone()
+            return True, row[0], row[1] or 0
     except Exception:
-        return False, count()[0]
+        return False, count()[0], 0
 
 
 def purge_unrecordable() -> int:
