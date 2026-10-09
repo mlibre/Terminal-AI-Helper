@@ -29,8 +29,10 @@ def menu_entries(drawn: str) -> list[str]:
 
     Columns are padded to the widest name in the list, so the spacing between
     entries is not a fixed number of characters and cannot be asserted on. The
-    entries themselves never contain a space — a menu completes one word — which
-    is what makes a run of spaces a reliable separator here.
+    entries themselves never contain a space — a menu completes one word —
+    which is what makes a run of spaces a reliable separator here. The one
+    exception is the first-word menu's learned rows, which are whole lines and
+    are asserted as drawn text, not through this split.
     """
     flat = drawn.replace("\\n", " ")
     return [name for name in re.split(r" +", flat.strip()) if name]

@@ -22,7 +22,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from tai.engine import Engine, W_FREQ, W_RECENCY, W_SUCCESS
+from tai.engine import (Engine, LEN_PENALTY_DIV, MAX_LEN_PEN, W_FREQ,
+                        W_RECENCY, W_SUCCESS)
 from tai.knowledge import load_all as load_tool_knowledge
 from tai.paths import destinations_first, takes_file
 from tai.seed import SEED_COMMANDS
@@ -33,9 +34,10 @@ from tai.typo import shadow_map
 # an observation, so it has no evidence at all and its score is *only* its place
 # in the corpus — a band below anything the history actually saw.
 #
-# The band is the corpus length times the step, so 60 seeds span 0.01..0.60, and
-# the lowest real command scores 0.833 (one run, long ago, failed). That gap is
-# the whole invariant: generated vocabulary ranks below observed usage.
+# The band is the corpus length times the step, so 60 seeds span 0.003..0.18,
+# and the weakest real command scores 0.233 (one run, long ago, failed, and
+# long enough to pay the full length penalty below). That gap is the whole
+# invariant: generated vocabulary ranks below observed usage.
 #
 # This used to be a flat SEED_BONUS of 1500 added on top of a seed's real score.
 # That is not a tiebreak, it is a promotion, and it was large enough to invert
@@ -52,14 +54,20 @@ from tai.typo import shadow_map
 # The step has to be big enough to survive ordinary noise, or the ordering it is
 # meant to express stops being real: one hour of recency decay is worth ~9 milli,
 # so a 1-milli step meant "the user ran `ls -la` an hour ago" silently demoted
-# `ls -la` below `ls -l`. 10 keeps `ls -la` ahead of `ls -l` on a cold history
-# while every real command stays ahead of both.
-SEED_RANK_STEP = 10
+# `ls -la` below `ls -l`. It also has to stay *below* the weakest real command:
+# with the engine's length penalty baked in (below), a one-run, long-ago, failed
+# line scores as little as 0.833 − 0.6 = 0.233, so 60 seeds spaced at 10 milli
+# once reached 0.60 — above the floor, and the convention outranked the
+# observation it exists to stand in for. 3 keeps every seed below 0.18, real
+# commands above the band on every history, and the seeds themselves strictly
+# ordered by a step that no longer has to fight anything.
+SEED_RANK_STEP = 3
 
 # Vocabulary generated from a tool's `--help` is a guess until the history says
-# otherwise, so it ranks below every command the user has actually run. A real
-# command scores at least 3*log1p(1)/log1p(20) + 0.6*0.5 = 0.988, so anything
-# under that can only come from a generated candidate.
+# otherwise, so it ranks below what the same words would score had the history
+# actually run them: its base score is multiplied by COLD_FACTOR, one and the
+# same down-scaling for every generated line. The history is the only thing
+# that turns a guess into a rank of its own.
 COLD_FACTOR = 0.6
 # A tool that appears in the history is worth its full verb and flag dump; one
 # that does not is worth two lines, because the name alone is an echo of what is
@@ -302,6 +310,20 @@ def build(max_commands: int = 20000) -> int:
         score = W_FREQ * freq + W_RECENCY * recency + W_SUCCESS * success
         if cmd in generated and cmd not in seed_set:
             score *= COLD_FACTOR
+        # The engine's length penalty, baked into the scores the plugins read —
+        # without it the two rankers disagree about exactly the lines a
+        # first-word ghost has to choose between: a three-run `go mod download`
+        # outranked a two-run `go mod vendor` here while `tai suggest` and the
+        # dashboard put the shorter, fresher line first, so the hint offered
+        # the download and the panel said vendor. The penalty is linear in the
+        # line's length and its *difference* between two candidates is
+        # (len(a) − len(b)) / LEN_PENALTY_DIV whatever prefix the engine is
+        # asked, so subtracting it once here — against a one-character query,
+        # the shortest there is — reproduces the engine's per-query ordering,
+        # not merely its formula. The constants are the engine's own (tai tune
+        # writes them back into engine.py, not here), and pure seeds keep
+        # their corpus band: a convention has no length, only a place.
+        score -= min(max(0, len(cmd) - 1) / LEN_PENALTY_DIV, MAX_LEN_PEN)
         # Integer milli-score keeps comparisons native and process-free in zsh/bash.
         scored.append((int(round(score * 1000)), cmd))
     # One-off typos rank just below the line they shadow — tai/typo.py owns

@@ -113,6 +113,38 @@ def _suggest(qs: dict) -> dict:
                                  limit=6)
 
 
+def _explain(qs: dict) -> dict:
+    """Why one suggestion scores what it scores — the panel's arithmetic.
+
+    Answered under the same lock, from the same engine, with the same question
+    the suggest box asked: the probability is read back from a fresh suggest so
+    the number explained is the number on screen, never a recomputation that
+    could have drifted while the user typed.
+    """
+    from tai import predictor
+    prefix = (qs.get("q", [""])[0] or "")[:500]
+    cmd = (qs.get("cmd", [""])[0] or "")[:500]
+    cwd = (qs.get("cwd", [""])[0] or "")[:4096]
+    last = [s.strip() for s in (qs.get("last", [""])[0] or "").split(";") if s.strip()]
+    if not cmd:
+        return {"cmd": cmd, "prefix": prefix, "found": False}
+    with _LOCK:
+        res = predictor.suggest(prefix=prefix, cwd=cwd, last_commands=last[:3],
+                                limit=6)
+        exp = predictor.explain(prefix, cmd, cwd=cwd, last_commands=last[:3])
+    if exp is None:
+        return {"cmd": cmd, "prefix": prefix, "found": False}
+    exp["found"] = True
+    exp["prob"] = None
+    exp["rank"] = None
+    for i, c in enumerate(res.get("choices", []), 1):
+        if c.get("cmd") == cmd:
+            exp["prob"] = c.get("prob")
+            exp["rank"] = i
+            break
+    return exp
+
+
 def _state_locked() -> dict:
     with _LOCK:
         return _state()
@@ -140,6 +172,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, body, "application/json")
             elif u.path == "/api/suggest":
                 body = json.dumps(_suggest(parse_qs(u.query))).encode()
+                self._send(200, body, "application/json")
+            elif u.path == "/api/explain":
+                body = json.dumps(_explain(parse_qs(u.query))).encode()
                 self._send(200, body, "application/json")
             else:
                 self._send(404, b'{"error": "no such route"}', "application/json")
@@ -251,6 +286,17 @@ _PAGE = r"""<!doctype html>
   .ans td.cmd{font:13px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
   .pbar{height:6px;background:var(--bar);border-radius:3px;opacity:.85}
   .num{color:var(--dim);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  button.why{border:1px solid var(--line);background:transparent;color:var(--dim);
+             border-radius:6px;padding:2px 9px;font:inherit;font-size:11.5px;cursor:pointer}
+  button.why:hover{color:var(--fg);border-color:var(--dim)}
+  tr.xrow td{background:var(--in);padding:10px 14px;border-top:1px dashed var(--line)}
+  .xhead{font-size:12.5px;margin-bottom:7px;color:var(--fg)}
+  .xhead b{color:var(--acc)}
+  table.xt{width:100%;border-collapse:collapse}
+  table.xt td{border:none;padding:3px 14px 3px 0;font-size:12px;vertical-align:top}
+  table.xt td:first-child{color:var(--fg);white-space:nowrap}
+  table.xt td:last-child{color:var(--dim)}
+  .pos{color:var(--acc)} .neg{color:var(--bad)}
   #recent td{padding:7px 10px 7px 0;font-size:12.5px;border-top:1px solid var(--line);vertical-align:top}
   #recent tbody tr:hover{background:var(--hov)}
   td.cmd,td.cwd{font:12.5px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
@@ -298,7 +344,7 @@ _PAGE = r"""<!doctype html>
 <div class="foot">the server binds 127.0.0.1 only and answers GETs alone;
 nothing on this page can write to the store. Feed it the way you feed the
 prompt: just keep using the shell, or <code>tai refresh</code> in a terminal.
-Click a suggestion to copy it.</div>
+Click a suggestion to copy it; <code>why</code> opens its arithmetic.</div>
 </div>
 <div id="toast"></div>
 
@@ -336,6 +382,56 @@ function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toastTm); toastTm = setTimeout(() => t.classList.remove("show"), 1300);
 }
+
+// Why this score: one fetch per open, the breakdown rendered through
+// textContent like everything else — the details quote the user's own
+// directories and commands, and innerHTML would make that an XSS again.
+function why(btn, cmd) {
+  const tr = btn.closest("tr");
+  const open = tr.nextElementSibling;
+  if (open && open.classList.contains("xrow")) { open.remove(); return; }
+  document.querySelectorAll("#ans tr.xrow").forEach(x => x.remove());
+  const u = "/api/explain?q=" + encodeURIComponent($("q").value) +
+            "&cwd=" + encodeURIComponent($("cwd").value) +
+            "&cmd=" + encodeURIComponent(cmd);
+  btn.textContent = "…";
+  fetch(u).then(r => r.json()).then(x => {
+    btn.textContent = "why";
+    const row = document.createElement("tr"); row.className = "xrow";
+    const td = document.createElement("td"); td.colSpan = 5;
+    if (!x.found) {
+      td.textContent = "nothing recorded for this line — its score is a seed or a guess";
+    } else {
+      const head = document.createElement("div"); head.className = "xhead";
+      const b = document.createElement("b"); b.textContent = "score " + x.score;
+      head.appendChild(b);
+      if (x.prob != null)
+        head.appendChild(document.createTextNode("  →  " + (x.prob * 100).toFixed(1) + "% of the answer"));
+      if (x.rank != null)
+        head.appendChild(document.createTextNode("  ·  rank " + x.rank));
+      if (x.stale)
+        head.appendChild(document.createTextNode("  ·  hidden as stale (its path is gone)"));
+      td.appendChild(head);
+      const t = document.createElement("table"); t.className = "xt";
+      x.factors.forEach(f => {
+        const r2 = document.createElement("tr");
+        const a = document.createElement("td"); a.textContent = f.label;
+        const c2 = document.createElement("td");
+        c2.textContent = (f.contrib >= 0 ? "+" : "") + f.contrib.toFixed(3);
+        c2.className = "num " + (f.contrib >= 0 ? "pos" : "neg");
+        const d = document.createElement("td"); d.textContent = f.detail;
+        r2.append(a, c2, d); t.appendChild(r2);
+      });
+      td.appendChild(t);
+      const foot = document.createElement("div"); foot.className = "k";
+      foot.style.marginTop = "7px";
+      foot.textContent = "the % is this score beside every other candidate's (softmax over the panel)";
+      td.appendChild(foot);
+    }
+    row.appendChild(td); tr.after(row);
+  }).catch(() => { btn.textContent = "why"; $("net").style.display = "block"; });
+}
+
 function copy(cmd) {
   const short = cmd.length > 40 ? cmd.slice(0, 40) + "…" : cmd;
   const done = () => toast("copied  " + short);
@@ -405,13 +501,16 @@ function suggest() {
         `<td class="cmd">${E(c.cmd)}</td>` +
         `<td style="width:90px"><span class="pbar" style="display:block;width:${Math.max(2, 100 * (c.prob || 0) / (top || 1))}%"></span></td>` +
         `<td class="num">${((c.prob || 0) * 100).toFixed(1)}%</td>` +
-        `<td class="num">${c.score}</td></tr>`).join("");
+        `<td class="num">${c.score}</td>` +
+        `<td style="width:1px"><button class="why" data-w="${i}" aria-label="why this score">why</button></td></tr>`).join("");
       $("ans").innerHTML =
         `<div class="top">${E(q)}${ghost}</div>` +
         `<div class="meta">engine ${(res.latency_ms || 0).toFixed ? (res.latency_ms || 0).toFixed(2) : res.latency_ms}ms · ${res.source || "ranking"}</div>` +
         (rows ? `<table>${rows}</table>` : `<div class="k">no answer</div>`);
       $("ans").querySelectorAll("tr[data-i]").forEach(tr =>
         tr.addEventListener("click", () => copy(cmds[+tr.dataset.i])));
+      $("ans").querySelectorAll("button.why").forEach(btn =>
+        btn.addEventListener("click", ev => { ev.stopPropagation(); why(btn, cmds[+btn.dataset.w]); }));
     }).catch(() => { $("net").style.display = "block"; });
   }, 120);
 }

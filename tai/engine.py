@@ -470,6 +470,145 @@ class Engine:
             "count": len(cand_names),
         }
 
+    # -- explain ----------------------------------------------------------
+    def explain(self, prefix: str, cmd: str, cwd: str = "", repo: str = "",
+                branch: str = "", last_commands: list | None = None,
+                now_ts: int | None = None) -> dict | None:
+        """Why `cmd` scores what it scores for `prefix` — the factors, named.
+
+        The dashboard's question: the panel says `got log` is 7.4% and the
+        user asks why. Every contribution the scoring loop above adds is
+        listed here with its weight, its value and the evidence it came from,
+        in the loop's own order and from the same module constants, so `tai
+        tune` moves both at once.
+
+        A twin of the loop, not a shared function: the loop is the hot path
+        (hundreds of candidates per suggest, two-stage prefilter and cap
+        around the arithmetic), while explain answers for one candidate and
+        can afford to speak. What keeps the twins honest where a shared
+        function would keep them identical is the test that pins explain's
+        total against suggest's score for the same candidate on a seeded
+        engine (tests/test_web.py).
+
+        Returns None for a command the engine never saw. A candidate that
+        does not start with the prefix is reported as the near-miss it can
+        only have been, with the typo penalty applied.
+        """
+        st = self.cmds.get(cmd)
+        if st is None:
+            return None
+        now = now_ts or int(time.time())
+        hb = hour_bucket(now)
+        last_commands = last_commands or []
+        prev = last_commands[-1].strip() if last_commands else ""
+        prefix = prefix or ""
+
+        factors: list[dict] = []
+
+        def add(label: str, weight: float, value: float, detail: str) -> None:
+            factors.append({"label": label, "weight": weight, "value": round(value, 4),
+                            "contrib": round(weight * value, 4), "detail": detail})
+
+        age_days = max(0, (now - (st.last_ts or now)) / 86400)
+        recency = math.exp(-age_days / _TAU)
+        freq_s = min(math.log1p(st.freq) / _LOG1P20, 1.0)
+        add("frequency", W_FREQ, freq_s, f"run {st.freq}× (log1p scaled at 20)")
+        add("recency", W_RECENCY, recency,
+            f"last run {age_days:.1f}d ago (half-life 14d)")
+
+        cwd_s = min((st.cwd.get(cwd, 0) if cwd else 0) / max(st.freq, 1), 1.0)
+        if cwd:
+            cwd_detail = f"{st.cwd.get(cwd, 0)} of {st.freq} runs in this directory"
+            if cwd_s == 0 and st.cwd:
+                base = cwd.rstrip("/").split("/")[-1]
+                for k, v in st.cwd.items():
+                    if k.rstrip("/").split("/")[-1] == base:
+                        cwd_s = min(0.5 * v / max(st.freq, 1), 0.5)
+                        cwd_detail = (f"half credit: {v} of {st.freq} runs "
+                                      f"in a directory also named {base}/")
+                        break
+        else:
+            cwd_detail = f"{st.freq} runs recorded, no directory asked"
+        add("this directory", W_CWD, cwd_s, cwd_detail)
+
+        repo_s = min((st.repo.get(repo, 0) if repo else 0) / max(st.freq, 1), 1.0)
+        add("repository", W_REPO, repo_s,
+            f"{st.repo.get(repo, 0)} of {st.freq} runs in this repository")
+
+        branch_s = min((st.branch.get(branch, 0) if branch else 0) / max(st.freq, 1), 1.0)
+        add("git branch", W_BRANCH, branch_s,
+            f"{st.branch.get(branch, 0)} of {st.freq} runs on this branch")
+
+        success_s = max(-0.5, min(1.0, (st.success - st.fail * 0.5) / max(st.freq, 1))) * 0.5 + 0.5
+        add("success", W_SUCCESS, success_s,
+            f"{st.success} ok / {st.fail} failed")
+
+        hour_s = (st.hour[hb] / max(st.freq, 1)) if st.freq else 0.0
+        add("hour of day", W_HOUR, hour_s,
+            f"{st.hour[hb]} of {st.freq} runs in this hour of the day")
+
+        follow = self.seq.get(prev, None) if prev else None
+        max_follow = max(follow.values()) if follow else 0
+        seq_s = (follow.get(cmd, 0) / max_follow) if (follow and max_follow) else 0.0
+        seq_n = follow.get(cmd, 0) if follow else 0
+        if prev:
+            add("follows the last command", W_SEQ, seq_s,
+                f"followed `{prev}` {seq_n}×"
+                + ("" if seq_s else "; never this command"))
+        else:
+            add("follows the last command", W_SEQ, 0.0, "no last command in the question")
+
+        # token n-gram bonus: P(next token | context) — the loop's own test,
+        # including the partial-token shape a mid-word prefix produces.
+        tok_s = 0.0
+        tok_detail = "no next word behind the prefix"
+        ptoks = prefix.split()
+        tri_ctx = tuple(ptoks[-2:]) if len(ptoks) >= 2 else None
+        bi_ctx = ptoks[-1] if ptoks else None
+        if prefix and cmd.startswith(prefix):
+            rest = cmd[len(prefix):].lstrip()
+            if rest:
+                nxt = rest.split()[0]
+                tok_detail = f"`{nxt}` has never followed the typed words"
+                if tri_ctx and tri_ctx in self.token_trigram:
+                    tc = self.token_trigram[tri_ctx]
+                    tok_s = max(tok_s, tc.get(nxt, 0) / max(sum(tc.values()), 1))
+                    tok_detail = (f"`{nxt}` followed `{' '.join(tri_ctx)}` "
+                                  f"{tc.get(nxt, 0)} of {sum(tc.values())}×")
+                if bi_ctx and bi_ctx in self.token_bigram:
+                    bc = self.token_bigram[bi_ctx]
+                    cand = 0.7 * bc.get(nxt, 0) / max(sum(bc.values()), 1)
+                    if cand > tok_s:
+                        tok_s = cand
+                        tok_detail = (f"`{nxt}` followed `{bi_ctx}` "
+                                      f"{bc.get(nxt, 0)} of {sum(bc.values())}×")
+        add("next-word evidence", W_TOKEN, tok_s, tok_detail)
+
+        extra_len = max(0, len(cmd) - len(prefix))
+        len_pen = min(extra_len / LEN_PENALTY_DIV, MAX_LEN_PEN)
+        factors.append({"label": "length", "weight": -1.0, "value": round(len_pen, 4),
+                        "contrib": -round(len_pen, 4),
+                        "detail": f"{extra_len} characters past the prefix"
+                                  + (", at the penalty cap" if len_pen >= MAX_LEN_PEN else "")})
+
+        score = sum(f["contrib"] for f in factors)
+        if cwd and repo and st.cwd.get(cwd, 0) and st.repo.get(repo, 0):
+            score += EXACT_CTX_BONUS
+            factors.append({"label": "directory and repository together", "weight": 1.0,
+                            "value": EXACT_CTX_BONUS, "contrib": EXACT_CTX_BONUS,
+                            "detail": "run here, in this repository"})
+        near_miss = not cmd.startswith(prefix)
+        if near_miss:
+            score -= TYPO_PENALTY
+            factors.append({"label": "near-miss", "weight": -1.0, "value": TYPO_PENALTY,
+                            "contrib": -TYPO_PENALTY,
+                            "detail": f"does not start with `{prefix}`; offered as a typo of it"})
+
+        return {"cmd": cmd, "prefix": prefix, "score": round(score, 3),
+                "freq": st.freq, "last_ts": st.last_ts,
+                "age_days": round(age_days, 2), "near_miss": near_miss,
+                "factors": factors}
+
 
 def _rewrap(result: dict, head: str, prefix: str) -> dict:
     """Put the wrapper back on a suggestion made for the line behind it."""

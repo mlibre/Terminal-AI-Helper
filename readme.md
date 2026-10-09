@@ -44,7 +44,7 @@ file is sourced again — same after `tai update`.
 
 | key                     | what it does                                                      |
 | ----------------------- | ----------------------------------------------------------------- |
-| `Tab`                   | cycle files, folders and options; never the hint                   |
+| `Tab`                   | cycle files, folders and options; on a bare first word the learned lines come first, ranked like the panel |
 | `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection |
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line  |
 | `→`                     | take the hint at the end of the line, else move right             |
@@ -54,7 +54,10 @@ file is sourced again — same after `tai update`.
 
 One question per key: `Tab` cycles completions, `Ctrl-Space` (also on
 `Ctrl-T`, which every terminal can send) opens the list to look at; the hint
-is `→`'s, never `Tab`'s. Pasted text never opens the list on its own — a
+is `→`'s, never `Tab`'s — but on a line that is still one word, `Tab` opens
+with the learned lines themselves, whole and in the dashboard's own order,
+with the installed names below. Pasted text never opens the list on its own —
+a
 paste is not a query — and one typed or removed character brings it back.
 Taking a directory from a list is not a request to go there, so `Enter` takes
 and stops; a second runs it. The selected entry is highlighted, a directory
@@ -192,7 +195,10 @@ tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
 One page, served by the tool itself: a box where typing a prefix answers
 exactly what the prompt would answer — through the same engine, not a copy —
 plus the most-run commands, the latest recorded rows, and the state of the
-store and both indexes. It binds `127.0.0.1` only, answers GETs only, and can
+store and both indexes. Every suggestion row carries a `why` that opens its
+arithmetic: the factors and the evidence behind the score, so a rank that
+surprises can be asked what it saw. It binds `127.0.0.1` only, answers GETs
+only, and can
 write nothing: the database is your shell history. A light/dark toggle sits in
 the corner and the choice is remembered; clicking a suggestion copies it; and
 multi-kilobyte history rows arrive bounded, so the page stays quick on stores

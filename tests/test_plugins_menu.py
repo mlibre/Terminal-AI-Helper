@@ -1012,6 +1012,87 @@ def test_cd_answers_directories() -> None:
     s.close()
 
 
+def test_first_word_menu() -> None:
+    """Tab on a one-word line offers the learned lines first, whole.
+
+    The report: typing `g` hinted one learned line, Tab replaced it with a
+    screen of installed command names, and the first suggestion was `godot .`
+    where the dashboard panel ranked `go mod vendor` first. The menu's learned
+    source looks the index up by the text *in front of* the word, and a first
+    word has none — so the learned lines were never offered, and one head per
+    key was the only learned candidate anywhere. Now the first-word menu opens
+    with the learned whole lines, merged by score across their keys — the
+    panel's own order, the `go` key's second line included — and the installed
+    names keep their place below. Committing a learned row onto a one-word
+    line writes the whole line, because for a first word the completion and
+    the line it came from are one span.
+
+    Both shells are asserted, because the two implementations of the rule are
+    where the drift would start.
+    """
+    fixture = ["go mod vendor", "go mod download", "godot .", "got log",
+               "goose web", "git status"]
+    learned = ["go mod vendor", "go mod download", "godot .", "got log",
+               "goose web"]
+    try:
+        write_index(fixture)
+
+        if SHELLS["zsh"]:
+            print("zsh first-word menu")
+            s = Session("zsh")
+            s.run(f"cd {MENU_DIR}")
+            s.send("g")
+            check("the ghost hints the engine's winner",
+                  s.suggestion().split(" PD=")[0], "SUG=[o mod vendor]")
+            # The dump above abandons the line, so the word is typed again.
+            s.send("g")
+            s.write(TAB)
+            s.settle()
+            line, drawn, size, idx = s.menu(clear=False)
+            # Whole learned lines are the rows here, and menu_entries' space
+            # split would tear them into words; the rows are asserted as the
+            # text the user reads, in the order it is painted.
+            at = [drawn.find(row) for row in learned]
+            check("Tab opens with the learned lines, ranked like the panel",
+                  all(a >= 0 for a in at) and at == sorted(at), True)
+            check("the installed names still follow",
+                  any(e not in learned for e in drawn.split("\\n") if e), True)
+            check("the line is untouched while the menu stands", line, "g")
+            check("no noise from the first-word menu", s.noise(), [])
+            # The selection is armed on an opened menu; Enter takes the row
+            # and writes the whole line, the panel's promise.
+            s.write(ENTER)
+            s.settle()
+            check("Enter takes the whole line", s.line(), "go mod vendor")
+            s.write("\x15")
+            s.close()
+
+        if SHELLS["bash"]:
+            print("bash first-word completion")
+            s = Session("bash", env_extra={"TAI_COMPLETE_ALL": "1"})
+            s.run(f"cd {MENU_DIR}")
+
+            def offered(line: str) -> list[str]:
+                REPLY.unlink(missing_ok=True)
+                s.run(f'COMP_LINE={line!r}; COMP_POINT={len(line)}; COMPREPLY=(); '
+                      f'_tai_complete; printf "%s\\n" "${{#COMPREPLY[@]}}" '
+                      f'"${{COMPREPLY[@]}}" > {REPLY}')
+                s.wait_file(REPLY, f"the completion list for {line!r}")
+                got = REPLY.read_text().splitlines()
+                return got[1:] if got and got[0].isdigit() else got
+
+            got = offered("g")
+            check("bash offers the learned lines first, ranked",
+                  got[:len(learned)], learned)
+            check("and the installed names after", len(got) > len(learned), True)
+            check("a complete word keeps its lines first",
+                  offered("go")[:len(learned)], learned)
+            check("no noise from the bash listing", s.noise(), [])
+            s.close()
+    finally:
+        write_index()         # every other suite reads the default fixture
+
+
 def main() -> int:
     setup()
     test_bash_menu()
@@ -1025,6 +1106,7 @@ def main() -> int:
     test_unpaintable_rows_are_never_drawn_bash()
     test_history_browsing_opens_no_list()
     test_cd_answers_directories()
+    test_first_word_menu()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")

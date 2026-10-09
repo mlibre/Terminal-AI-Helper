@@ -144,3 +144,12 @@ _TAI_FILES_Q=()
 # Command names considered for a half-typed command name, in one lookup. A key
 # holds at most WORD_CANDIDATE_CAP lines, so this bounds the lines too.
 _TAI_PREFIX_KEYS=64
+
+# How deep one first-word key is read, and how many learned whole lines Tab
+# offers ahead of the installed names (_tai_first_lines in lookup.bash). The
+# zsh menu keeps the same two bounds (_TAI_MENU_FIRST_DEPTH / _TAI_MENU_FIRST_CAP):
+# one head per key is the ghost's contract, and a menu that showed only the
+# keys' heads would hide exactly the lines the web panel ranks beside
+# the winner.
+_TAI_FIRST_LINES_DEPTH=3
+_TAI_FIRST_LINES_CAP=16

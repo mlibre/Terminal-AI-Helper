@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -64,6 +65,8 @@ assert 'id="net"' in page, \
     "a failed poll must show the reconnect banner, not blank panels"
 assert 'localStorage.setItem("tai-theme"' in page, \
     "the theme choice is persisted under one name, not just flipped"
+assert "button" in page and 'class="why"' in page, \
+    "every suggestion row carries the why toggle that opens its arithmetic"
 print("OK — the page serves, names its box, and points at its own API.")
 
 # --- state: the numbers on the page are the store's numbers ------------------
@@ -118,6 +121,39 @@ assert code == 200 and json.loads(body) is not None, "an empty prefix must not 5
 code, body = get("/api/suggest?q=" + "x" * 600)
 assert code == 200, "an over-long prefix must be cut, not an error"
 print("OK — /api/suggest answers from the engine, and abuses stay 200.")
+
+# --- explain: why one suggestion scores what it scores -----------------------
+# The panel says `git status` is 39% and the user asks why. The route answers
+# with the factors the scoring loop added, and the one number that must agree
+# is the total: explain is a twin of the hot loop, not a shared function, so
+# this pin is what keeps the twins from drifting — for every candidate the
+# panel offers, explain's total is the panel's score.
+code, body = get("/api/suggest?q=git%20st")
+panel = json.loads(body)["choices"]
+assert panel, "the panel has something to explain"
+for choice in panel:
+    q = urllib.parse.urlencode({"q": "git st", "cmd": choice["cmd"]})
+    code, body = get("/api/explain?" + q)
+    exp = json.loads(body)
+    assert code == 200 and exp["found"], exp
+    assert exp["cmd"] == choice["cmd"], exp
+    assert abs(exp["score"] - choice["score"]) < 0.01, (exp["score"], choice)
+    assert exp["prob"] == choice["prob"], (exp["prob"], choice["prob"])
+    assert exp["rank"] is not None and exp["rank"] >= 1, exp
+    labels = [f["label"] for f in exp["factors"]]
+    assert "frequency" in labels and "recency" in labels, labels
+    assert any(f["label"] == "length" and f["contrib"] <= 0
+               for f in exp["factors"]), "length only ever subtracts"
+    total = sum(f["contrib"] for f in exp["factors"])
+    assert abs(total - exp["score"]) < 0.01, (total, exp["score"])
+q = urllib.parse.urlencode({"q": "git st", "cmd": "no such command"})
+code, body = get("/api/explain?" + q)
+assert json.loads(body)["found"] is False, "an unrecorded line explains to nothing"
+code, body = get("/api/explain?cmd=")
+assert json.loads(body)["found"] is False, "an empty cmd is a question about nothing"
+code, body = get("/api/explain?q=" + "x" * 600 + "&cmd=" + "y" * 600)
+assert code == 200, "an over-long explain question is cut, not an error"
+print("OK — /api/explain names the factors, and its total is the panel's score.")
 
 # --- read-only, full stop ------------------------------------------------------
 assert post("/") == 405, "a POST must meet an explicit read-only refusal"

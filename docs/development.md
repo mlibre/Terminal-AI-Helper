@@ -7,13 +7,16 @@ for the rules that came out of reported failures, read
 ## Layout
 
 ```text
-tai/engine.py       ranker; the W_* weights live at the top and `tai tune` rewrites them
+tai/engine.py       ranker; the W_* weights live at the top and `tai tune` rewrites them;
+                    `explain` names the factors behind one candidate's score, pinned to
+                    suggest's totals by the web suite
 tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`;
                     `shadow_map` ranks a rare near-duplicate line under its stronger twin
 tai/store.py        SQLite log (WAL), schema, oldest-first loader, history import
 tai/paths.py        path liveness, `cd` destinations, "does this line end in a file"
 tai/fresh.py        the files a path argument could be — the one-shot half
-tai/web.py          the read-only localhost dashboard: one page, two GET routes
+tai/web.py          the read-only localhost dashboard: one page, three GET routes
+                    (state, suggest, explain)
 tai/knowledge.py    read-only CLI discovery from --help / man / __complete
 tai/helptext.py     what a tool's help text is read into: verbs, flags, one probe
 tai/maintenance.py  the rebuild lock, reclaimable by pid, boot id and age

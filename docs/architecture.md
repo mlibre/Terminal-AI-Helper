@@ -97,6 +97,16 @@ top of
 one-shot paths, keyed on the store file itself — a new row invalidates it
 (`tai/engcache.py`); the keystroke path never touches it.
 
+The length penalty is the one term the index bakes. Its difference between
+two candidates is the same whatever prefix the engine is asked with, so
+subtracting it at build time makes the scores the plugins read order exactly
+as the engine would, for every one-word question — without it, a three-run
+long line out-ranked a two-run short one in the prompt while the dashboard
+said the opposite, and the hint named a line the user's own panel did not.
+The per-query terms — the directory you stand in, the hour of day, what ran
+before — stay per-query: a snapshot cannot carry them, and the dashboard's
+`why` panel names them when a rank surprises.
+
 Three rules are about what may be *ranked* rather than how, and they live in
 `tai/paths.py` because they are about whether a candidate still exists. Each
 is a promise in [AGENTS.md](../AGENTS.md) and a check in the suites: path

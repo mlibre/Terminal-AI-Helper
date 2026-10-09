@@ -551,6 +551,64 @@ eng3.add("git status", ts=1_700_000_000)
 assert shadow_map(eng3) == {}, shadow_map(eng3)
 print("OK — `tai un` answers `tai uninstall` even when every signal ties.")
 
+# The report behind the length penalty: `go mod download` recorded three times
+# a few days back and `go mod vendor` twice more recently. The index's
+# milli-scores put the download at the head of the `go` key — the line the
+# ghost and the Tab menu read — while `tai suggest` and the dashboard put the
+# shorter, fresher vendor first: the two rankers disagreed about exactly the
+# lines a one-word question has to choose between, and the user's hint named a
+# line their own dashboard did not. The engine's length penalty is what
+# separates the two, and its difference between two candidates is
+# (len(a) − len(b)) / 60 whatever prefix it is asked with, so the builder bakes
+# it in: the same ordering as the engine for every query, and pure seeds keep
+# their corpus band below even the weakest, longest real command.
+import re as _re  # noqa: E402
+import time as _time  # noqa: E402
+from tai.seed import SEED_COMMANDS  # noqa: E402
+from tai.store import session  # noqa: E402
+
+_now = int(_time.time())
+# The ages are chosen so the download's frequency advantage over the vendor
+# (+0.284 base) outweighs the vendor's recency advantage by only ~0.02 — a
+# gap the penalty's 0.033 difference between the two lines flips. Without the
+# baked penalty this assertion fails by 20 milli, which is the whole point.
+with session() as _con:
+    for _cmd, _ts in (
+        ("go mod vendor", _now - 76117),
+        ("go mod vendor", _now - 76117 - 5),
+        ("go mod download", _now - 259200),
+        ("go mod download", _now - 259200 - 60),
+        ("go mod download", _now - 259200 - 120),
+        ("godot .", _now - 1800),
+        ("got log", _now - 43200),
+    ):
+        _con.execute(
+            "INSERT INTO commands(cmd, cwd, exit_code, ts) VALUES (?, '', 0, ?)",
+            (_cmd, _ts))
+    _con.commit()         # session() does not commit; a raw insert says so
+build()
+_scores = {}
+for _line in pathlib.Path(SCRATCH_INDEX).read_text().splitlines():
+    if _line.startswith("_TAI_SCORE+=("):
+        _head = _line[len("_TAI_SCORE+=("):-1]
+        _cmd, _, _num = _head.rpartition(" ")
+        _scores[_cmd.strip("'")] = int(_num)
+assert _scores["go mod vendor"] > _scores["go mod download"], _scores
+_go = _re.search(r"_TAI_FIRST\+=\('go' '([^']*)'\)",
+                 pathlib.Path(SCRATCH_INDEX).read_text(), _re.S)
+assert _go, "the go key is written"
+assert _go.group(1).split("\n")[0] == "go mod vendor", _go.group(1)
+_real_scores = [s for c, s in _scores.items() if c not in set(SEED_COMMANDS)]
+from tai.index import SEED_RANK_STEP  # noqa: E402
+# The band invariant: a pure seed's ceiling is n_seeds × step, and every real
+# command — even one-run, long-ago, failed, and long enough to pay the full
+# length penalty — scores above it. Recorded seeds are not in the band; they
+# are history, and score like it.
+assert _real_scores and min(_real_scores) > len(SEED_COMMANDS) * SEED_RANK_STEP, \
+    min(_real_scores)
+print("OK — the index carries the engine's length penalty; the head of `go` "
+      "is the line the dashboard ranks first.")
+
 # A record reaches the index without waiting a hundred records: when the index
 # on disk is older than the newest row, past a short debounce, the background
 # rebuild runs — and when the index is fresh, it does not.

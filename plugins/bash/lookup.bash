@@ -61,6 +61,56 @@ _tai_first_values() {
   return 0
 }
 
+# The learned whole lines whose first word extends the typed word, best first,
+# into _TAI_LEARNED_LINES — what Tab offers for a line that is still one word.
+#
+# The keystroke path answers one head per key, and that contract is not enough
+# for a menu: the web panel for `go` had the `go` key's *second* line
+# on its second row, and a menu built from the heads alone would have hidden
+# it. Each matching key lends its first _TAI_FIRST_LINES_DEPTH lines and the
+# merge is one sort over zero-padded `score line` strings — Tab time, where a
+# process is already the price of `compgen -d` — capped at
+# _TAI_FIRST_LINES_CAP rows ahead of the installed names. Committing a learned
+# row onto a one-word line writes the whole line, because for a first word the
+# completion and the line it came from are one span.
+_tai_first_lines() {
+  local word="$1" k v line s lo hi mid d
+  _TAI_LEARNED_LINES=()
+  [[ -n "$word" && "$word" != *[\*\?\[]* ]] || return 1
+  local -a merged=()
+  # The keys were sorted once, at load; the ones beginning with the word are
+  # the same contiguous run the half-typed lookup binary-searches for.
+  lo=0; hi=${#_TAI_FIRST_KEYS[@]}
+  while (( lo < hi )); do
+    mid=$(( (lo + hi) / 2 ))
+    if [[ "${_TAI_FIRST_KEYS[mid]}" < "$word" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
+  done
+  while (( lo < ${#_TAI_FIRST_KEYS[@]} )); do
+    k="${_TAI_FIRST_KEYS[lo]}"
+    [[ "$k" == "$word"* ]] || break
+    v="${_TAI_FIRST[$k]}"
+    for (( d = 0; d < _TAI_FIRST_LINES_DEPTH; d++ )); do
+      line="${v%%$'\n'*}"
+      [[ -n "$line" ]] || break
+      if [[ ! "$line" =~ [[:cntrl:]] ]]; then
+        s="${_TAI_SCORE[$line]:-0}"
+        merged+=("$(printf '%08d' "$s") $line")
+      fi
+      [[ "$v" == *$'\n'* ]] || break
+      v="${v#*$'\n'}"
+    done
+    (( ++lo ))
+  done
+  ((${#merged[@]})) || return 1
+  local -a sorted=()
+  mapfile -t sorted < <(printf '%s\n' "${merged[@]}" | sort -r)
+  local i
+  for (( i = 0; i < ${#sorted[@]} && i < _TAI_FIRST_LINES_CAP; i++ )); do
+    _TAI_LEARNED_LINES+=("${sorted[i]:9}")
+  done
+  ((${#_TAI_LEARNED_LINES[@]}))
+}
+
 # 1 when _TAI_VALUES is one key's own score-ordered list (the head of it is the
 # winner), 0 when it is one head per key and _tai_best must rank by score.
 _TAI_VALUES_ONE=0

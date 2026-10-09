@@ -30,6 +30,13 @@ typeset -ga _TAI_MENU
 # _tai_menu_open for why the flag travels with the entry.
 typeset -ga _TAI_MENU_Q
 typeset -gi _TAI_MENU_IDX=0 _TAI_MENU_FROM=0 _TAI_MENU_TO=0 _TAI_MENU_LOOSE=0
+# How deep one first-word key is read, and how many learned whole lines the
+# first-word menu carries ahead of the installed names. Three per key is what
+# keeps a two-line `go mod …` pair beside each other — one per key is the
+# ghost's contract, and a menu that showed only the keys' heads would hide
+# exactly the lines the web panel ranks beside the winner.
+typeset -gi _TAI_MENU_FIRST_DEPTH=3
+typeset -gi _TAI_MENU_FIRST_CAP=16
 typeset -gi _TAI_MENU_COLS=1 _TAI_MENU_WIDTH=3
 # Whether the selection in the menu is armed: 1 means a key in the list is
 # highlighted and Enter commits it. 0 (the default) means the menu was opened on
@@ -183,6 +190,65 @@ _tai_menu_stem() {
   _TAI_MENU_STEM=$rest
 }
 
+# The learned whole lines whose first word extends the typed word, best first,
+# into _TAI_MENU_LEARNED — the menu's answer for a line that is still one word.
+#
+# Source 1 below looks the index up by the text *in front of* the word, and a
+# first word has none: `g` looked up nothing and the menu answered with the
+# installed command names alone, while the ghost — which asks the word itself
+# through _tai_first_values — had `go mod vendor` and friends all along. The
+# report: typing `g` hinted one line, Tab replaced it with a screen of
+# binaries, and the first suggestion was `godot .` where the web panel
+# said `go mod vendor`. The lines are whole lines, because for a first word a
+# completion and the line it came from are the same span: committing
+# `go mod vendor` onto `g` writes the line, which is exactly what the panel
+# promises.
+#
+# One head per key is the ghost's contract and it is not enough here — the
+# panel's second row was `go mod download`, the `go` key's *second* line — so
+# each matching key lends its first _TAI_MENU_FIRST_DEPTH lines and the list is
+# merged by score. The merge is one sort over at most _TAI_PREFIX_KEYS × depth
+# zero-padded `score line` strings, a Tab-press cost, not a keystroke cost.
+# No fork, the same rule as the rest of the menu.
+_tai_menu_first_lines() {
+  local word="$1" k values line s
+  local -a merged
+  _TAI_MENU_LEARNED=()
+  # A glob character in the word is refused for the same reason
+  # _tai_first_values refuses it: the match below would mean something other
+  # than "begins with the word".
+  [[ "$word" != *[\*\?\[]* ]] || return 1
+  merged=()
+  for k in "${(@k)_TAI_FIRST[(I)${word}*]}"; do
+    values="${_TAI_FIRST[$k]}"
+    # Peel, don't split: a key's whole list is split nowhere else on the
+    # keystroke path, and `git` holds thousands of lines when the first three
+    # are all a menu can show.
+    local d
+    for (( d = 0; d < _TAI_MENU_FIRST_DEPTH; d++ )); do
+      line="${values%%$'\n'*}"
+      [[ -n "$line" ]] || break
+      s="${_TAI_SCORE[$line]:-0}"
+      merged+=( "${(l:8::0:)s} $line" )
+      [[ "$values" == *$'\n'* ]] || break
+      values="${values#*$'\n'}"
+    done
+    (( ${#merged[@]} >= _TAI_PREFIX_KEYS * _TAI_MENU_FIRST_DEPTH )) && break
+  done
+  (( ${#merged[@]} )) || return 1
+  # Zero-padded scores sort as themselves; (O) is the ranking. The strip is a
+  # fixed nine characters — eight of pad and the space — because the score is
+  # always the prefix.
+  local -a sorted
+  sorted=( "${(O)merged[@]}" )
+  local m
+  for m in "${(@)sorted[1,_TAI_MENU_FIRST_CAP]}"; do
+    _TAI_MENU_LEARNED+=( "${m[10,-1]}" )
+  done
+  (( ${#_TAI_MENU_LEARNED[@]} ))
+}
+typeset -ga _TAI_MENU_LEARNED=()
+
 # Build the menu for the word under the cursor, or fail when there is nothing to
 # show. Failing is not an error: the caller hands the key to the shell's own
 # completion, which is better at quoting and suffixes than this is.
@@ -271,6 +337,20 @@ _tai_menu_open() {
     rest="$_TAI_LINES_LEAD${c}"
     out+=( "${${rest[skip + 1, -1]}%% *}" ); outq+=( 0 )
   done
+
+  # 1b. The first word has no `before` for the lookup above, and without this
+  #    source the menu answered a one-word line with the installed command
+  #    names alone — the learned lines the ghost hints were never offered.
+  #    Here they come first, whole and ranked the way the engine ranks them;
+  #    the installed names keep their place below, and committing a learned
+  #    row onto a one-word line writes the whole line, because for a first
+  #    word the completion and the line it came from are one span.
+  local -i learned_whole=0
+  if [[ -z "$before" ]] && _tai_menu_first_lines "$word"; then
+    out+=( "${_TAI_MENU_LEARNED[@]}" )
+    repeat ${#_TAI_MENU_LEARNED[@]}; do outq+=( 0 ); done
+    learned_whole=1
+  fi
   # An installed command the history has never seen. Worth offering only once
   # the command name is complete, which is the same rule _tai_query keeps so
   # `9router --p` is never answered with `--help`. When the command name *is* the
@@ -412,7 +492,16 @@ _tai_menu_open() {
   (( ${#_TAI_MENU} )) || return 1
 
   _TAI_MENU_ARMED=1
-  _tai_menu_layout "$word"
+  # A menu holding whole learned lines lays out with no stem, the loose list's
+  # rule: the line above shows only the typed `g`, and a stem cut from the
+  # rows' common prefix (`go `) would leave rows reading `mod vendor` under a
+  # line that never said `go`. An empty word bounds the stem to nothing, the
+  # same way the loose open passes one.
+  if (( learned_whole )); then
+    _tai_menu_layout ""
+  else
+    _tai_menu_layout "$word"
+  fi
 }
 
 # Layout and cap: shared by the normal and the loose menus. `$1` is the word the

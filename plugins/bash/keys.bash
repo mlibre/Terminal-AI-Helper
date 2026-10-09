@@ -85,6 +85,7 @@ _tai_accept_or_right() {
 }
 _tai_complete() {
   local line="${COMP_LINE:0:$COMP_POINT}" first word values="" c
+  local -i first_word=0
   if [[ "$line" == *' '* ]]; then
     # Same rule as _tai_query: the last complete word is the key, so `ls -l`
     # also offers `ls -la` — and a key with no space in it is the command name,
@@ -97,9 +98,7 @@ _tai_complete() {
       values="$_TAI_VALUES"
     fi
   elif [[ -n "$line" ]]; then
-    first="$line"
-    _tai_first_values "$first"
-    values="$_TAI_VALUES"
+    first_word=1
   else
     values=""
   fi
@@ -132,6 +131,24 @@ _tai_complete() {
   # liveness rule the ghost applies. `tzz_dir` from the history and `tzz_dir/`
   # from the listing are one completion said twice, so the slash-stripped
   # forms dedup against each other and the learned form wins.
+  # A first word is answered by whole lines, not by words: the learned lines
+  # whose first word extends what is typed, ranked the way the engine ranks
+  # them, then the installed command names. The old shape replied with the
+  # last word of each learned head — `g` completed to `status` off the
+  # `git status` line — a completion of a line nobody typed. For a first word
+  # a completion and the line it came from are one span, so the learned rows
+  # commit whole: exactly what the zsh menu and the web panel offer.
+  if (( first_word )); then
+    if _tai_first_lines "$line"; then
+      for c in "${_TAI_LEARNED_LINES[@]}"; do
+        [[ "$c" == "$line"* ]] && _tai_reply "$c"
+      done
+    fi
+    local -i names=0
+    while IFS= read -r c && (( names < 100 )); do
+      [[ -n "$c" ]] && { _tai_reply "$c"; (( ++names )); }
+    done < <(compgen -c -- "$line")
+  fi
   local stem x
   while IFS= read -r c; do
     [[ -n "$c" && "$c" == "$line"* ]] && _tai_reply "${c##*[[:space:]]}"

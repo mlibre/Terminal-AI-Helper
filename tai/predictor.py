@@ -84,6 +84,29 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     return res
 
 
+def explain(prefix: str, cmd: str, cwd: str = "",
+            last_commands: list | None = None) -> dict | None:
+    """Why `cmd` ranks what it ranks for `prefix` — the dashboard's why.
+
+    Same engine, same path-liveness policy: a command hidden as stale is
+    reported as hidden rather than scored, because the honest answer to "why
+    don't I see it" is not its arithmetic. Returns None for a line the store
+    never recorded.
+    """
+    global _E, _STALE
+    if _E is None:
+        from tai.engcache import get
+        from tai.store import db_path
+        _E = get(db_path(), _build_engine)
+        _STALE = _stale_for(_E)
+    out = _E.explain(prefix or "", cmd, cwd=cwd,
+                     last_commands=last_commands or [])
+    if out is None:
+        return None
+    out["stale"] = cmd in _STALE
+    return out
+
+
 def _file_answer(prefix: str, res: dict) -> dict:
     """A path argument is answered by the filesystem, not by the history.
 
