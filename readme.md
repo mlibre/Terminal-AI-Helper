@@ -165,6 +165,7 @@ tai eval        # candidate coverage against your own history
 tai update      # newest version from GitHub, then reinstall (alias: tai upgrade)
 tai version     # print the release this install is running
 tai purge       # drop unusable rows, then rebuild
+tai forget git sta   # drop every stored row for a command, exactly as typed
 tai uninstall   # remove everything tai added
 ```
 

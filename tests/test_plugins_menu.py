@@ -1182,6 +1182,78 @@ def test_empty_line_menu() -> None:
         write_index()         # every other suite reads the default fixture
 
 
+def test_junk_first_word_key() -> None:
+    """A key that holds only the word itself must not shadow its siblings.
+
+    The reported world: `openc` sat in the index — Enters on a half-typed
+    line had recorded it — and the ghost for `openc` answered nothing at all,
+    while `ope` and `op` still hinted `opencode`. Why: the exact-key hit in
+    _tai_first_values returned the bare word and never reached the keys that
+    begin with the same letters, and the bare word extends nothing. The hit
+    now peels word-equal heads and falls through to the sibling scan — in
+    both shells, the two implementations of the lookup being where the drift
+    would start. The full word keeps its own behaviour: its bare name is
+    peeled the same way and what follows it is the hint, which is what the
+    hit always meant to answer.
+    """
+    fixture = ["openc", "opencode", "opencode web", "git status"]
+    try:
+        write_index(fixture)
+
+        if SHELLS["zsh"]:
+            print("zsh ghost past a junk first-word key")
+            g = Ghosts()
+            check("the ghost for the junk word comes from its sibling",
+                  g.of("openc"), "ode")
+            check("the full word still hints what follows it",
+                  g.of("opencode"), " web")
+            g.close()
+            print("zsh menu past a junk first-word key")
+            s = Session("zsh")
+            s.send("openc")
+            s.write(TAB)
+            s.settle()
+            line, drawn, size, idx = s.menu(clear=False)
+            check("the menu lists the sibling's lines", "opencode" in drawn, True)
+            check("the junk word itself is not an entry",
+                  [e for e in menu_entries(drawn) if e == "openc"], [])
+            check("the line is untouched while the menu stands", line, "openc")
+            check("no noise from the menu", s.noise(), [])
+            s.close()
+
+        if SHELLS["bash"]:
+            print("bash lookup past a junk first-word key")
+            s = Session("bash")
+            out = pathlib.Path("/tmp/tai/tai_lookup_out.txt")
+            s.run(f'_tai_first_values openc; printf "%s|%s\\n" "$_TAI_VALUES" '
+                  f'"$_TAI_VALUES_ONE" > {out}')
+            s.wait_file(out, "the lookup answer for openc")
+            vals, one = out.read_text().rstrip("\n").split("|", 1)
+            check("the junk key falls through to its siblings",
+                  vals.split(), ["openc", "opencode"])
+            check("one head per key, so the ranking loop runs", one, "0")
+            s.run(f'_tai_first_values opencode; printf "%s|%s\\n" "$_TAI_VALUES" '
+                  f'"$_TAI_VALUES_ONE" > {out}')
+            s.wait_file(out, "the lookup answer for opencode")
+            vals, one = out.read_text().rstrip("\n").split("|", 1)
+            check("the full word keeps its own extension",
+                  vals.split("\n"), ["opencode web"])
+            check("and answers from its own list", one, "1")
+            # The completion list a Tab would offer, through the real entry
+            # point: the learned lines first, the sibling's among them.
+            REPLY.unlink(missing_ok=True)
+            s.run('COMP_LINE="openc"; COMP_POINT=5; COMPREPLY=(); _tai_complete; '
+                  f'printf "%s\\n" "${{#COMPREPLY[@]}}" "${{COMPREPLY[@]}}" > {REPLY}')
+            s.wait_file(REPLY, "the completion list for openc")
+            got = REPLY.read_text().splitlines()
+            got = got[1:] if got and got[0].isdigit() else got
+            check("Tab lists the sibling's lines", "opencode" in got, True)
+            check("no noise from the bash lookups", s.noise(), [])
+            s.close()
+    finally:
+        write_index()         # every other suite reads the default fixture
+
+
 def main() -> int:
     setup()
     test_bash_menu()
@@ -1196,6 +1268,7 @@ def main() -> int:
     test_history_browsing_opens_no_list()
     test_cd_answers_directories()
     test_first_word_menu()
+    test_junk_first_word_key()
     test_empty_line_menu()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."

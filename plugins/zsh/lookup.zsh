@@ -106,9 +106,30 @@ _tai_first_values() {
   [[ -n "$word" ]] || { _TAI_VALUES=""; return }
   values="${_TAI_FIRST[$word]:-}"
   if [[ -n "$values" ]]; then
-    _TAI_VALUES_ONE=1
-    _TAI_VALUES="$values"
-    return
+    # Every line in a first-word key's list begins with the key, so the only
+    # line in it that does not extend the word is the word itself. A key
+    # whose every line is the bare word — Enters on a half-typed line that
+    # the store recorded as successes, or a tool that is only ever run bare —
+    # extends nothing, and answering with the exact hit alone shadows the
+    # keys that begin with the same letters: the reported case had `openc`
+    # as such a key, and the ghost for `openc` died on this hit while
+    # `opencode` sat one key over. So when the head is the word, peel the
+    # word-equal heads; what survives is the key's own extension, and a key
+    # with none falls through to the half-typed scan below, which answers
+    # one head per sibling key and lets _tai_best rank them. A head that
+    # already extends (`ls` with `ls -la` behind it) peels one line and
+    # keeps the rest — the same winner the ranking loop used to find, minus
+    # the line it would have skipped.
+    while [[ -n "$values" && "${values%%$'\n'*}" == "$word" ]]; do
+      if [[ "$values" == *$'\n'* ]]; then values="${values#*$'\n'}"; else values=""; fi
+    done
+    if [[ -n "$values" ]]; then
+      _TAI_VALUES_ONE=1
+      _TAI_VALUES="$values"
+      return
+    fi
+    _TAI_VALUES=""
+    # Fall through: this key had nothing that extends, its siblings might.
   fi
   # A glob character in the word would make the pattern mean something other than
   # "begins with the word" — zsh's `(I)` does not honour a backslash escape here —

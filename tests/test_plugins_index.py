@@ -220,6 +220,62 @@ def test_recording() -> None:
 
 
 
+def test_exit_code_survives_earlier_hooks() -> None:
+    """The recorded exit status is the command's, even with hooks before tai's.
+
+    The report behind this one: `opencoe` — a typo — sat at the top of the
+    dashboard panel, and `openc` answered nothing in the shell. Both grew out
+    of the store: rows for refused words had been recorded as successes, the
+    phantom rule (a line whose every run was 127) could never fire, and the
+    typos ranked like real commands. Whatever put the wrong status in those
+    rows — a shell config that answers for not-found commands with its own
+    exit, an install old enough to predate one of the record paths — the
+    recording path's own invariant is what this test pins: the status that
+    lands in the store is the one the shell handed the prompt, even when a
+    prompt hook registered before tai's runs first. zsh hands every precmd
+    hook the command's own status and tai takes the first slot anyway; bash
+    flows $? from one PROMPT_COMMAND segment into the next and tai has
+    always prepended itself there.
+    """
+    typed = "tai_no_such_command_xyz"
+    for shell in PLUGINS:
+        if not SHELLS[shell]:
+            continue
+        print(f"{shell} exit code with an earlier prompt hook")
+        db = RECORD_DB.with_name(f"{RECORD_DB.stem}-{shell}-exit{RECORD_DB.suffix}")
+        spool = RECORD_DB.with_name(f"{db.stem}-spool{db.suffix}")
+        for suffix in ("", "-wal", "-shm"):
+            pathlib.Path(str(db) + suffix).unlink(missing_ok=True)
+        spool.unlink(missing_ok=True)
+        env = {"TAI_NO_AUTO_RECORD": "0", "TAI_INDEX": str(RECORD_INDEX),
+               "TAI_DB": str(db), "TAI_SPOOL": str(spool),
+               "TAI_SPOOL_MAX": "1", "TAI_SPOOL_SECONDS": "1"}
+        # source=False: the plugin is sourced from inside the session, AFTER
+        # the stand-in theme has registered its hook — the order every real
+        # setup has, and the one that decides which hook reads $? first. The
+        # theme's body runs `true`, so the $? it leaves behind is never the
+        # command's; only a hook that runs before it can see the 127.
+        s = Session(shell, env, source=False)
+        if shell == "zsh":
+            s.run(f"_tai_theme_hook() {{ true; }}; "
+                  f"precmd_functions=( _tai_theme_hook ); source {PLUGINS['zsh']}")
+        else:
+            # bash: tai is already first in PROMPT_COMMAND by its own doing,
+            # and the theme appends — which is what a theme sourced later does.
+            s.run(f"_tai_theme_hook() {{ true; }}; source {PLUGINS['bash']}; "
+                  "PROMPT_COMMAND=\"${PROMPT_COMMAND:-};_tai_theme_hook\"")
+        s.send(typed + "\n")    # newline submits: the shell refuses the word, 127
+        missing = await_rows(db, [typed])
+        s.close()
+        check(f"{shell} records the refused command", missing, [])
+        con = sqlite3.connect(str(db))
+        codes = [r[0] for r in con.execute(
+            "select exit_code from commands where cmd=?", (typed,))]
+        con.close()
+        check(f"{shell} recorded the command's 127, not the theme's 0",
+              codes, [127])
+
+
 def main() -> int:
     setup()
     test_live_reload()
@@ -228,6 +284,8 @@ def main() -> int:
     check_fixture_intact("the bash run")
     test_recording()
     check_fixture_intact("the recording test")
+    test_exit_code_survives_earlier_hooks()
+    check_fixture_intact("the exit-code test")
     print("\nOK — a rebuild picked up by an open shell, and recording."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
     return 1 if failures else 0

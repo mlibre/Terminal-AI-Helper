@@ -589,10 +589,39 @@ _tai_precmd() {
     _TAI_CMD=""
   fi
 }
+# precmd and preexec put tai FIRST in the hook arrays — deliberately not
+# through add-zsh-hook, which appends. In the zsh this was tested on, every
+# precmd hook is handed the command's own exit status in $?, whatever the
+# hook before it did — and the first slot makes that independence explicit
+# instead of something tai leans on without knowing it: a prompt theme that
+# registers before tai, then runs, cannot stand between the command and the
+# status this hook records, whatever else its hooks touch (the prompt state,
+# $PWD, a handler of its own). bash is the shell where $? genuinely flows
+# from one PROMPT_COMMAND segment into the next, and there tai has always
+# taken the first slot for exactly that reason. A plugin sourced later that
+# also prepends would still jump ahead; nothing short of owning the prompt
+# catches that, and this comment is where that limit is documented.
+if (( ${+precmd_functions} )); then
+  (( ${precmd_functions[(Ie)_tai_precmd]} )) || \
+    precmd_functions=( _tai_precmd "${precmd_functions[@]}" )
+else
+  precmd_functions=( _tai_precmd )
+fi
+if (( ${+preexec_functions} )); then
+  (( ${preexec_functions[(Ie)_tai_preexec]} )) || \
+    preexec_functions=( _tai_preexec "${preexec_functions[@]}" )
+else
+  preexec_functions=( _tai_preexec )
+fi
+# zshexit carries no exit status anyone can steal, so add-zsh-hook serves it
+# as always, with the direct form as the fallback for a zsh without it.
 if (( $+functions[add-zsh-hook] )); then
-  add-zsh-hook preexec _tai_preexec
-  add-zsh-hook precmd _tai_precmd
   add-zsh-hook zshexit _tai_spool_exit
+elif (( ${+zshexit_functions} )); then
+  (( ${zshexit_functions[(Ie)_tai_spool_exit]} )) || \
+    zshexit_functions=( _tai_spool_exit "${zshexit_functions[@]}" )
+else
+  zshexit_functions=( _tai_spool_exit )
 fi
 bindkey '^F' tai-accept
 # TAI_NO_MENU=1 puts Tab back to "take the ghost text, or complete". Read once,

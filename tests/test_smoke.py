@@ -734,3 +734,31 @@ assert "'opencoe'" not in _text, "a command-not-found line is not published"
 assert "'echo gone-typo'" not in _text, "every-127 lines are phantoms, whatever the word"
 assert "'echo kept'" in _text
 print("OK — the index does not publish a line the shell never ran.")
+
+# The poisoned sequel to that world: the typo recorded MORE runs than the
+# tool — not-found refusals some install kept as successes — and nothing in
+# the ranker can un-know them. This is the shape the panel showed the user
+# (`opencoe` first, `opencode` behind it), pinned so the day the arithmetic
+# changes nobody wonders whether the report was ever real. The cure is not
+# a ranking rule: poisoned rows are indistinguishable from successes, so
+# `tai forget opencoe` is how they leave — and the installed question is
+# what the panel has left while the rows are still there. Everything about
+# the two candidates is equal here except the run count and the bonus:
+# without the question the busier spelling wins, with it the tool does.
+eng_po = Engine()
+eng_po.add("openc", cwd="/w", exit_code=0, ts=_T - 300)
+eng_po.add("openc", cwd="/w", exit_code=0, ts=_T - 240)
+eng_po.add("openc", cwd="/w", exit_code=0, ts=_T - 180)
+eng_po.add("opencoe", cwd="/w", exit_code=0, ts=_T - 120)
+eng_po.add("opencoe", cwd="/w", exit_code=0, ts=_T - 60)
+eng_po.add("opencode", cwd="/w", exit_code=0, ts=_T - 30)
+_po_noq = [c["cmd"] for c in
+           eng_po.suggest("openc", cwd="/w", now_ts=_T, limit=6)["choices"]]
+assert _po_noq[:1] == ["opencoe"], _po_noq
+_po_q = [c["cmd"] for c in
+         eng_po.suggest("openc", cwd="/w", now_ts=_T, limit=6,
+                        on_path={"opencode"}.__contains__)["choices"]]
+assert _po_q[:1] == ["opencode"], _po_q
+assert _po_q.index("opencode") < _po_q.index("opencoe"), _po_q
+print("OK — a poisoned history is pinned as poisoned; forget is the cure, "
+      "the installed question the stopgap.")

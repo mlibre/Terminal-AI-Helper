@@ -572,3 +572,77 @@ _alias = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"
                         env=_predict_env, capture_output=True, text=True, timeout=60)
 assert "upgrade" in _alias.stdout, "the `tai upgrade` alias is missing from --help"
 print("OK — record answers without argparse; version and the upgrade alias report.")
+
+# `tai forget` is the user-facing half of the exit-code repair: a typo that an
+# older install recorded as a success — the hook-order bug read a prompt
+# theme's exit status instead of the command's — sits in the ranking for good,
+# because no rule can tell it from a command that worked. The command drops
+# the rows and rebuilds, says how many rows it took, and is honest about a
+# name that matched nothing.
+_forget_db = "/tmp/tai/tai_forget.db"
+_forget_index = "/tmp/tai/tai_forget_index.zsh"
+_forget_spool = "/tmp/tai/tai_forget_spool.log"
+for _sfx in ("", "-wal", "-shm"):
+    pathlib.Path(_forget_db + _sfx).unlink(missing_ok=True)
+pathlib.Path(_forget_index).unlink(missing_ok=True)
+pathlib.Path(_forget_spool).unlink(missing_ok=True)
+# A spool of its own: every CLI drains first, and the developer's real spool
+# must never land in a scratch database — or in these assertions.
+_forget_env = dict(os.environ, TAI_DB=_forget_db, TAI_INDEX=_forget_index,
+                   TAI_SPOOL=_forget_spool, TAI_NO_LEARN="1")
+import sqlite3
+
+
+def _forget_rows() -> list[str]:
+    con = sqlite3.connect(_forget_db)
+    try:
+        return [r[0] for r in con.execute("select cmd from commands order by id")]
+    finally:
+        con.close()
+
+
+def _seed_forget() -> None:
+    con = sqlite3.connect(_forget_db)
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS commands(id INTEGER PRIMARY KEY, "
+        "cmd TEXT NOT NULL, cwd TEXT DEFAULT '', repo TEXT DEFAULT '', "
+        "branch TEXT DEFAULT '', exit_code INTEGER DEFAULT 0, ts INTEGER DEFAULT 0)")
+    con.executemany(
+        "INSERT INTO commands(cmd,cwd,repo,branch,exit_code,ts) VALUES(?,?,?,?,?,?)",
+        [("tai-junk-opencoe", "/w", "", "", 0, 1728500000),
+         ("tai-junk-opencoe", "/w", "", "", 0, 1728500100),
+         ("tai-junk-openc", "/w", "", "", 0, 1728500200),
+         ("tai-real-opencode", "/w", "", "", 0, 1728500300),
+         ("tai-real-opencode web", "/w", "", "", 0, 1728500400)])
+    con.commit()
+    con.close()
+
+
+_seed_forget()
+_f1 = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"),
+                      "forget", "tai-junk-opencoe", "tai-junk-openc"],
+                     env=_forget_env, capture_output=True, text=True, timeout=60)
+assert _f1.returncode == 0, (_f1.stdout, _f1.stderr)
+assert "forgot 3 rows for 2 commands" in _f1.stdout, _f1.stdout
+assert "index rebuilt" in _f1.stdout, _f1.stdout
+assert _forget_rows() == ["tai-real-opencode", "tai-real-opencode web"], _forget_rows()
+# The rebuild really wrote the index, and the forgotten names are out of it.
+_idx = pathlib.Path(_forget_index).read_text()
+assert "tai-junk" not in _idx, "a forgotten command is still in the index"
+assert "tai-real-opencode" in _idx, "the survivor lost its index entry"
+# A name that matches nothing is a printed answer, not a shrug.
+_f2 = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"),
+                      "forget", "tai-junk-opencoe", "never-was-cmd"],
+                     env=_forget_env, capture_output=True, text=True, timeout=60)
+assert _f2.returncode == 0 and "nothing forgotten" in _f2.stdout, (_f2.stdout, _f2.stderr)
+# --no-rebuild leaves the index behind and says so.
+_seed_forget()
+_before = pathlib.Path(_forget_index).read_text()
+_f3 = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"),
+                      "forget", "--no-rebuild", "tai-junk-openc"],
+                     env=_forget_env, capture_output=True, text=True, timeout=60)
+assert _f3.returncode == 0 and "tai refresh" in _f3.stdout, (_f3.stdout, _f3.stderr)
+assert "index rebuilt" not in _f3.stdout, _f3.stdout
+assert pathlib.Path(_forget_index).read_text() == _before, "--no-rebuild wrote the index"
+assert "tai-junk-opencoe" in _forget_rows(), "the survivor of --no-rebuild went missing"
+print("OK — forget: exact rows out, siblings kept, rebuild on and off, honest silence.")

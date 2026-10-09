@@ -486,6 +486,43 @@ def cmd_purge(a) -> int:
     return 0
 
 
+def cmd_forget(a) -> int:
+    """Drop every stored row for the named commands, then rebuild.
+
+    The one command that speaks to the store in the user's own words: a typo
+    that an older install recorded as a success sits in the ranking forever —
+    no rule can tell it from a command that worked — and this is how it leaves.
+    The names are exact, arguments included; the count is printed so a name
+    that matched nothing is visible rather than silent.
+    """
+    names = [n.strip() for n in (a.commands or []) if n.strip()]
+    if not names:
+        print("usage: tai forget <command> [more commands...]")
+        print("       the names are exact — 'tai forget opencoe git sta' forgets "
+              "those lines, not their prefixes")
+        return 2
+    from tai.store import forget_commands
+    try:
+        n = forget_commands(names)
+    except Exception as e:
+        print(f"tai forget: could not read the history store: {e}")
+        return 1
+    shown = ", ".join(f"`{x}`" for x in names[:6]) + ("…" if len(names) > 6 else "")
+    if not n:
+        print(f"nothing forgotten — no stored row matches {shown}")
+        return 0
+    if a.rebuild:
+        from tai.maintenance import _rebuild_quietly
+        _rebuild_quietly()
+    row_word = "row" if n == 1 else "rows"
+    cmd_word = "command" if len(names) == 1 else "commands"
+    print(f"forgot {n} {row_word} for {len(names)} {cmd_word}: {shown}"
+          + ("; index rebuilt" if a.rebuild else ""))
+    if not a.rebuild:
+        print("run 'tai refresh' to rebuild the shell indexes")
+    return 0
+
+
 def cmd_jev(a) -> int:
     import json
     from tai.jev import decide
@@ -531,6 +568,7 @@ _COMMANDS = {
     "version": cmd_version,
     "discover": cmd_discover,
     "purge": cmd_purge,
+    "forget": cmd_forget,
     "uninstall": cmd_uninstall,
     "bench": cmd_bench,
     "tune": cmd_tune,
@@ -647,6 +685,12 @@ def main() -> int:
                     help="rebuild the shell indexes afterwards (default: yes)")
     pg.add_argument("--stale", action="store_true",
                     help="also drop commands whose paths no longer exist")
+    fg = sub.add_parser("forget",
+                        help="drop every stored row for the named commands")
+    fg.add_argument("commands", nargs="+",
+                    help="commands to forget, exactly as they were run")
+    fg.add_argument("--rebuild", action=argparse.BooleanOptionalAction, default=True,
+                    help="rebuild the shell indexes afterwards (default: yes)")
     rf = sub.add_parser("refresh",
                         help="import new history rows and rebuild the indexes")
     rf.add_argument("--quiet", action="store_true", help="print nothing on success")

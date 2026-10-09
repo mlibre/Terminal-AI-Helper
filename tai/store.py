@@ -313,6 +313,37 @@ def purge_stale() -> int:
     return len(stale)
 
 
+def forget_commands(names: list[str]) -> int:
+    """Delete every row whose command is exactly one of `names`; return the count.
+
+    The user-facing half of the exit-code repair. A typo that an older install
+    recorded as a success — the hook-order bug that read a prompt theme's exit
+    status instead of the command's — is indistinguishable from a real success
+    for the rest of this program's life: the phantom rule can only drop a line
+    whose every run was command-not-found, and these rows claim success. No
+    ranking rule can undo what the store was told, so the store is asked
+    directly: `tai forget opencoe` drops the rows, `--rebuild` (the default)
+    takes the line out of the indexes in the same breath.
+
+    Matching is exact on the stored text, whitespace-stripped the way every
+    writer strips it. A name with arguments is one command ("git sta"), not a
+    prefix — forgetting `git` must not take `git status` with it. Unknown
+    names simply match nothing; the count is the honest answer either way.
+    """
+    cleaned: list[str] = []
+    for name in names:
+        name = (name or "").strip()
+        if name and name not in cleaned:
+            cleaned.append(name)
+    if not cleaned:
+        return 0
+    with session() as con:
+        marks = ",".join("?" * len(cleaned))
+        cur = con.execute(f"DELETE FROM commands WHERE cmd IN ({marks})", cleaned)
+        con.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+
 def count() -> tuple[int, int]:
     try:
         with session() as con:

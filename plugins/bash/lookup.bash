@@ -21,9 +21,29 @@ _tai_first_values() {
   [[ -n "$word" ]] || { _TAI_VALUES=""; _TAI_VALUES_ONE=0; return 0; }
   values="${_TAI_FIRST[$word]:-}"
   if [[ -n "$values" ]]; then
-    _TAI_VALUES="$values"
-    _TAI_VALUES_ONE=1
-    return 0
+    # Every line in a first-word key's list begins with the key, so the only
+    # line in it that does not extend the word is the word itself. A key
+    # whose every line is the bare word — Enters on a half-typed line that
+    # the store recorded as successes, or a tool that is only ever run bare —
+    # extends nothing, and answering with the exact hit alone shadows the
+    # keys that begin with the same letters: the reported case had `openc`
+    # as such a key, and the ghost for `openc` died on this hit while
+    # `opencode` sat one key over. So when the head is the word, peel the
+    # word-equal heads; what survives is the key's own extension, and a key
+    # with none falls through to the half-typed scan below, which answers
+    # one head per sibling key and lets _tai_best rank them. A head that
+    # already extends peels one line and keeps the rest — the same winner
+    # the ranking loop used to find, minus the line it would have skipped.
+    while [[ -n "$values" && "${values%%$'\n'*}" == "$word" ]]; do
+      if [[ "$values" == *$'\n'* ]]; then values="${values#*$'\n'}"; else values=""; fi
+    done
+    if [[ -n "$values" ]]; then
+      _TAI_VALUES="$values"
+      _TAI_VALUES_ONE=1
+      return 0
+    fi
+    _TAI_VALUES=""; _TAI_VALUES_ONE=0
+    # Fall through: this key had nothing that extends, its siblings might.
   fi
   _TAI_VALUES=""; _TAI_VALUES_ONE=0
   # A glob character in the word would make the test mean something other than
@@ -50,6 +70,13 @@ _tai_first_values() {
       if [[ ! "$head" =~ [[:cntrl:]] ]]; then
         values+="$head"$'\n'
         (( ++n >= _TAI_PREFIX_KEYS )) && break 2
+        # One head per key — the head is that key's best line, the winner
+        # _tai_best ranks, and the rest of the list is _tai_first_lines' job
+        # on a Tab press. This loop walked every clean line of the key, so a
+        # half-typed word split its biggest sibling's whole list on every
+        # keystroke — the work this function exists not to do — and its
+        # answer held lines its own docstring promised were not in it.
+        break
       fi
       [[ "$v" == *$'\n'* ]] || break
       v="${v#*$'\n'}"
