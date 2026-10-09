@@ -88,6 +88,10 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
   `~word` is unknown before it is a path, and unknown removes nothing.
 - Learning has to show up where the user is: a record reaches an open shell
   within one debounce, not a hundred records.
+- A command the user ran is stored by a builtin append and a batched flush —
+  no interpreter per command on the recording path, any more than on the
+  keystroke one. The store's `is_recordable` gate is the only gate between
+  what was typed and what is learned, whichever transport carried the record.
 - The key that fills in a completion must not also run it: `Enter` takes, a
   second `Enter` runs. It was asked for after it shipped the other way — do
   not "fix" it back without being asked.

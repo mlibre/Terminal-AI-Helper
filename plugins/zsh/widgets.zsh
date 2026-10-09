@@ -507,6 +507,55 @@ else
   print -u2 "tai: zsh is missing add-zle-hook-widget — suggestions will not appear"
 fi
 
+# The record path: one builtin append per command, one interpreter per batch.
+#
+# The frame is `ts US exit US cwd US cmd RS` — the exact bytes tai/spool.py
+# parses. US and RS (\x1f and \x1e) are the frame's own separators, so a
+# command that carries them would corrupt the framing: they are stripped the
+# way the flush strips control bytes, and a command with a newline survives
+# the frame to be refused by the store's one-line rule, exactly as
+# `tai record` refused it. The repo and branch are deliberately not resolved
+# here: four forks on the critical path of every command is what the old
+# design moved off it, and the flush resolves them from the cwd once per
+# distinct directory in the batch — same labels, no process at the prompt.
+#
+# A spool write that fails (a data directory that does not exist yet, a full
+# disk) falls back to the old detached `tai record`, so recording degrades to
+# what it was rather than to silence.
+_tai_record() {
+  local code=$1 cmd="$_TAI_CMD" ts="${EPOCHSECONDS:-0}" cwd="${_TAI_CWD:-$PWD}"
+  [[ -n "$cmd" ]] || return 0
+  cmd=${cmd//$'\x1e'/}; cmd=${cmd//$'\x1f'/}; cmd=${cmd[1,8192]}
+  cwd=${cwd//$'\x1e'/}; cwd=${cwd//$'\x1f'/}
+  { print -rn -- "$ts"$'\x1f'"$code"$'\x1f'"$cwd"$'\x1f'"$cmd"$'\x1e' >> "$_TAI_SPOOL_FILE" } 2>/dev/null \
+    || { ( ${(z)_TAI_BIN} record "$cmd" --cwd "$cwd" --exit "$code" >/dev/null 2>&1 & ); return 0 }
+  (( ++_TAI_SPOOL_N ))
+  _tai_spool_due
+}
+
+# Eight pending records, or three idle seconds with anything pending —
+# whichever comes first. The seconds sit under the index's own five-second
+# rebuild debounce, so a single command lands in the store and the index in
+# about the same window the old per-command record took, without the
+# interpreter per command; a burst coalesces eight at a time.
+_tai_spool_due() {
+  (( _TAI_SPOOL_N >= _TAI_SPOOL_MAX )) && { _tai_spool_flush; return 0 }
+  (( _TAI_SPOOL_N )) && (( ${EPOCHSECONDS:-0} - _TAI_FLUSH_AT >= _TAI_SPOOL_SECONDS )) \
+    && _tai_spool_flush
+  return 0
+}
+
+_tai_spool_flush() {
+  ( ${(z)_TAI_BIN} flush >/dev/null 2>&1 & )
+  _TAI_SPOOL_N=0
+  _TAI_FLUSH_AT=${EPOCHSECONDS:-0}
+}
+
+# A shell that exits with anything pending flushes it on the way out — the
+# detached flush survives the shell that asked for it, which is the same
+# parenthesised-fork rule the record path has always used.
+_tai_spool_exit() { (( _TAI_SPOOL_N )) && _tai_spool_flush; return 0 }
+
 _tai_preexec() {
   # The command only. Resolving the repo and branch costs four forks, and doing
   # it here put them on the critical path of every command the user runs — about
@@ -536,14 +585,14 @@ _tai_precmd() {
     fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions
     # but skips the durable write. Read per prompt so it can be set per command.
-    [[ "${TAI_NO_AUTO_RECORD:-0}" == "1" ]] || \
-      ( ${(z)_TAI_BIN} record "$_TAI_CMD" --cwd "${_TAI_CWD:-$PWD}" --git "$(_tai_repo)" --branch "$(_tai_branch)" --exit $code >/dev/null 2>&1 & )
+    [[ "${TAI_NO_AUTO_RECORD:-0}" == "1" ]] || _tai_record "$code"
     _TAI_CMD=""
   fi
 }
 if (( $+functions[add-zsh-hook] )); then
   add-zsh-hook preexec _tai_preexec
   add-zsh-hook precmd _tai_precmd
+  add-zsh-hook zshexit _tai_spool_exit
 fi
 bindkey '^F' tai-accept
 # TAI_NO_MENU=1 puts Tab back to "take the ghost text, or complete". Read once,

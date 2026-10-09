@@ -119,6 +119,39 @@ if [[ -z "$_TAI_BIN" ]]; then
   fi
 fi
 
+# The spool: the write side of recording. One user command used to be one
+# backgrounded python process — `tai record` forked an interpreter per command
+# for the life of an install, about 30ms of CPU each. Now the command is one
+# builtin append to this file, and `tai flush` — asked for only when the batch
+# is worth a process — ingests it into the store, maintains the index, and
+# learns the batch's new tools, all in one interpreter.
+#   TAI_SPOOL          names the spool file (default: beside the database)
+#   TAI_SPOOL_MAX      pending records that force a flush (default 8)
+#   TAI_SPOOL_SECONDS  idle seconds that force one (default 3)
+_tai_spool_file="${TAI_SPOOL:-}"
+if [[ -z "$_tai_spool_file" && -n "${TAI_DB:-}" ]]; then
+  # The spool lives beside the database, the same rule tai/spool.py applies;
+  # a relative TAI_DB is the current directory in both.
+  [[ "$TAI_DB" == */* ]] && _tai_spool_file="${TAI_DB%/*}/spool.log" || _tai_spool_file="spool.log"
+fi
+: ${_TAI_SPOOL_FILE:=${_tai_spool_file:-${XDG_DATA_HOME:-$HOME/.local/share}/tai/spool.log}}
+# The knobs are read from their own public names here, not defaulted into the
+# underscore spellings: `: ${_TAI_SPOOL_MAX:=8}` would answer "is the shell
+# variable set" — which it never is — and a TAI_SPOOL_MAX=1 in the
+# environment would be ignored while the flush waited for eight records
+# forever. An integer type, so a garbage value degrades to zero (flush every
+# command) rather than to a math error in a prompt hook.
+typeset -gi _TAI_SPOOL_MAX=${TAI_SPOOL_MAX:-8}
+typeset -gi _TAI_SPOOL_SECONDS=${TAI_SPOOL_SECONDS:-3}
+typeset -gi _TAI_SPOOL_N=0
+# The timestamp a record carries and the idle clock the flush decision reads
+# are both this builtin's, because a fork for the time would cost more than
+# the record it is attached to. A zsh without the module records ts=0, and the
+# flush stamps the drain time instead — coarser recency, nothing lost.
+zmodload zsh/datetime 2>/dev/null
+: ${_TAI_FLUSH_AT:=${EPOCHSECONDS:-0}}
+unset _tai_spool_file
+
 _TAI_SUGGESTION=""
 _TAI_LAST=""
 # Set by preexec, read and cleared by precmd. Initialised here because zsh runs

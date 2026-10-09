@@ -70,6 +70,16 @@ assert not is_recordable("echo " + "x" * 2100), "over-long must be rejected"
 assert is_recordable("docker compose up -d"), "normal command must be kept"
 assert is_recordable("ls -R ~/src"), "plain command must be kept"
 assert is_recordable("git commit -m __START__"), "lookalike text must be kept"
+# One key is not vocabulary: an accidental Enter on a stray character is
+# recorded like any other command, and recency is the one signal that makes it
+# look good — the report that set this rule was an empty Tab whose menu was a
+# band of one-key entries above the directory listing. Aliases are shell state;
+# a real one-character tool loses nothing but a rank it never deserved.
+assert not is_recordable("y"), "a one-key Enter must not be recorded (y)"
+assert not is_recordable("n"), "a one-key Enter must not be recorded (n)"
+assert not is_recordable("-"), "a one-key Enter must not be recorded (-)"
+assert not is_recordable("`"), "a stray backtick must not be recorded"
+assert is_recordable("ls"), "a two-letter command is kept"
 # A command that spans several of the user's Enters is one command here and two
 # candidates there: the index newline-joins what it offers for a word, so the
 # second half of it would have been offered as a command of its own that is not.

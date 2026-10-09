@@ -6,13 +6,19 @@ How tai is put together, and why. For what the keys do, read
 ## The one-line shape
 
 ```text
-history / SQLite  →  tai refresh  →  zsh + bash associative arrays  →  ZLE / readline
+command → shell spool (builtin append)  →  tai flush  →  SQLite  →  tai refresh  →  zsh + bash associative arrays  →  ZLE / readline
 ```
 
 `tai refresh` writes two ordinary shell-sourceable snapshots —
 `$XDG_DATA_HOME/tai/zsh-index.zsh` and `bash-index.bash` beside it; the
 plugins load them into associative arrays at startup and do everything else
-with shell builtins. There is no server component on the autocomplete path.
+with shell builtins. There is no server component on the autocomplete path —
+and no Python process on the *recording* path either: a command is one
+`print`/`printf` append to a spool file, and `tai flush` ingests batches of
+them into the store when the batch is worth a process (eight records or three
+idle seconds, whichever comes first). The store's `is_recordable` gate —
+secrets, harness wrappers, multiline and one-key commands — is the only gate
+between what was typed and what is learned, whichever transport carried it.
 
 ## Why embedded rather than a service
 
@@ -21,7 +27,10 @@ already holding the user's keystroke. A socket round-trip cannot be made
 reliable inside that, and a daemon that has to be installed, started, supervised
 and version-matched with the shell plugin is a great deal of surface. So the
 ranking happens at build time, the answer is a file, and the keystroke path is
-an associative-array lookup.
+an associative-array lookup. The same arithmetic retired the last per-command
+process: a backgrounded `tai record` after every line cost ~30ms of
+interpreter per command for the life of an install, and the spool records the
+same rows for ~0.01ms of shell and one interpreter per batch.
 
 The consequence worth knowing: **learning is not instant, and does not pretend
 to be.** The index is a file, and a shell that read it keeps the copy it read.

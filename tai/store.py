@@ -35,7 +35,17 @@ _WRAPPER = re.compile(
 def is_recordable(cmd: str) -> bool:
     """True when a command is safe to store and worth ranking."""
     cmd = (cmd or "").strip()
-    if not cmd or len(cmd) > 2000:
+    if len(cmd) < 2:
+        # One key is not vocabulary. An accidental Enter on a stray character
+        # (`y`, `n`, `-`, a backtick) is recorded like any other command, and
+        # nothing can rank it usefully: it carries no tool, no argument, and
+        # no path — it just happened recently, which is the one signal that
+        # makes it look good. The report that set this rule: those one-key
+        # entries filled an empty Tab's menu ahead of the directory listing.
+        # Aliases are shell state, not history; a real one-character tool
+        # loses nothing but a rank it never deserved.
+        return False
+    if len(cmd) > 2000:
         return False
     # A command with a newline in it is one command here but two there: the
     # index newline-joins its candidates, so `git commit -m 'line one<NL>line

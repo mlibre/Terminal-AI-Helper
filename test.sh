@@ -61,6 +61,7 @@ step "syntax"        syntax_check
 
 step "smoke"         python3 tests/test_smoke.py
 step "smoke cli"     python3 tests/test_smoke_cli.py
+step "spool"         python3 tests/test_spool.py
 step "smoke install" python3 tests/test_smoke_install.py
 step "deb"           python3 tests/test_deb.py
 step "jev"           python3 tests/test_jev.py

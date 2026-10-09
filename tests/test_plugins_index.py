@@ -170,13 +170,22 @@ def test_recording() -> None:
             db = RECORD_DB.with_name(f"{RECORD_DB.stem}-{shell}-"
                                      f"{'off' if disabled else 'on'}"
                                      f"{RECORD_DB.suffix}")
+            # The spool, named just as singly: it is the shells' write side now,
+            # and "wrote nothing" has to mean the spool never grew either.
+            spool = RECORD_DB.with_name(f"{db.stem}-spool{db.suffix}")
             for suffix in ("", "-wal", "-shm"):
                 pathlib.Path(str(db) + suffix).unlink(missing_ok=True)
+            spool.unlink(missing_ok=True)
             # The only test that records, so it also gets a throwaway index path:
             # a stored command can trigger the 100-command maintenance rebuild in
             # a detached process, and that process writes TAI_INDEX.
+            # TAI_SPOOL_MAX=1 asks for the flush after every command — the same
+            # one-record-at-a-time cadence the tests can wait on; the product's
+            # default batches eight.
             env = {"TAI_NO_AUTO_RECORD": "1" if disabled else "0",
-                   "TAI_INDEX": str(RECORD_INDEX), "TAI_DB": str(db)}
+                   "TAI_INDEX": str(RECORD_INDEX), "TAI_DB": str(db),
+                   "TAI_SPOOL": str(spool),
+                   "TAI_SPOOL_MAX": "1", "TAI_SPOOL_SECONDS": "1"}
             s = Session(shell, env)
             for cmd in typed:
                 s.send(cmd + "\n")   # newline submits, so it really runs
@@ -186,7 +195,7 @@ def test_recording() -> None:
             # still open is what makes the assertion about recording and not
             # about the race between a python startup and the pty going away:
             # close() tears down the master, and the kernel's SIGHUP to the
-            # session's group is then free to kill a record that has not
+            # session's group is then free to kill a flush that has not
             # exec'd yet. A session that exits NORMALLY never sends that
             # SIGHUP, so the product never sees this race — only this
             # harness could lose it.
@@ -195,10 +204,18 @@ def test_recording() -> None:
                 # Recording is off, so nothing will ever land: the absence
                 # is checked after the session is gone, on the final state.
                 check(f"{shell} writes nothing when disabled", rows(db), [])
+                check(f"{shell} spools nothing when disabled",
+                      spool.exists(), False)
             else:
                 missing = await_rows(db, typed)
                 s.close()
                 check(f"{shell} records when enabled", missing, [])
+                # Every record went through the spool, and every flush drains
+                # it whole: a spool still holding frames at this point means a
+                # record bypassed the gate or a flush lost one.
+                check(f"{shell} drained its spool",
+                      not spool.exists() or spool.read_text().strip() == "",
+                      True)
 
 
 

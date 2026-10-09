@@ -8,6 +8,7 @@ updating, and diagnostics.
     tai suggest "<prefix>" [--cwd X --git Y --branch B --last "a;b" --limit N --json --jev]
     tai jev "<prefix>" --candidate "cmd" [--candidate "cmd" ...]
     tai record "<cmd>" [--cwd X --git Y --branch B --exit 0]
+    tai flush              ingest the records the plugins spooled, then maintain
     tai refresh [--quiet]
     tai update | upgrade   pull the latest version from GitHub and reinstall
     tai version            print the release this install is running
@@ -21,22 +22,22 @@ updating, and diagnostics.
     tai eval
     tai eval-jev
 """
-import argparse
 import os
 import sys
-from pathlib import Path
 
 REPO_URL = "https://github.com/mlibre/terminal-ai-helper"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Nothing heavy is imported at module level, and the reason is `tai record`: it
-# runs in a fresh process after every single command the user types, so every
-# import here is paid once per command for the life of an install. argparse is
-# unavoidable (every path parses arguments) and the store is what record opens;
-# json, shutil and subprocess are each needed by one command, and maintenance,
-# knowledge and jev by a few — all of them load inside the functions that use
-# them, so a record pays for none of them.
+# Nothing heavy is imported at module level, and the reason is the CLI's own
+# startup: `tai flush` runs once per batch of records, `tai record` is the
+# fallback write path, and every command here is one process the user waits
+# on. argparse — about 5ms — is imported inside main(), after the two
+# hand-parsed fast paths (record, version) have had their chance; pathlib is
+# imported by the four commands that touch paths; json, shutil and subprocess
+# are each needed by one command, and maintenance, knowledge and jev by a
+# few — all of them load inside the functions that use them, so a record or a
+# flush pays for none of them.
 
 
 def _which(name: str) -> str | None:
@@ -111,13 +112,14 @@ def cmd_suggest(a) -> int:
     return 0
 
 
-def _repo_dir() -> Path:
+def _repo_dir() -> "Path":
     """The checkout this `tai` was installed from.
 
     The wrapper is `exec python3 <checkout>/tai/cli.py`, so the checkout is
     always this file's grandparent. No state file, no configuration, and it
     still works on a machine that has never been online.
     """
+    from pathlib import Path
     return Path(__file__).resolve().parent.parent
 
 
@@ -290,16 +292,46 @@ def _learn_on_use(command: str) -> None:
         _rebuild_quietly()
 
 
+def cmd_flush(a) -> int:
+    """Ingest the records the plugins spooled, then do the record path's chores.
+
+    The plugins append every command to the spool as one builtin write and ask
+    for this when the batch is worth a process — one interpreter per batch, not
+    one per command. Draining first and maintaining after is the same order
+    `tai record` keeps, so the index never rebuilds over rows it has not seen.
+    """
+    from tai.spool import flush
+    r = flush()
+    if r["ingested"]:
+        parts = [f"ingested {r['ingested']}"]
+        if r["skipped"]:
+            parts.append(f"skipped {r['skipped']} (secrets, control bytes, or not one line)")
+        if r["learned"]:
+            parts.append(f"learned {r['learned']} new tools")
+        print(f"✓ {', '.join(parts)}")
+    elif r["skipped"]:
+        print(f"✓ nothing ingested; skipped {r['skipped']} unusable records")
+    else:
+        print("✓ nothing pending")
+    return 0
+
+
 def cmd_record(a) -> int:
     """Store one command. Says whether it was stored, and says why if not.
 
-    The plugins call this detached with the output discarded, so the news is for
-    the person who typed it: `tai record` on the command line used to print
-    nothing at all, and a command rejected as a secret looked exactly like one
-    that had been stored. Which is the wrong way round — the rejection is the one
-    outcome worth explaining, because the rule is deliberate and the row is
-    absent on purpose.
+    The plugins no longer call this per command — they spool and the batch is
+    flushed — so this is the manual write path and the plugin's fallback when
+    the spool file cannot be written. The news is for the person who typed it:
+    `tai record` on the command line used to print nothing at all, and a
+    command rejected as a secret looked exactly like one that had been stored.
+    Which is the wrong way round — the rejection is the one outcome worth
+    explaining, because the rule is deliberate and the row is absent on
+    purpose.
     """
+    # Spooled records land first, so a record typed by hand is the newest row,
+    # not a row competing with a pending batch for the same moment.
+    from tai.spool import drain
+    drain()
     from tai.store import append_and_count
     ok, total, newest = append_and_count(a.command, cwd=a.cwd, repo=a.git,
                                          branch=a.branch, exit_code=a.exit)
@@ -365,6 +397,7 @@ def cmd_eval_jev(a) -> int:
 
 def cmd_uninstall(a) -> int:
     import shutil
+    from pathlib import Path
 
     from tai.paths import data_dir
     home = Path.home()
@@ -474,10 +507,15 @@ def cmd_version(a) -> int:
 
 
 def _read_version() -> str:
-    """The release version, from the VERSION file beside the checkout."""
+    """The release version, from the VERSION file beside the checkout.
+
+    Plain open, not pathlib: `tai version` is a fast path, and importing
+    pathlib costs about 9ms for a file read.
+    """
     try:
-        return (Path(__file__).resolve().parent.parent / "VERSION").read_text(
-            encoding="utf-8").strip()
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, os.pardir, "VERSION"), encoding="utf-8") as f:
+            return f.read().strip()
     except OSError:
         return "(unknown)"
 
@@ -486,6 +524,7 @@ _COMMANDS = {
     "suggest": cmd_suggest,
     "jev": cmd_jev,
     "record": cmd_record,
+    "flush": cmd_flush,
     "refresh": cmd_refresh,
     "update": cmd_update,
     "upgrade": cmd_update,
@@ -541,11 +580,30 @@ def _fast_record(argv: list[str]):
 
 def main() -> int:
     argv = sys.argv[1:]
-    # `record` is the one command typed by proxy once per user command, so it
-    # answers before argparse is even imported. A word it does not recognise
-    # (--help, a typo) drops through to the real parser, which names the problem.
+    # `record` is the fallback write path the plugins call by proxy, and
+    # `version` is the one a person types to see what they are running — both
+    # answer before argparse is even imported, because argparse is about 5ms
+    # and both commands are shorter than that. A word either does not
+    # recognise (--help, a typo) drops through to the real parser, which
+    # names the problem.
     if argv and argv[0] == "record" and "--help" not in argv and "-h" not in argv:
         return cmd_record(_fast_record(argv[1:]))
+    if argv == ["version"]:
+        print(f"tai {_read_version()}")
+        return 0
+    # Any other command is a tai process the user asked for, and a non-empty
+    # spool is records waiting for one: drain it here, so `tai suggest`,
+    # `tai refresh` or the dashboard never answer from a store that is a few
+    # records behind what the shells just did. `record` drained above, `flush`
+    # is the drain, and `version` stays lean; `uninstall` is about to delete
+    # the store either way.
+    if argv and argv[0] not in ("record", "flush", "version", "uninstall"):
+        try:
+            from tai.spool import drain
+            drain()
+        except Exception:
+            pass
+    import argparse
     p = argparse.ArgumentParser(
         prog="tai",
         description="learn the commands you run and suggest them as you type")
@@ -582,6 +640,7 @@ def main() -> int:
     r.add_argument("--branch", default="")
     r.add_argument("--exit", type=int, default=0)
 
+    sub.add_parser("flush", help="ingest the records the plugins spooled")
     sub.add_parser("uninstall", help="remove the plugins and the stored history")
     pg = sub.add_parser("purge", help="drop unusable stored history rows")
     pg.add_argument("--rebuild", action=argparse.BooleanOptionalAction, default=True,

@@ -25,8 +25,9 @@ tai/seed.py         the universal cold-start corpus
 tai/decisions.py    bounded Choice decision contract and the safety gate
 tai/jev.py          optional hosted Jev adapter (batched; never generates)
 tai/predictor.py    one-shot suggest: engine plus the path-liveness policy
+tai/spool.py        the shells' batched write side: framed spool, drain, flush
 tai/engcache.py     the built engine on disk for one-shot paths, keyed on the store
-tai/cli.py          suggest | jev | record | refresh | update | upgrade | version
+tai/cli.py          suggest | jev | record | flush | refresh | update | upgrade | version
                     | discover | purge | uninstall | bench | tune | web | doctor
 tai/bench.py        latency, memory, index and stale-path diagnostics
 tai/tune.py         coordinate search over the weights (writes engine.py)
@@ -247,9 +248,18 @@ Two costs dominate and both are worth checking after a change:
 The one-shot paths (`tai suggest`, `tai web`) load the engine from a disk
 cache beside the store (`tai/engcache.py`), keyed on the store's size and
 mtime — a new row invalidates it within the same write. `TAI_NO_ENGINE_CACHE=1`
-turns it off. `tai record` hand-parses its five flags so the once-per-command
-process never imports argparse; keep its imports lazy and its wrapper on
-`python3 -S -E`.
+turns it off. **The record path is a spool, not a process per command**: the
+plugins append one framed line with `print`/`printf` (measured ~0.01ms) and
+ask for `tai flush` when eight records or three idle seconds have piled up —
+one interpreter per batch, which drains, resolves repo/branch per distinct
+cwd, and runs the same `is_recordable` gate `tai record` applies. `tai record`
+itself is the manual write path and the plugin's fallback when the spool file
+cannot be written; it hand-parses its five flags and never imports argparse.
+Every `tai` command except `version` and `uninstall` drains a non-empty spool
+first, so no answer is ever behind the pending records. The knob names are
+read from their own public spellings (`TAI_SPOOL_MAX`, `TAI_SPOOL_SECONDS`) —
+a `: ${_TAI_SPOOL_MAX:=8}` default asks about the wrong variable and silently
+ignores the environment.
 
 Measured shapes the keystroke path now relies on — each is a promise in
 [AGENTS.md](../AGENTS.md) whose letter a suite holds; a change here should

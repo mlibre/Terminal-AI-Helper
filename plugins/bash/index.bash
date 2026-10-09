@@ -119,6 +119,37 @@ if [[ ${#_TAI_ARGV[@]} -eq 0 ]]; then
   fi
 fi
 
+# The spool: the write side of recording. One user command used to be one
+# backgrounded python process — `tai record` forked an interpreter per command
+# for the life of an install, about 30ms of CPU each. Now the command is one
+# builtin append to this file, and `tai flush` — asked for only when the batch
+# is worth a process — ingests it into the store, maintains the index, and
+# learns the batch's new tools, all in one interpreter.
+#   TAI_SPOOL          names the spool file (default: beside the database)
+#   TAI_SPOOL_MAX      pending records that force a flush (default 8)
+#   TAI_SPOOL_SECONDS  idle seconds that force one (default 3)
+_TAI_SPOOL_FILE="${TAI_SPOOL:-}"
+if [[ -z "$_TAI_SPOOL_FILE" && -n "${TAI_DB:-}" ]]; then
+  # The spool lives beside the database, the same rule tai/spool.py applies;
+  # a relative TAI_DB is the current directory in both.
+  [[ "$TAI_DB" == */* ]] && _TAI_SPOOL_FILE="${TAI_DB%/*}/spool.log" || _TAI_SPOOL_FILE="spool.log"
+fi
+: "${_TAI_SPOOL_FILE:=${XDG_DATA_HOME:-$HOME/.local/share}/tai/spool.log}"
+# The knobs are read from their own public names — `: "${_TAI_SPOOL_MAX:=8}"`
+# would ask about the underscore variable, never the environment's, and a
+# TAI_SPOOL_MAX=1 in the environment would be ignored while the flush waited
+# for eight records forever. The `+0` is the boundary: a garbage value
+# degrades to zero (flush every command) rather than to a math error in a
+# prompt hook.
+_TAI_SPOOL_MAX=$(( ${TAI_SPOOL_MAX:-8} + 0 ))
+_TAI_SPOOL_SECONDS=$(( ${TAI_SPOOL_SECONDS:-3} + 0 ))
+_TAI_SPOOL_N=0
+# The timestamp a record carries and the idle clock the flush decision reads
+# are this builtin's, because a fork for the time would cost more than the
+# record it is attached to. A bash without %(...)T records ts=0, and the flush
+# stamps the drain time instead — coarser recency, nothing lost.
+printf -v _TAI_FLUSH_AT '%(%s)T' -1 2>/dev/null || _TAI_FLUSH_AT=0
+
 _TAI_SUGGESTION=""
 _TAI_LAST=""
 # What a path argument could be, and when each of those files was last written.
