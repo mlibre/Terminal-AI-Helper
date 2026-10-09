@@ -24,11 +24,15 @@ _tai_units_load() {
   local file list line
   _tai_units_cache "$user"
   file="$_TAI_UNITS_FILE"
-  local epoch=""
+  # The stamp and the first unit are read together, because a file with a
+  # stamp and nothing under it is not a cache that answered — it is a torn
+  # or truncated one, and "zero units" would stick for the TTL. The zsh
+  # loader has always required both lines; this one matches it now.
+  local epoch="" first=""
   if [[ -r "$file" ]]; then
-    read -r epoch < "$file" 2>/dev/null
+    { read -r epoch; read -r first; true; } < "$file" 2>/dev/null
   fi
-  if [[ "$epoch" =~ ^[0-9]+$ ]] && (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )); then
+  if [[ "$epoch" =~ ^[0-9]+$ && -n "$first" ]] && (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )); then
     list=()
     while IFS= read -r line; do [[ -n "$line" ]] && list+=( "$line" ); done < <(tail -n +2 "$file" 2>/dev/null)
     if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi

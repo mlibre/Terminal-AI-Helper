@@ -188,6 +188,22 @@ def data_dir() -> Path:
     return Path(base) / "tai"
 
 
+def db_path() -> Path:
+    """Where the history store lives — `TAI_DB`, or beside `data_dir()`.
+
+    This used to live in tai/store, and the cost of that was paid by every
+    process that only wanted the *name*: the engine cache is keyed on the
+    database file's own (size, mtime_ns), so `tai suggest` asked for the path
+    before it could ask whether it needed the store at all — and importing
+    the store dragged sqlite3 and re into a warm-cache process that reads
+    neither. The decision is a path decision (one env var, one directory),
+    so it lives here with the others; tai/store keeps the name as a
+    re-export, because the writer and every reader of the store still say
+    `store.db_path`.
+    """
+    return Path(os.environ.get("TAI_DB") or data_dir() / "history.db")
+
+
 def _unquote(token: str) -> str:
     if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
         return token[1:-1]

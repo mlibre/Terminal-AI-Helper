@@ -70,19 +70,32 @@ _tai_load_index() {
   # for the same reason: the file has to be the whole truth rather than a growing
   # superset of every index this shell has ever read.
   _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=()
+  # The sorted-keys array is built on first use, not here: its one fork (a
+  # `sort` over every first-word key) belonged to the shell's startup, which
+  # is exactly the cost a plugin should not add — and most keystrokes never
+  # need it, because the exact-key hit answers first. _tai_first_keys below
+  # builds it the first time a half-typed name asks, and every shell start
+  # that never types one pays nothing.
+  _TAI_FIRST_KEYS_BUILT=""
   _TAI_FIRST_KEYS=()
   [[ -r "$_TAI_INDEX_FILE" ]] && _tai_index_readable && source "$_TAI_INDEX_FILE"
-  # The _TAI_FIRST keys, sorted once, for the binary search a half-typed command
-  # name walks instead of scanning every key on every keystroke. One fork per
-  # index load, never on the keystroke path; the comparison in the search uses
-  # the shell's own collation, and the sort runs in that same locale, so the two
-  # agree.
-  readarray -t _TAI_FIRST_KEYS < <(printf '%s\n' "${!_TAI_FIRST[@]}" | sort)
   # The redirect is wrapped in a group whose stderr is redirected, because inside
   # a function bash reports a failed redirect past the simple command's own
   # 2>/dev/null. The data directory may not exist yet, and a message on every
   # shell start is worse than a missing stamp. _tai_index_changed retries.
   { : >| "$_TAI_INDEX_STAMP"; } 2>/dev/null
+}
+
+# The _TAI_FIRST keys, sorted once, for the binary search a half-typed command
+# name walks instead of scanning every key. One fork per shell that uses it,
+# never per keystroke; the comparison in the search uses the shell's own
+# collation, and the sort runs in that same locale, so the two agree.
+# The flag is what makes "empty" mean empty rather than unbuilt: an index with
+# no first-word keys at all would otherwise re-fork on every half-typed letter.
+_tai_first_keys() {
+  [[ -n "$_TAI_FIRST_KEYS_BUILT" ]] && return 0
+  readarray -t _TAI_FIRST_KEYS < <(printf '%s\n' "${!_TAI_FIRST[@]}" | sort)
+  _TAI_FIRST_KEYS_BUILT=1
 }
 
 _tai_index_changed() {

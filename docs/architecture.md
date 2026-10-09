@@ -111,7 +111,7 @@ module owns the shadow rule
 just below it, in the engine and the index alike, however the rows'
 frequencies, timestamps and exit codes tie. The full weight list lives at the
 top of
-`tai/engine.py`, and the built engine is pickled beside the store for the
+`tai/engine.py`, and the built engine is marshaled beside the store for the
 one-shot paths, keyed on the store file itself — a new row invalidates it
 (`tai/engcache.py`); the keystroke path never touches it.
 

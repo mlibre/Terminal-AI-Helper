@@ -192,12 +192,55 @@ def test_preload_makes_no_job_noise() -> None:
             print(f"       terminal tail:\n{indent(tail(s.raw(), 400))}")
 
 
+def test_units_cache_survives_corruption() -> None:
+    """A torn, stale-in-the-future, or gutted cache refetches, never sticks.
+
+    The cache is one file a shell reads back; anything can happen to it — a
+    truncated write, a clock that jumped, a stamp with no units under it. The
+    loader's answer in every one of those cases has to be the same: fork the
+    one `systemctl` call, rewrite the file, answer with the real units. A
+    cache that could answer "no units" for a day because of one bad write
+    would be a completion that lies politely.
+    """
+    for shell in ("bash", "zsh"):
+        if not SHELLS[shell]:
+            continue
+        print(f"{shell}: the unit cache refetches instead of sticking")
+        cache_dir = UNITS_CACHE / "tai"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        s = Session(shell, env_extra=units_env())
+        for name, body in (
+                ("a garbage stamp", "not-a-number\njunk\n"),
+                ("a stamp with no units", f"{int(time.time()) - 10}\n"),
+                ("a stamp from the future", f"{int(time.time()) + 90_000}\n"
+                                            "herm.service\n"),
+        ):
+            (cache_dir / "units-system.txt").write_text(body)
+            s.run("_tai_units_load 0 >/dev/null 2>&1")
+            # The accept key, not the ghost: bash paints no hint while a line
+            # is being typed — its suggestion arrives when a key takes it —
+            # so the answer is read the way a user reads it, in both shells.
+            s.send("sudo systemctl restart her")
+            s.write(RIGHT)
+            s.settle()
+            check(f"{shell}: {name} refetches rather than answering",
+                  s.line(), "sudo systemctl restart herm.service")
+            s.write("\x15")
+            body_now = cache_text("system")
+            check(f"{shell}: {name} left a whole cache behind",
+                  body_now.splitlines()[0].isdigit()
+                  and "herm.service" in body_now, True)
+        s.close()
+        check(f"{shell} corrupt-cache runs clean", s.noise(), [])
+
+
 def main() -> int:
     setup()
     setup_units()
     test_zsh_units()
     test_bash_units()
     test_units_cache_is_reused()
+    test_units_cache_survives_corruption()
     test_preload_makes_no_job_noise()
     print("\nOK — systemctl units complete from a cached list, in both shells."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")

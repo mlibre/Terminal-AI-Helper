@@ -28,7 +28,8 @@ tai/predictor.py    one-shot suggest: engine plus the path-liveness policy
 tai/spool.py        the shells' batched write side: framed spool, drain, flush
 tai/engcache.py     the built engine on disk for one-shot paths, keyed on the store
 tai/cli.py          suggest | jev | record | flush | refresh | update | upgrade | version
-                    | discover | purge | uninstall | bench | tune | web | doctor
+                    | discover | purge | forget | uninstall | bench | tune | web
+                    | doctor | eval | eval-jev
 tai/bench.py        latency, memory, index and stale-path diagnostics
 tai/tune.py         coordinate search over the weights (writes engine.py)
 tai/evaluate.py     labeled candidate evaluation (+ evaluate_jev.py, hosted)
@@ -49,6 +50,8 @@ tests/test_spool.py         the spool: framed records, drain, flush, learning bo
 tests/test_smoke_install.py sequence table, history files, safety, lock, install
 tests/test_deb.py           the package: builds, installs its tree, runs
 tests/test_jev.py           the decision contract
+tests/test_typo.py          the banded distance against a reference, gates, shadows
+tests/test_engcache.py      the engine cache: round-trip identity, every fall-back
 tests/test_web.py           the dashboard: routes, binding, engine agreement
 tests/plugin_env.py         paths, key names and the index fixture the pty tests share
 tests/plugin_pty.py         a real shell on a pty, plus check/probe/Ghosts
@@ -59,13 +62,14 @@ tests/test_plugins_draw.py  what is drawn: ghost text, hints, colours, load orde
 tests/test_plugins_files.py a line ending in a file, its caps and roots agreement
 tests/test_plugins_wide.py  double-width file names, drawn and highlighted right
 tests/test_plugins_index.py a rebuild an open shell picks up, and recording
+tests/test_plugins_units.py systemctl units: the cache, its corruption, the quiet preload
 tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
                             the system's, then this — the pty suite runs anywhere
 ```
 
-Twelve entry points, each a script of assertions that prints what it found,
+Seventeen entry points, each a script of assertions that prints what it found,
 and each runnable on its own; `./test.sh` runs them all. Three share
-`smoke_env.py` and six share the `plugin_*` modules, so a scratch database, a
+`smoke_env.py` and seven share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences: **a test function no
 `main()` calls is not a test** — adding a test means adding the call — and
 **the shared modules are the only copy**: a test that defines its own fixture,
@@ -83,11 +87,11 @@ in code.
 ## Tests
 
 ```sh
-./test.sh          # everything, ~16s
-./test.sh --fast   # skips the pty suite, ~3s
+./test.sh          # everything, on the order of a minute
+./test.sh --fast   # skips the pty suite, a fraction of that
 ```
 
-The pty suite is ~90% of the runtime and it is the one that matters for
+The pty suite is roughly half the runtime and it is the one that matters for
 anything touching `plugins/`: it drives real interactive bash and zsh and
 asserts on what the terminal actually shows, because calling a plugin's
 functions from a non-interactive shell silently skips key bindings, the
@@ -276,8 +280,8 @@ re-measure on a fixture big enough to feel:
   letter — instead of one per keystroke.
 - **The file answer reads a one-second snapshot, not the disk**, with one
   direct listing as the fallback when the snapshot answers nothing.
-- **bash sorts `_TAI_FIRST` once per index load** and binary-searches the
-  half-typed name.
+- **bash sorts `_TAI_FIRST` once, on the first half-typed name** (the sort is
+  one fork, kept off the shell's startup), and binary-searches from there.
 
 ## Documentation
 

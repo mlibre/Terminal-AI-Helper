@@ -349,10 +349,17 @@ class Engine:
         follow = self.seq.get(prev, None) if prev else None
         max_follow = max(follow.values()) if follow else 0
 
-        # token context for next-token bonus
+        # token context for next-token bonus. The rows and their totals are
+        # taken once, here, rather than per candidate: the old loop summed
+        # the same row again for every candidate the prefix had, which on a
+        # broad prefix was the same walk paid 600 times for one row.
         ptoks = prefix.split()
         tri_ctx = tuple(ptoks[-2:]) if len(ptoks) >= 2 else None
         bi_ctx = ptoks[-1] if ptoks else None
+        tri_row = self.token_trigram.get(tri_ctx) if tri_ctx else None
+        tri_total = sum(tri_row.values()) if tri_row else 0
+        bi_row = self.token_bigram.get(bi_ctx) if bi_ctx else None
+        bi_total = sum(bi_row.values()) if bi_row else 0
 
         scored: list[tuple[float, str]] = []
         exp = math.exp
@@ -379,18 +386,18 @@ class Engine:
             hour_s = (st.hour[hb] / max(st.freq, 1)) if st.freq else 0.0
             seq_s = (follow.get(name, 0) / max_follow) if (follow and max_follow) else 0.0
 
-            # token n-gram bonus: P(next token | context)
+            # token n-gram bonus: P(next token | context). The row and its
+            # total come from above; `or 1` is the loop's old `max(sum, 1)`.
             tok_s = 0.0
             if prefix and name.startswith(prefix):
                 rest = name[len(prefix):].lstrip()
                 if rest:
                     nxt = rest.split()[0]
-                    if tri_ctx and tri_ctx in self.token_trigram:
-                        tc = self.token_trigram[tri_ctx]
-                        tok_s = max(tok_s, tc.get(nxt, 0) / max(sum(tc.values()), 1))
-                    if bi_ctx and bi_ctx in self.token_bigram:
-                        bc = self.token_bigram[bi_ctx]
-                        tok_s = max(tok_s, 0.7 * bc.get(nxt, 0) / max(sum(bc.values()), 1))
+                    if tri_row is not None:
+                        tok_s = max(tok_s, tri_row.get(nxt, 0) / (tri_total or 1))
+                    if bi_row is not None:
+                        tok_s = max(tok_s,
+                                    0.7 * bi_row.get(nxt, 0) / (bi_total or 1))
 
             extra_len = max(0, len(name) - len(prefix))
             len_pen = min(extra_len / LEN_PENALTY_DIV, MAX_LEN_PEN)

@@ -582,6 +582,64 @@ _COMMANDS = {
 }
 
 
+def _fast_suggest(argv: list[str]):
+    """Hand-parse `tai suggest …`'s seven flags, or return None to say no.
+
+    suggest is the one command a curious person runs first and the one the
+    dashboard's try box re-runs, and argparse is about 6ms of its 45 — the
+    same deal `tai record` got, with one extra rule: any token this parser
+    cannot name (--help, -h, a misspelled flag, an abbreviation like --lim,
+    a bare `--`, a second positional) returns None and argparse reports it
+    properly. The = form is accepted because it is the one shell scripts
+    actually write.
+    """
+    class _A: pass
+    a = _A()
+    a.prefix = ""
+    a.cwd = a.git = a.branch = ""
+    a.last = ""
+    a.limit = 1
+    a.json = a.jev = False
+    positional: list[str] = []
+    it = iter(argv)
+    for tok in it:
+        if tok == "--":
+            return None
+        if tok.startswith("--"):
+            name, eq, value = tok[2:].partition("=")
+            if name == "json" and not eq:
+                a.json = True
+                continue
+            if name == "jev" and not eq:
+                a.jev = True
+                continue
+            if name in ("cwd", "git", "branch", "last"):
+                if not eq:
+                    value = next(it, None)
+                    if value is None:
+                        return None
+                setattr(a, name, value)
+                continue
+            if name == "limit":
+                if not eq:
+                    value = next(it, None)
+                    if value is None:
+                        return None
+                try:
+                    a.limit = int(value)
+                except ValueError:
+                    return None
+                continue
+            return None              # --help, -h, a typo, an abbreviation
+        if tok.startswith("-"):
+            return None              # short flags belong to argparse
+        positional.append(tok)
+    if len(positional) > 1:
+        return None
+    a.prefix = positional[0] if positional else ""
+    return a
+
+
 def _fast_record(argv: list[str]):
     """Hand-parse `tai record …`'s five flags, so record skips argparse.
 
@@ -634,13 +692,19 @@ def main() -> int:
     # `tai refresh` or the dashboard never answer from a store that is a few
     # records behind what the shells just did. `record` drained above, `flush`
     # is the drain, and `version` stays lean; `uninstall` is about to delete
-    # the store either way.
+    # the store either way. The fast suggest path below returns from inside
+    # main(), so the drain has to have happened by then — it is ordered first
+    # on purpose, and tests/test_cli.py pins the order.
     if argv and argv[0] not in ("record", "flush", "version", "uninstall"):
         try:
             from tai.spool import drain
             drain()
         except Exception:
             pass
+    if argv and argv[0] == "suggest":
+        fast = _fast_suggest(argv[1:])
+        if fast is not None:
+            return cmd_suggest(fast)
     import argparse
     p = argparse.ArgumentParser(
         prog="tai",

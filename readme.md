@@ -83,7 +83,7 @@ GETs only, and it can write nothing.
 | ----------------------- | ----------------------------------------------------------------- |
 | `→`                     | take the hint at the end of the line, else move right             |
 | `Ctrl-F`                | take the hint                                                     |
-| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type           |
+| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`) |
 | `Tab`                   | cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
 | `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection |
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line  |
@@ -94,9 +94,10 @@ list on its own, and one typed character brings it back. And taking a
 directory from a list is not a request to go there: `Enter` fills it in and
 stops, so the line always says exactly what it will do before it runs.
 
-**bash** ranks identically but readline cannot draw a list below the line:
-`→` and `Ctrl-F` write plain characters, and `Tab` completes directly — by
-default only after `tai`, or after every command with `TAI_COMPLETE_ALL=1`.
+**bash** ranks identically, accepts the same keys, and readline cannot draw a
+list below the line: `→` and `Ctrl-F` accept the hint, `Ctrl-Right` takes one
+word of it, and `Tab` completes directly — by default only after `tai`, or
+after every command with `TAI_COMPLETE_ALL=1`.
 
 ## What it suggests, and what it will not
 
@@ -189,7 +190,7 @@ All have working defaults; they are for when yours is wrong.
 | `TAI_FILE_ROOTS`        | —                               | extra places to look for a file argument, `:`-separated |
 | `TAI_SKIP_PATH_CHECK`   | off                             | suggest commands whose paths no longer exist            |
 | `TAI_COMPLETE_ALL`      | off                             | bash `Tab` completes every command                      |
-| `TAI_HIGHLIGHT_STYLE`   | `fg=8,bold`                     | zsh hint style, set before sourcing                     |
+| `_TAI_HIGHLIGHT_STYLE`  | `fg=8,bold`                     | zsh hint style, set before sourcing                     |
 | `_TAI_MENU_ROWS`        | `10`                            | rows the zsh list may take                              |
 | `_TAI_MENU_STYLE`       | `standout`                      | zsh selection style, set before sourcing                |
 | `_TAI_DIR_STYLE`        | `fg=blue,bold`                  | zsh colour for a directory's name                       |

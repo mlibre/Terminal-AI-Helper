@@ -59,9 +59,11 @@ the letter of the law, this file keeps the spirit. A rule broken is a red
 build. When a check fails, fix the product, never the check — and write the
 check before the fix lands, not after.
 
-- `tests/test_smoke*.py` — the engine, the store, the CLI: what the history
-  and the filesystem promise, what a rebuild may publish, and what a store
-  that cannot be read is allowed to look like.
+- `tests/test_smoke*.py`, `tests/test_typo.py`, `tests/test_engcache.py`,
+  `tests/test_spool.py`, `tests/test_cli.py` — the engine, the store, the typo
+  tolerance, the engine cache, the spool and the CLI: what the history and the
+  filesystem promise, what a rebuild may publish, and what a store that cannot
+  be read is allowed to look like.
 - `tests/test_plugins*.py` — both shells, driven through a real pty and read
   off an emulated screen, so a rule that works in one shell and not the other
   is caught where it would be caught: on the screen.

@@ -68,8 +68,14 @@ def is_recordable(cmd: str) -> bool:
 
 
 def db_path() -> Path:
-    from tai.paths import data_dir
-    return Path(os.environ.get("TAI_DB") or data_dir() / "history.db")
+    """Where the history store lives. One decision, kept in tai/paths.
+
+    The implementation moved there so that the processes which only want the
+    *name* — the engine cache is keyed on it — stop importing this module for
+    it; this re-export keeps every `store.db_path` reader working.
+    """
+    from tai.paths import db_path as _db_path
+    return _db_path()
 
 
 def ensure_db(con: sqlite3.Connection) -> None:

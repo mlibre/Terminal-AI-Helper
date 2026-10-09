@@ -66,6 +66,8 @@ step "cli"           python3 tests/test_cli.py
 step "smoke install" python3 tests/test_smoke_install.py
 step "deb"           python3 tests/test_deb.py
 step "jev"           python3 tests/test_jev.py
+step "typo"          python3 tests/test_typo.py
+step "engcache"      python3 tests/test_engcache.py
 step "web"           python3 tests/test_web.py
 step "rules"         python3 tests/test_rules.py
 if (( ! fast )); then

@@ -14,8 +14,7 @@ import time
 
 from tai.engine import WRAPPERS, Engine
 from tai.fresh import files
-from tai.paths import takes_file
-from tai.store import load_rows
+from tai.paths import db_path, takes_file
 
 _E: Engine | None = None
 _STALE: frozenset = frozenset()
@@ -61,6 +60,10 @@ def _build_engine() -> Engine:
     """
     eng = Engine()
     try:
+        # Imported here, not at the top: a warm engine cache answers without
+        # the store, and this import is sqlite3 and re for every process that
+        # never reads either.
+        from tai.store import load_rows
         eng.build_from_rows(load_rows(20000))
     except Exception as e:
         from tai.store import schema_note
@@ -79,7 +82,6 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     # these, and a literal here meant a tuned temperature changed the engine and
     # not the one-shot path that calls it.
     from tai.engine import TEMP_DEFAULT
-    from tai.store import db_path
     if temp is None:
         temp = TEMP_DEFAULT
     if _E is None:
@@ -117,7 +119,6 @@ def explain(prefix: str, cmd: str, cwd: str = "", repo: str = "",
     global _E, _STALE
     if _E is None:
         from tai.engcache import get
-        from tai.store import db_path
         _E = get(db_path(), _build_engine)
         _STALE = _stale_for(_E)
     out = _E.explain(prefix or "", cmd, cwd=cwd, repo=repo, branch=branch,

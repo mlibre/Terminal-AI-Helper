@@ -503,7 +503,7 @@ assert "W_RECENCY" in _refused.stdout and "not written" in _refused.stdout, _ref
 assert _engine.read_text() == _before, "engine.py was rewritten by a run that could not tune it"
 print("OK — tune: writes only what it changed, and says so when it changed nothing.")
 
-# The one-shot paths are answered from a pickled engine keyed on the store
+# The one-shot paths are answered from a marshaled engine keyed on the store
 # file, so a fresh process loads instead of rebuilding. Two properties matter:
 # a store that gained a row is reflected the moment the next process asks, and
 # a stale-or-disabled cache only ever costs time, never correctness.

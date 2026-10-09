@@ -191,6 +191,36 @@ def main() -> int:
     check("and the local ranking still answers",
           r.stdout.strip().splitlines()[0], "git status")
 
+    print("tai suggest: the fast parser and the wall behind it")
+    # suggest is hand-parsed before argparse is imported, and the hand stops
+    # at anything it cannot name — the wall's other side is argparse, which
+    # reports the problem properly. Every fall-through here is a shape a
+    # script or a curious person can actually type.
+    r = run("suggest", "git ", "--limit=2", env=env)
+    check("the = form parses without argparse",
+          (r.returncode, len(r.stdout.strip().splitlines())), (0, 2))
+    r = run("suggest", "git", "status", env=env)
+    check("a second positional falls through and argparse refuses it",
+          (r.returncode, "unrecognized" in r.stderr), (2, True))
+    r = run("suggest", "--help", env=env)
+    check("--help falls through to the real parser's usage",
+          (r.returncode, "usage: tai" in r.stdout), (0, True))
+    r = run("suggest", "git ", "--nope", env=env)
+    check("an unknown flag falls through and is named",
+          (r.returncode, "--nope" in r.stderr), (2, True))
+    r = run("suggest", "git ", "--limit", "two", env=env)
+    check("a garbage --limit falls through rather than guessing",
+          (r.returncode, "invalid int value" in r.stderr), (2, True))
+    # The fast path returns from inside main(), so the pending spool has to
+    # have been drained before it — a suggest that answers from a store a few
+    # records behind the shells is the one thing the drain exists to prevent.
+    env = world("suggest_drain")
+    seed_rows(env, [("git status", "/w", "", "", 0, 1728500000)])
+    append_frame(env, "1728500900", "0", "/w", "git bisect run")
+    r = run("suggest", "git b", env=env)
+    check("a pending spool row reaches the fast suggest that drains it",
+          (r.returncode, r.stdout.strip()), (0, "git bisect run"))
+
     print("tai forget: the usage line")
     env = world("forget")
     r = run("forget", "   ", env=env)

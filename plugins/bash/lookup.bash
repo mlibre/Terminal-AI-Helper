@@ -49,13 +49,15 @@ _tai_first_values() {
   # A glob character in the word would make the test mean something other than
   # "begins with the word", and no command is spelled with one.
   [[ "$word" != *[\*\?\[]* ]] || return 0
-  # Half-typed name. The keys were sorted once, at load, so the ones that begin
-  # with the word are a contiguous run found by binary search — a scan of every
+  # Half-typed name. The keys are sorted once, on first use (see
+  # _tai_first_keys in index.bash), so the ones that begin with the word are a
+  # contiguous run found by binary search — a scan of every
   # key here was most of a millisecond per keystroke on a real index, paid
   # again on every letter of a first word being typed. From each key the answer
   # takes only its *head*, which is that key's best line: the winner is the best
   # of the heads, by score, in _tai_best — provably the same winner a scan of
   # every line would find, because each key's head is the best of that key.
+  _tai_first_keys
   lo=0; hi=${#_TAI_FIRST_KEYS[@]}
   while (( lo < hi )); do
     mid=$(( (lo + hi) / 2 ))
@@ -107,6 +109,7 @@ _tai_first_lines() {
   local -a merged=()
   # The keys were sorted once, at load; the ones beginning with the word are
   # the same contiguous run the half-typed lookup binary-searches for.
+  _tai_first_keys
   lo=0; hi=${#_TAI_FIRST_KEYS[@]}
   while (( lo < hi )); do
     mid=$(( (lo + hi) / 2 ))
