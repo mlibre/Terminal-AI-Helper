@@ -155,10 +155,17 @@ def _file_answer(prefix: str, res: dict) -> dict:
     # A wrapper runs the command behind it, so it is transparent to the file too:
     # `sudo cat ` is a path argument exactly as `cat ` is. Both plugins strip it
     # before the lookup, and a rule that changed in one and not the others is how
-    # the paths drift apart.
+    # the paths drift apart. The typed form is kept beside the stripped one,
+    # because the engine's own answer for a wrapped line carries the wrapper
+    # back on it — the learned answer is read against the line as the user
+    # typed it, or `sudo cat notes.txt` would never start with the bare `cat`
+    # the lookup ran behind, and a live learned file would lose to whatever
+    # touched the directory last.
+    typed = key
     head = key.split(" ", 1)[0]
     if head in WRAPPERS:
         key = key.split(" ", 1)[1] if " " in key else ""
+        typed = f"{head} {key}" if key else ""
     if not key:
         return res
     evidence = any(takes_file(cmd) for cmd in _E.cmds
@@ -166,7 +173,7 @@ def _file_answer(prefix: str, res: dict) -> dict:
     if not evidence:
         return res
     learned = res.get("choice") or ""
-    last = learned[len(key) + 1:] if learned.startswith(key + " ") else ""
+    last = learned[len(typed) + 1:] if learned.startswith(typed + " ") else ""
     if last.startswith(word) and last and os.path.exists(
             os.path.expanduser(last)):
         return res

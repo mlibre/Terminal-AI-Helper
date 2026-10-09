@@ -183,6 +183,124 @@ def main() -> int:
     check("an empty command wrote nothing",
           pathlib.Path(SPOOL).exists(), False)
 
+    print("where the spool lives when TAI_SPOOL is not set")
+    # spool_path reads its answer at call time, so the env can be swapped for
+    # one question and put back. The rule under test: the spool follows the
+    # database, because a relocated store must relocate its pending records
+    # with it, without being told twice.
+    _saved_spool = os.environ.get("TAI_SPOOL")
+    _saved_db = os.environ.get("TAI_DB")
+    try:
+        os.environ.pop("TAI_SPOOL", None)
+        os.environ["TAI_DB"] = "/tmp/tai/somewhere/else.db"
+        check("a TAI_DB with a directory keeps the spool beside it",
+              spool_path(), "/tmp/tai/somewhere/spool.log")
+        os.environ["TAI_DB"] = "plain-name.db"
+        check("a relative TAI_DB makes the spool a relative neighbour",
+              spool_path(), "spool.log")
+        os.environ.pop("TAI_DB", None)
+        from tai.paths import data_dir
+        check("and with neither variable it is beside the data directory",
+              spool_path(),
+              os.path.join(str(data_dir()), "spool.log"))
+    finally:
+        if _saved_spool is not None:
+            os.environ["TAI_SPOOL"] = _saved_spool
+        else:
+            os.environ.pop("TAI_SPOOL", None)
+        os.environ["TAI_DB"] = _saved_db
+
+    print("an append that cannot write refuses, and refuses quietly")
+    # A directory named as the spool file: open() raises IsADirectoryError,
+    # deterministic on every machine, which is the same OSError a read-only
+    # directory or a vanished parent produces.
+    os.environ["TAI_SPOOL"] = "/tmp"
+    try:
+        check("a spool that cannot be opened answers False",
+              spool_append("echo nowhere", cwd="/tmp"), False)
+    finally:
+        os.environ["TAI_SPOOL"] = SPOOL
+    check("and the refusal left no spool behind",
+          pathlib.Path(SPOOL).exists(), False)
+
+    print("frames that fail before the store ever opens")
+    # Both are written raw, past the write side's own guards: what a truncated
+    # write, a foreign tool or a runaway paste would leave on disk. The store
+    # must never see them.
+    with open(SPOOL, "ab") as f:
+        f.write(f"1700000060{US}0{US}/tmp{US}echo {'x' * 13000}{RS}".encode())
+        f.write(f"not-a-number{US}0{US}/tmp{US}echo late{RS}".encode())
+        f.write(f"1700000061{US}zero{US}/tmp{US}echo badcode{RS}".encode())
+    ingested, skipped, total, _ = drain()
+    check("an oversized frame, a bad timestamp and a bad exit code are skipped",
+          (ingested, skipped, total), (0, 3, 0))
+    check("none of them reached the store",
+          any("echo late" in r[0] or "echo badcode" in r[0] or r[0].startswith("echo x")
+              for r in db_rows()), False)
+    check("and the spool file itself was consumed", pathlib.Path(SPOOL).exists(), False)
+
+    print("flush() answers before it does any store work")
+    out = flush()
+    check("a flush with nothing pending is all zeroes and no learning",
+          out, {"ingested": 0, "skipped": 0, "total": 0, "newest": 0,
+                "learned": 0})
+
+    print("the learning step is bounded and filtered")
+    # The real learn() runs --help discovery; the stub records what it was
+    # asked, so the assertion is about the batch's own rules: which names are
+    # candidates, how many may be asked at once, and when the rebuild fires.
+    import tai.cli as spool_cli
+    import tai.knowledge as spool_knowledge
+    import tai.maintenance as spool_maintenance
+    saved = (spool_cli._which, spool_knowledge.learn, spool_knowledge.is_known,
+             spool_maintenance._rebuild_quietly, os.environ.get("TAI_NO_LEARN"))
+    asked: list[list[str]] = []
+    rebuilds: list[int] = []
+    try:
+        spool_cli._which = lambda name: f"/usr/bin/{name}"
+        spool_knowledge.learn = lambda tools=None: (asked.append(list(tools or [])),
+                                                    len(tools or []))[1]
+        spool_knowledge.is_known = lambda name: name == "known-tool"
+        spool_maintenance._rebuild_quietly = lambda: rebuilds.append(1)
+        from tai.spool import _learn_from_batch
+
+        os.environ["TAI_NO_LEARN"] = "1"
+        check("TAI_NO_LEARN=1 turns the batch learning off",
+              _learn_from_batch(["echo hello"]), 0)
+        check("and nothing was probed", asked, [])
+        os.environ.pop("TAI_NO_LEARN", None)
+
+        check("flags, paths and over-long names are never candidates",
+              _learn_from_batch(["-x", "a/b", "n" * 65, "known-tool",
+                                 "realtool --now"]),
+              1)
+        check("only the one candidate that can exist was probed",
+              asked, [["realtool"]])
+
+        asked.clear()
+        rebuilds.clear()
+        n = _learn_from_batch([f"tool{i:02d} --run" for i in range(12)])
+        check("a batch pays for at most eight probes", n, 8)
+        check("and one rebuild covers them all", rebuilds, [1])
+
+        spool_knowledge.learn = lambda tools=None: (asked.append(list(tools or [])), 0)[1]
+        rebuilds.clear()
+        check("a probe that teaches nothing rebuilds nothing",
+              _learn_from_batch(["realtool --now"]), 0)
+        check("no rebuild on a learned-nothing batch", rebuilds, [])
+    finally:
+        (spool_cli._which, spool_knowledge.learn, spool_knowledge.is_known,
+         spool_maintenance._rebuild_quietly, _nl) = saved
+        if _nl is not None:
+            os.environ["TAI_NO_LEARN"] = _nl
+        else:
+            os.environ.pop("TAI_NO_LEARN", None)
+
+    print("a git question that cannot even be asked")
+    from tai.spool import _git_context
+    check("a cwd with a NUL byte answers no labels",
+          _git_context("bad\x00dir"), ("", ""))
+
     print("\nOK — the spool is transport; the store's gate is the only gate."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
     return 1 if failures else 0

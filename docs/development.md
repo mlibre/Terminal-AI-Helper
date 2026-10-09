@@ -44,6 +44,8 @@ VERSION             the release version; the release workflow tags v<VERSION>
 tests/smoke_env.py          the scratch database, index and imports they share
 tests/test_smoke.py         engine, store, path policy, ranking, fresh files
 tests/test_smoke_cli.py     learn-on-use, discovery, wrappers, refresh, the index scores
+tests/test_cli.py           every verb's conversation: what it prints, what it refuses
+tests/test_spool.py         the spool: framed records, drain, flush, learning bounds
 tests/test_smoke_install.py sequence table, history files, safety, lock, install
 tests/test_deb.py           the package: builds, installs its tree, runs
 tests/test_jev.py           the decision contract
@@ -61,7 +63,7 @@ tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
                             the system's, then this — the pty suite runs anywhere
 ```
 
-Eleven entry points, each a script of assertions that prints what it found,
+Twelve entry points, each a script of assertions that prints what it found,
 and each runnable on its own; `./test.sh` runs them all. Three share
 `smoke_env.py` and six share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences: **a test function no

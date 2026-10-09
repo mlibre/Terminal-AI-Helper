@@ -762,3 +762,380 @@ assert _po_q[:1] == ["opencode"], _po_q
 assert _po_q.index("opencode") < _po_q.index("opencoe"), _po_q
 print("OK — a poisoned history is pinned as poisoned; forget is the cure, "
       "the installed question the stopgap.")
+
+# --- Store edges: the parts of the gate and the migration no CLI run hits ---
+#
+# Everything above asks the store through `is_recordable` and the CLI. These
+# sections hold the pieces a user never calls directly and a bug in them would
+# be invisible for months: the schema migration an old install needs, the
+# semantics of append/purge/forget/load, and the rule that a rejection reports
+# the store it left behind rather than a count of zero.
+
+import sqlite3 as _sql
+from tai.store import (append_and_count, forget_commands, load_rows,
+                       purge_stale, purge_unrecordable)
+
+def _section_db(name: str) -> str:
+    """A scratch store for one section, swapped in and out via TAI_DB.
+
+    `db_path()` reads the environment at call time, so the swap is the whole
+    mechanism. Each section gets its own file: a row a section seeded must
+    never be the row the next section finds.
+    """
+    p = pathlib.Path("/tmp/tai") / name
+    for suffix in ("", "-wal", "-shm"):
+        p.with_name(p.name + suffix).unlink(missing_ok=True)
+    return str(p)
+
+_saved_db = os.environ["TAI_DB"]
+
+# An install whose schema predates the branch column must open, migrate, and
+# keep its rows: the ALTER is the one line between an old history and a store
+# every reader refuses.
+_old_db = _section_db("tai_edge_old_schema.db")
+con = _sql.connect(_old_db)
+con.execute("CREATE TABLE commands(id INTEGER PRIMARY KEY, cmd TEXT NOT NULL, "
+            "cwd TEXT DEFAULT '', repo TEXT DEFAULT '', exit_code INTEGER DEFAULT 0, "
+            "ts INTEGER DEFAULT 0)")
+con.execute("INSERT INTO commands(cmd, cwd, ts) VALUES('legacy-echo', '/legacy', 42)")
+con.commit()
+con.close()
+os.environ["TAI_DB"] = _old_db
+try:
+    from tai.store import connect as _connect
+    con = _connect()
+    cols = [r[1] for r in con.execute("PRAGMA table_info(commands)")]
+    rows = con.execute("SELECT cmd, branch FROM commands").fetchall()
+    con.close()
+    assert "branch" in cols, cols
+    assert rows == [("legacy-echo", "")], rows
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — an old-schema store migrates in place and keeps its rows.")
+
+# append_and_count: a refusal is an answer about the store, not a shrug — the
+# count that comes back is the count the store still has, so `tai record`'s
+# maintenance decisions are made on the truth. A Path argument for cwd is an
+# ordinary thing for a caller to pass; label fields are bounded, evidence is not.
+_rows_db = _section_db("tai_edge_append.db")
+os.environ["TAI_DB"] = _rows_db
+try:
+    ok, total, _ = append_and_count("echo one", cwd="/w")
+    assert (ok, total) == (True, 1), (ok, total)
+    ok, total, newest = append_and_count("y")
+    assert ok is False and total == 1, (ok, total)
+    assert newest == 0, newest
+    ok, total, _ = append_and_count("echo two", cwd=pathlib.Path("/tmp"),
+                                    repo="r" * 300, branch="b" * 300)
+    assert (ok, total) == (True, 2), (ok, total)
+    con = _sql.connect(_rows_db)
+    got = con.execute("SELECT cwd, repo, branch FROM commands ORDER BY id").fetchall()
+    con.close()
+    assert got == [("/w", "", ""), ("/tmp", "r" * 200, "b" * 200)], got
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — append: the refusal counts what it kept, evidence stays whole.")
+
+# purge_unrecordable takes out what an older install stored under rules that
+# have since tightened, and touches nothing else.
+_purge_db = _section_db("tai_edge_purge.db")
+os.environ["TAI_DB"] = _purge_db
+try:
+    con = _sql.connect(_purge_db)
+    con.execute("CREATE TABLE commands(id INTEGER PRIMARY KEY, cmd TEXT NOT NULL, "
+                "cwd TEXT DEFAULT '', repo TEXT DEFAULT '', branch TEXT DEFAULT '', "
+                "exit_code INTEGER DEFAULT 0, ts INTEGER DEFAULT 0)")
+    con.executemany("INSERT INTO commands(cmd, cwd, ts) VALUES(?, '/w', 1)",
+                    [("keep me",), ("keep me too",), ("y",),
+                     ('git commit -m "a\nb"',), ("curl -H 'token: x' https://s",)])
+    con.commit()
+    con.close()
+    assert purge_unrecordable() == 3
+    con = _sql.connect(_purge_db)
+    left = [r[0] for r in con.execute("SELECT cmd FROM commands ORDER BY id")]
+    con.close()
+    assert left == ["keep me", "keep me too"], left
+    assert purge_unrecordable() == 0, "an empty second sweep is a zero, not a crash"
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — purge_unrecordable: exactly the rows the gate now refuses.")
+
+# purge_stale deletes on the recorded evidence alone. A row with a path that
+# is gone is deleted; a command with no path in it is never stale; a relative
+# path in a row whose own directory is gone has no evidence and is kept —
+# the delete needs the same conservative verdict the suggestion gets.
+_stale_db = _section_db("tai_edge_stale.db")
+os.environ["TAI_DB"] = _stale_db
+try:
+    con = _sql.connect(_stale_db)
+    con.execute("CREATE TABLE commands(id INTEGER PRIMARY KEY, cmd TEXT NOT NULL, "
+                "cwd TEXT DEFAULT '', repo TEXT DEFAULT '', branch TEXT DEFAULT '', "
+                "exit_code INTEGER DEFAULT 0, ts INTEGER DEFAULT 0)")
+    con.executemany("INSERT INTO commands(cmd, cwd, ts) VALUES(?, ?, 1)",
+                    [("cd /nonexistent-tai-edge-dir", "/w"),
+                     ("echo live", ""),
+                     ("cat /etc/hosts", ""),
+                     ("python3 src/main.py", "/nonexistent-tai-edge-dir")])
+    con.commit()
+    con.close()
+    assert purge_stale() == 1
+    con = _sql.connect(_stale_db)
+    left = [r[0] for r in con.execute("SELECT cmd FROM commands ORDER BY id")]
+    con.close()
+    assert left == ["echo live", "cat /etc/hosts", "python3 src/main.py"], left
+    # The switch the doctor names: a user who wants the rows back off entirely.
+    os.environ["TAI_SKIP_PATH_CHECK"] = "1"
+    try:
+        assert purge_stale() == 0
+    finally:
+        os.environ.pop("TAI_SKIP_PATH_CHECK", None)
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — purge_stale: evidence deletes, no evidence never deletes.")
+
+# forget: exact rows out, name deduplication, a prefix that is not a prefix.
+_forget_db = _section_db("tai_edge_forget.db")
+os.environ["TAI_DB"] = _forget_db
+try:
+    con = _sql.connect(_forget_db)
+    con.execute("CREATE TABLE commands(id INTEGER PRIMARY KEY, cmd TEXT NOT NULL, "
+                "cwd TEXT DEFAULT '', ts INTEGER DEFAULT 0)")
+    con.executemany("INSERT INTO commands(cmd, cwd, ts) VALUES(?, '/w', 1)",
+                    [("git",), ("git status",), ("git",), ("ls",)])
+    con.commit()
+    con.close()
+    assert forget_commands([]) == 0
+    assert forget_commands(["  "]) == 0
+    assert forget_commands(["git", "git", " git "]) == 2, "the exact rows only"
+    con = _sql.connect(_forget_db)
+    left = [r[0] for r in con.execute("SELECT cmd FROM commands ORDER BY id")]
+    con.close()
+    assert left == ["git status", "ls"], left
+    assert forget_commands(["git"]) == 0, "the second ask is honest silence"
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — forget: dedup, exactness, and silence that means zero rows.")
+
+# load_rows keeps the most recent `limit` rows and returns them oldest-first,
+# because the sequence map is built from the order the commands ran in.
+_window_db = _section_db("tai_edge_window.db")
+os.environ["TAI_DB"] = _window_db
+try:
+    for i in range(12):
+        append_and_count(f"echo row{i:02d}", cwd="/w")
+    got = load_rows(5)
+    assert [r[0] for r in got] == [f"echo row{i:02d}" for i in range(7, 12)], got
+    assert load_rows(5)[0][0] == "echo row07"
+finally:
+    os.environ["TAI_DB"] = _saved_db
+print("OK — load_rows: the newest window, in the order it ran.")
+
+# _history_files: a custom HISTFILE leads, the well-known names follow, and
+# an override that repeats one of them must not import it twice.
+os.environ["TAI_HISTORY_FILES"] = ""
+os.environ.pop("HISTFILE", None)
+_home = pathlib.Path.home()
+_only = pathlib.Path("/tmp/tai/tai_edge_only_history")
+_only.write_text("echo only\n")
+os.environ["TAI_HISTORY_FILES"] = str(_only) + os.pathsep + str(_only)
+from tai.store import _history_files
+_got = _history_files(_home)
+assert _got.count(_only) == 1, _got
+assert _got[-1] == _only, "the override is read, once — after the known files"
+os.environ["TAI_HISTORY_FILES"] = ""
+print("OK — history sources are deduplicated before a single row is read.")
+
+# --- The one-shot path: the file answer, the broken store, the why ---
+#
+# `_file_answer` is the rule that lets the filesystem win a path argument —
+# but only on evidence, only when the learned answer is not already a live
+# file, and only when the file actually extends the word being typed.
+import tai.predictor as tai_predictor
+from tai.fresh import files as _fresh_files
+
+_tai_predictor_E = tai_predictor._E
+_tai_predictor_S = tai_predictor._STALE
+
+_files_dir = pathlib.Path("/tmp/tai/tai_edge_files")
+_files_dir.mkdir(parents=True, exist_ok=True)
+# The learned file exists: it wins. The history and the disk agree.
+(_files_dir / "notes.txt").write_text("hello\n")
+# A file the history never saw: the case the disk answer exists for — the
+# download from a moment ago. The history's own backup.sh is not on disk, so
+# it cannot win, and the live file that extends the word is the answer.
+(_files_dir / "backup2.sh").write_text("#!/bin/sh\necho hi\n")
+_eng = Engine()
+_eng.add("cat notes.txt", cwd=str(_files_dir))
+_eng.add("cat notes.txt", cwd=str(_files_dir))
+_eng.add("chmod +x backup.sh", cwd=str(_files_dir))
+_eng.add("chmod +x backup.sh", cwd=str(_files_dir))
+tai_predictor._E = _eng
+tai_predictor._STALE = frozenset()
+try:
+    _cwd = dict(tai_predictor.__dict__)  # noqa: F841  (readability only)
+    os.chdir(_files_dir)
+    _res = tai_predictor.suggest("cat ")
+    assert _res["choice"] == "cat notes.txt", _res
+    # A wrapper is transparent: the answer carries the wrapper the user typed.
+    _res = tai_predictor.suggest("sudo cat ")
+    assert _res["choice"] == "sudo cat notes.txt", _res
+    # A word mid-typing is replaced, not appended after — and the answer is
+    # the file that exists, not the one the history remembers.
+    _res = tai_predictor.suggest("chmod +x ba")
+    assert _res["choice"] == "chmod +x backup2.sh", _res
+    assert _res["from_disk"], _res
+    assert _res["completion"] == "ckup2.sh", _res
+    # No evidence in the history that this verb takes a file: the ranking
+    # stands, the filesystem is never asked.
+    _res = tai_predictor.suggest("echo ")
+    assert "from_disk" not in _res, _res
+finally:
+    os.chdir(str(REPO))
+    tai_predictor._E = _tai_predictor_E
+    tai_predictor._STALE = _tai_predictor_S
+print("OK — the one-shot file answer: evidence, wrappers, word boundaries.")
+
+# A store that cannot be read is announced and answered from the seed corpus —
+# never an empty ranking, and never silence.
+_garbage_db = _section_db("tai_edge_garbage.db")
+pathlib.Path(_garbage_db).write_text("definitely not a database")
+os.environ["TAI_DB"] = _garbage_db
+os.environ["TAI_NO_ENGINE_CACHE"] = "1"
+_saved_stderr = sys.stderr
+import io as _io
+_captured = _io.StringIO()
+sys.stderr = _captured
+try:
+    tai_predictor._E = None
+    tai_predictor._STALE = frozenset()
+    _res = tai_predictor.suggest("git ")
+finally:
+    sys.stderr = _saved_stderr
+    os.environ["TAI_DB"] = _saved_db
+    os.environ.pop("TAI_NO_ENGINE_CACHE", None)
+    tai_predictor._E = _tai_predictor_E
+    tai_predictor._STALE = _tai_predictor_S
+assert "cannot read the history database" in _captured.getvalue(), _captured.getvalue()
+assert _res["choices"], "a broken store still answers from the seed corpus"
+print("OK — a broken store says so, and answers from the seed vocabulary.")
+
+# The panel's why on a line whose every run was command-not-found: the row
+# scores nowhere, and the answer says so in words instead of leaving a number
+# the reader cannot reconcile with an absent suggestion.
+from tai.engine import hour_bucket
+
+_ph = Engine()
+for _ts in range(3):
+    _ph.add("phantom-cmd --now", cwd="/w", exit_code=127, ts=_T - 1000 + _ts)
+_ph.add("live-cmd --now", cwd="/w", exit_code=0, ts=_T - 500)
+_ex = _ph.explain("phant", "phantom-cmd --now", cwd="/w", now_ts=_T)
+assert _ex["phantom"] is True, _ex
+assert any(f["label"] == "command not found" for f in _ex["factors"]), _ex
+assert _ph.explain("phant", "never-was-typed") is None
+assert hour_bucket(None) in (0, 1, 2, 3)
+assert hour_bucket(10**20) == 0, "a timestamp nothing can render has no hour"
+print("OK — the why names a phantom; unrenderable time has no hour.")
+
+# The pre-filter: a first word with more candidates than the cap still answers
+# correctly — the cache exists to keep it fast, not to change what wins.
+_big = Engine()
+for _i in range(700):
+    _big.add(f"bulk task{_i:03d} --run", cwd="/w")
+_big.add("bulk favorite --run", cwd="/w")
+for _i in range(30):
+    _big.add("bulk favorite --run", cwd="/w", ts=int(time.time()) - _i)
+_got = _big.suggest("bulk ", cwd="/w", limit=3)
+assert _got["choice"] == "bulk favorite --run", _got["choices"]
+assert all(c["cmd"].startswith("bulk ") for c in _got["choices"]), _got
+print("OK — a key wider than the pre-filter cap still ranks the same winner.")
+
+# A wrapper on the typed line comes back on the answer: the lookup ran for the
+# line behind `sudo`, and the user typed the whole line.
+_wr = Engine()
+for _i in range(5):
+    _wr.add("docker compose up -d", cwd="/w", ts=_T - _i)
+_wr_res = _wr.suggest("sudo docker comp", cwd="/w", limit=1)
+assert _wr_res["choice"] == "sudo docker compose up -d", _wr_res
+assert _wr_res["completion"] == "ose up -d", _wr_res
+print("OK — a wrapped prefix is answered with the wrapper still on it.")
+
+# --- The record path's self-refresh, and the one filesystem question it asks ---
+#
+# `_which` is the CLI's own PATH walk — shutil.which's answer without shutil's
+# import, on a process that runs once per command. The empty PATH component
+# (which means the current directory) and the not-a-file case are the two
+# shapes a real PATH actually takes.
+_bin = pathlib.Path("/tmp/tai/tai_edge_bin")
+_bin.mkdir(parents=True, exist_ok=True)
+_tool = _bin / "taiedgetool"
+_tool.write_text("#!/bin/sh\ntrue\n")
+_tool.chmod(0o755)
+(_bin / "not-executable").write_text("data")
+(_bin / "a-directory").mkdir(exist_ok=True)
+_saved_path = os.environ["PATH"]
+os.environ["PATH"] = f"{_bin}:{_bin}/a-directory:"
+try:
+    from tai.cli import _which
+    assert _which("taiedgetool") == str(_tool), _which("taiedgetool")
+    assert _which("not-executable") is None, "data is not a tool"
+    assert _which("a-directory") is None, "a directory is not a tool"
+    assert _which("never-heard-of") is None
+finally:
+    os.environ["PATH"] = _saved_path
+print("OK — _which: executable and a file, and nothing else counts.")
+
+# The self-refresh: a record rebuilds the index only when the index is behind
+# the newest row, and never twice inside the debounce window. Both decisions
+# are read off the environment here, with the real index file's mtime as the
+# clock.
+import tai.index as tai_index_mod
+import tai.maintenance as tai_maint_mod
+
+_real_index_path, _real_rebuild = tai_index_mod.index_path, tai_maint_mod._rebuild_quietly
+_refresh_dir = pathlib.Path("/tmp/tai/tai_edge_refresh")
+_refresh_dir.mkdir(parents=True, exist_ok=True)
+_idx = _refresh_dir / "index.zsh"
+_idx.write_text("# tai index\n")
+_rebuilds: list[str] = []
+tai_maint_mod._rebuild_quietly = lambda: _rebuilds.append("build")
+try:
+    def _with_index_path(fn):
+        tai_index_mod.index_path = lambda: _idx
+        try:
+            return fn()
+        finally:
+            tai_index_mod.index_path = _real_index_path
+
+    from tai.cli import _auto_maintain, _rebuild_when_stale
+
+    _idx.unlink()
+    _with_index_path(lambda: _rebuild_when_stale(None))
+    assert _rebuilds == ["build"], "a missing index is rebuilt before it is read"
+
+    _rebuilds.clear()
+    _idx.write_text("# tai index\n")   # written now: inside the debounce window
+    _with_index_path(lambda: _rebuild_when_stale(int(time.time()) + 5))
+    assert _rebuilds == [], "a fresh index is not rebuilt, whatever the rows say"
+
+    _rebuilds.clear()
+    old = time.time() - 30
+    os.utime(_idx, (old, old))
+    _with_index_path(lambda: _rebuild_when_stale(int(old) + 10))
+    assert _rebuilds == ["build"], "a stale index older than the newest row is rebuilt"
+
+    _rebuilds.clear()
+    _with_index_path(lambda: _rebuild_when_stale(int(old) - 10))
+    assert _rebuilds == [], "rows older than the index are not worth a rebuild"
+
+    _rebuilds.clear()
+    tai_index_mod.index_path = lambda: _idx
+    _auto_maintain(100, 0)
+    assert _rebuilds == ["build"], "the 100th command rebuilds outright"
+    _rebuilds.clear()
+    _auto_maintain(101, 0)
+    assert _rebuilds == [], "the 101st asks the freshness question, which says no"
+finally:
+    tai_index_mod.index_path = _real_index_path
+    tai_maint_mod._rebuild_quietly = _real_rebuild
+    os.environ["TAI_DB"] = _saved_db
+print("OK — the self-refresh: debounce, staleness, and the 100th command.")
