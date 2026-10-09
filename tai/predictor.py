@@ -20,6 +20,24 @@ from tai.store import load_rows
 _E: Engine | None = None
 _STALE: frozenset = frozenset()
 
+# Is this command's first word installed? Asked once per word per process and
+# kept here, because PATH does not change under a running process in any way
+# worth re-statting per question. The engine itself never touches the
+# filesystem — it is a sub-millisecond ranker — so the installed question is
+# answered here, at the one place that can afford a `which`, and handed to the
+# engine as a callable. A cold answer stats every PATH directory for the word;
+# a warm one is a dict lookup, which is what the scored loop pays.
+_WHICH: dict[str, bool] = {}
+
+
+def _on_path(word: str) -> bool:
+    """Whether `word` resolves to an executable on this machine's PATH."""
+    import shutil
+    hit = _WHICH.get(word)
+    if hit is None:
+        hit = _WHICH[word] = shutil.which(word) is not None
+    return hit
+
 
 def _stale_for(eng: Engine) -> set:
     """Commands whose paths no longer exist, per the engine's own cwd records.
@@ -74,7 +92,7 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
         _STALE = _stale_for(_E)
     res = _E.suggest(prefix=prefix or "", cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [], limit=limit, temp=temp,
-                     exclude=_STALE)
+                     exclude=_STALE, on_path=_on_path)
     res = _file_answer(prefix or "", res)
     # The engine measures its own ranking; a caller that only cares about the
     # whole answer wants the process time, and a sub-millisecond rank has no
@@ -103,7 +121,7 @@ def explain(prefix: str, cmd: str, cwd: str = "", repo: str = "",
         _E = get(db_path(), _build_engine)
         _STALE = _stale_for(_E)
     out = _E.explain(prefix or "", cmd, cwd=cwd, repo=repo, branch=branch,
-                     last_commands=last_commands or [])
+                     last_commands=last_commands or [], on_path=_on_path)
     if out is None:
         return None
     out["stale"] = cmd in _STALE

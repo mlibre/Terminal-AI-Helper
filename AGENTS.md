@@ -82,6 +82,12 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
 - A wrapper must not hide what is behind it.
 - An installed command always has an answer: `tool --help` for a tool the
   history never saw is honest; inventing a flag is not.
+- A line the shell never ran is not a command: a line whose every recorded
+  run was exit 127 — command not found — is hidden from suggestions in both
+  rankers, its rows kept in the store for the day the tool exists.
+- An installed command outranks an uninstalled word, all evidence equal. The
+  engine never asks the filesystem itself: the caller answers `on_path`, once
+  per word, and the index resolves the whole vocabulary at rebuild time.
 - Generated vocabulary ranks in a band below observed usage, keeps the help's
   own order, and is capped; unused tools are not indexed at all.
 - A path is answered by the filesystem, because the history cannot know it;

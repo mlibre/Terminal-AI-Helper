@@ -22,6 +22,7 @@ W_CWD = 2.2
 W_REPO = 1.2
 W_BRANCH = 1.0
 W_SUCCESS = 0.6
+W_INSTALLED = 0.5
 W_SEQ = 2.5
 W_HOUR = 0.4
 W_TOKEN = 0.8
@@ -95,7 +96,7 @@ class CmdStats:
     """
 
     __slots__ = ("freq", "last_ts", "cwd", "repo", "branch", "hour",
-                 "success", "fail")
+                 "success", "fail", "nf")
 
     def __init__(self):
         self.freq = 0
@@ -106,6 +107,11 @@ class CmdStats:
         self.hour = [0, 0, 0, 0]
         self.success = 0
         self.fail = 0
+        # Runs the shell refused outright: exit 127 is "command not found",
+        # which is not this line failing, it is this line not existing. Counted
+        # apart from `fail` because the two carry different news — a failing
+        # command ran and can be fixed; a not-found one never ran at all.
+        self.nf = 0
 
 
 class Engine:
@@ -163,6 +169,8 @@ class Engine:
             st.success += 1
         else:
             st.fail += 1
+            if exit_code == 127:
+                st.nf += 1
         # token n-grams within command
         toks = cmd.split()
         bigram = self.token_bigram
@@ -234,13 +242,22 @@ class Engine:
                 branch: str = "", last_commands: list | None = None,
                 limit: int = 1, temp: float = TEMP_DEFAULT,
                 now_ts: int | None = None,
-                exclude: set | None = None) -> dict:
+                exclude: set | None = None,
+                on_path=None) -> dict:
         """Rank candidates for `prefix`.
 
         `exclude` drops candidates before ranking. The engine itself never
         touches the filesystem — it has to stay a sub-millisecond in-memory
         ranker — so the caller decides policy (currently: commands whose paths
         no longer exist) and passes the result in.
+
+        `on_path` is the caller's answer to one question — is this command's
+        first word installed? — asked at most once per candidate, and only for
+        the candidates actually scored. The engine supplies the question's
+        shape, the caller the filesystem: an installed command is worth
+        W_INSTALLED over an uninstalled word, all evidence equal, because the
+        user's own report is exactly that intuition — a tool they have must
+        outrank the typo of its name that never once ran.
         """
         # `choices[:limit]` and `[...][:max(limit, 1) * 3]` disagree about a
         # limit of zero or less: one asks for nothing and the other asks for
@@ -278,6 +295,23 @@ class Engine:
 
         if exclude:
             cand_names = [c for c in cand_names if c not in exclude]
+        # A line the shell never ran is not a command. Exit 127 is not this
+        # line failing — it is the shell refusing the word — so a line whose
+        # every recorded run was command-not-found was never a tool on this
+        # machine, and ranking it as though it were one is how the typo of a
+        # name outranks the name (the user's report: `opencoe` above
+        # `opencode`, every signal otherwise tied). Such a line is dropped
+        # here and from the index the plugins read — one rule, two rankers —
+        # and its rows stay in the store: install the tool later and its
+        # first success returns it on its own. The near-miss vocabulary still
+        # answers a *typed* phantom with the real spelling beside it, which
+        # is the direction typo tolerance exists for.
+        if cand_names:
+            phantom = {c for c in cand_names
+                       if (stc := self.cmds.get(c)) is not None
+                       and stc.nf and stc.nf == stc.freq}
+            if phantom:
+                cand_names = [c for c in cand_names if c not in phantom]
         if not cand_names:
             wrapped = split_wrapper(prefix)
             if wrapped:
@@ -288,7 +322,7 @@ class Engine:
                 inner = self.suggest(prefix=rest, cwd=cwd, repo=repo,
                                       branch=branch, last_commands=last_commands,
                                       limit=limit, temp=temp, now_ts=now_ts,
-                                      exclude=exclude)
+                                      exclude=exclude, on_path=on_path)
                 return _rewrap(inner, head, prefix)
             return _fallback(prefix, limit)
 
@@ -375,10 +409,13 @@ class Engine:
             )
             if cwd and repo and st.cwd.get(cwd, 0) and st.repo.get(repo, 0):
                 score += EXACT_CTX_BONUS
+            if on_path is not None and on_path(name.split(" ", 1)[0]):
+                score += W_INSTALLED
             if name in typo_set:
                 score -= TYPO_PENALTY
-            # never surface failed-command as top-1 when a good alt exists?
-            # handled softly via success_s; keep hard rule out for recall.
+            # A phantom (every run exit 127) was dropped above; a line that
+            # sometimes ran carries its failures softly via success_s. A hard
+            # top-1 veto stays out, for recall's sake.
             scored.append((score, name))
 
         # A one-off that nearly duplicates a stronger line ranks just below it
@@ -473,7 +510,7 @@ class Engine:
     # -- explain ----------------------------------------------------------
     def explain(self, prefix: str, cmd: str, cwd: str = "", repo: str = "",
                 branch: str = "", last_commands: list | None = None,
-                now_ts: int | None = None) -> dict | None:
+                now_ts: int | None = None, on_path=None) -> dict | None:
         """Why `cmd` scores what it scores for `prefix` — the factors, named.
 
         The dashboard's question: the panel says `got log` is 7.4% and the
@@ -545,6 +582,15 @@ class Engine:
         add("success", W_SUCCESS, success_s,
             f"{st.success} ok / {st.fail} failed")
 
+        # The loop's own question, asked of the caller's filesystem: the panel
+        # explains the installed bonus with the word it was decided on. A twin
+        # that skipped the factor would total a number suggest never made.
+        if on_path is not None:
+            fw = cmd.split(" ", 1)[0]
+            hit = bool(on_path(fw))
+            add("installed command", W_INSTALLED, 1.0 if hit else 0.0,
+                f"`{fw}` is" + ("" if hit else " not") + " on PATH")
+
         hour_s = (st.hour[hb] / max(st.freq, 1)) if st.freq else 0.0
         add("hour of day", W_HOUR, hour_s,
             f"{st.hour[hb]} of {st.freq} runs in this hour of the day")
@@ -605,10 +651,21 @@ class Engine:
             factors.append({"label": "near-miss", "weight": -1.0, "value": TYPO_PENALTY,
                             "contrib": -TYPO_PENALTY,
                             "detail": f"does not start with `{prefix}`; offered as a typo of it"})
+        phantom = bool(st.nf and st.nf == st.freq)
+        if phantom:
+            # Zero-weight row: the arithmetic above is what the line would
+            # score, and the row says why it scores nowhere — suggest drops a
+            # phantom before ranking, and the panel should say so rather than
+            # leave a number the reader cannot reconcile with an absent row.
+            factors.append({"label": "command not found", "weight": 0.0, "value": 0.0,
+                            "contrib": 0.0,
+                            "detail": f"all {st.nf} runs were exit 127 — the shell "
+                                      f"never found it; hidden from suggestions"})
 
         return {"cmd": cmd, "prefix": prefix, "score": round(score, 3),
                 "freq": st.freq, "last_ts": st.last_ts,
                 "age_days": round(age_days, 2), "near_miss": near_miss,
+                "phantom": phantom,
                 "factors": factors}
 
 

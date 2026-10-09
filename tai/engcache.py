@@ -20,7 +20,9 @@ import pickle
 from pathlib import Path
 
 # Bump when Engine's pickled shape changes (new fields on CmdStats, new maps).
-VERSION = 1
+# 2: CmdStats gained `nf` (command-not-found runs) — an engine unpickled from
+# a version-1 cache has no `.nf` and every ranking that asks would raise.
+VERSION = 2
 
 _MAGIC = "tai-engine"
 

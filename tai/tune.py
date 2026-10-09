@@ -12,7 +12,7 @@ import random
 import re
 
 
-def _eval(eng, ev_rows) -> tuple[float, dict]:
+def _eval(eng, ev_rows, on_path=None) -> tuple[float, dict]:
     r1 = r3 = s1 = s3 = 0
     n = 0
     for i, r in enumerate(ev_rows):
@@ -26,14 +26,15 @@ def _eval(eng, ev_rows) -> tuple[float, dict]:
         prev = (ev_rows[i - 1][0] or "").strip() if i > 0 else ""
         res = eng.suggest(prefix=cmd[:cut], cwd=r[1] or "", repo=r[2] or "",
                           branch=r[3] or "", last_commands=[prev] if prev else [],
-                          limit=3)
+                          limit=3, on_path=on_path)
         cands = [c["cmd"] for c in res.get("choices", [])]
         n += 1
         if cands[:1] == [cmd]:
             r1 += 1
         if cmd in cands[:3]:
             r3 += 1
-        res2 = eng.suggest(prefix="", last_commands=[prev] if prev else [], limit=3)
+        res2 = eng.suggest(prefix="", last_commands=[prev] if prev else [],
+                           limit=3, on_path=on_path)
         c2 = [c["cmd"] for c in res2.get("choices", [])]
         if c2[:1] == [cmd]:
             s1 += 1
@@ -73,9 +74,20 @@ def main(limit: int = 10000, trials: int = 60) -> None:
 
     base = {k: getattr(E, k) for k in
             ["W_FREQ", "W_RECENCY", "W_CWD", "W_REPO", "W_BRANCH",
-             "W_SUCCESS", "W_SEQ", "W_HOUR", "W_TOKEN"]}
+             "W_SUCCESS", "W_INSTALLED", "W_SEQ", "W_HOUR", "W_TOKEN"]}
+    # The installed question, answered once for the whole run: every first word
+    # the history carries, resolved against PATH here rather than inside the
+    # engine (which never touches the filesystem). Without it a tuned
+    # W_INSTALLED would be tuned against a signal that was never on.
+    import shutil
+    _words = set()
+    for r in rows:
+        c = (r[0] or "").strip()
+        if c:
+            _words.add(c.split(" ", 1)[0])
+    _on_path = {w for w in _words if shutil.which(w)}.__contains__
     best = dict(base)
-    score, m = _eval(build(best), ev)
+    score, m = _eval(build(best), ev, on_path=_on_path)
     print(f"base score={score:.3f} { {k: round(v,3) for k,v in m.items() if k!='n'} }")
     rng = random.Random(7)
     # coordinate search: perturb one weight at a time
@@ -85,11 +97,11 @@ def main(limit: int = 10000, trials: int = 60) -> None:
         cand = dict(best)
         factor = rng.choice([0.5, 0.7, 1.3, 1.6])
         cand[k] = round(max(0.0, best[k] * factor), 3)
-        score_c, _ = _eval(build(cand), ev)
+        score_c, _ = _eval(build(cand), ev, on_path=_on_path)
         if score_c > score:
             score, best = score_c, cand
             print(f"  [{t}] {k}={cand[k]} -> {score:.3f}")
-    _, m = _eval(build(best), ev)
+    _, m = _eval(build(best), ev, on_path=_on_path)
     print(f"best score={score:.3f} { {k: round(v,3) for k,v in m.items() if k!='n'} }")
     print("weights:", best)
     # Written back through a temporary file, for the reason install.sh edits an

@@ -636,3 +636,101 @@ assert "SENTINEL" not in rebuilt and rebuilt.startswith("# tai embedded zsh inde
 _rebuild_when_stale()
 assert idx_path.read_text() == rebuilt, "a fresh index must be left alone"
 print("OK — a record reaches the index on the next prompt, not a hundred later.")
+
+# The report that shaped two rules: typing `openc` offered `opencoe` — a typo
+# of `opencode` — above `opencode` itself, six lines within a hair of one
+# another, every gap the length penalty's own step. Two things were missing
+# from the ranker's world: a line the shell refused outright (exit 127) is not
+# a command, and a tool the machine has is worth more than a word it has not.
+# Both rules live in both rankers — the engine here, the index further down.
+_T = 1_800_000_000
+eng_nf = Engine()
+eng_nf.add("opencode", exit_code=0, ts=_T - 3 * 86400)
+eng_nf.add("opencode", exit_code=0, ts=_T - 2 * 86400)
+eng_nf.add("opencoe", exit_code=127, ts=_T - 60)
+eng_nf.add("opencoode", exit_code=127, ts=_T - 120)
+_names = [c["cmd"] for c in eng_nf.suggest("openc", now_ts=_T, limit=6)["choices"]]
+assert "opencoe" not in _names and "opencoode" not in _names, _names
+assert _names[:1] == ["opencode"], _names
+# A line that ran and failed is still a line: only the shell's own refusal
+# hides one. `opencode auth` failing once is evidence, not absence.
+eng_nf.add("opencode auth", exit_code=1, ts=_T - 30)
+assert "opencode auth" in [c["cmd"] for c in
+                           eng_nf.suggest("opencode ", now_ts=_T, limit=6)["choices"]]
+# And typing the phantom itself is answered by the real spelling — typo
+# tolerance keeps its direction; the phantom simply cannot be the answer.
+assert eng_nf.suggest("opencoe", now_ts=_T, limit=6)["choice"] == "opencode"
+print("OK — a line the shell never ran is nobody's suggestion.")
+
+# The user's recorded world, reproduced: six lines, one run each, every row
+# exit 0, minutes apart — frequency, recency, success and directory all tied,
+# so the freshest line won and the freshest line was the typo. Without the
+# installed question the answer is the report verbatim; that shape is pinned
+# so no future change to the signal-less path lands silently.
+eng_w = Engine()
+for _c, _ts in (("opencode2 pair", _T - 4 * 3600), ("opencode auth", _T - 3 * 3600),
+                ("opencode web", _T - 2 * 3600), ("opencoode", _T - 5400),
+                ("opencode", _T - 3600), ("opencoe", _T)):
+    eng_w.add(_c, cwd="/w", exit_code=0, ts=_ts)
+_mirrored = [c["cmd"] for c in
+             eng_w.suggest("openc", cwd="/w", now_ts=_T, limit=6)["choices"]]
+assert _mirrored[:1] == ["opencoe"], _mirrored
+# With the question asked, the tool the machine has outranks the words it has
+# not — and the one-shot path asks it through the same engine, from a cache
+# one `which` per word per process.
+_fixed = [c["cmd"] for c in eng_w.suggest("openc", cwd="/w", now_ts=_T, limit=6,
+                                          on_path={"opencode"}.__contains__)["choices"]]
+assert _fixed[:1] == ["opencode"], _fixed
+assert _fixed.index("opencode") < _fixed.index("opencoe"), _fixed
+assert _fixed.index("opencode") < _fixed.index("opencoode"), _fixed
+# The panel's why: same question, same answer, same total — and the factor
+# named, so the number on screen is one a reader can check.
+_res = eng_w.suggest("openc", cwd="/w", now_ts=_T, limit=6,
+                     on_path={"opencode"}.__contains__)
+_exp = eng_w.explain("openc", "opencode web", cwd="/w", now_ts=_T,
+                     on_path={"opencode"}.__contains__)
+_sc = next(c["score"] for c in _res["choices"] if c["cmd"] == "opencode web")
+assert abs(_exp["score"] - _sc) < 0.002, (_exp["score"], _sc)
+assert any(f["label"] == "installed command" and f["value"] == 1.0
+           for f in _exp["factors"]), _exp["factors"]
+_miss = eng_w.explain("openc", "opencoe", cwd="/w", now_ts=_T,
+                      on_path={"opencode"}.__contains__)
+assert any(f["label"] == "installed command" and f["value"] == 0.0
+           for f in _miss["factors"]), _miss["factors"]
+import tai.predictor as _pred  # noqa: E402
+eng_p = Engine()
+for _c, _ts in (("opencode2 pair", _T - 4 * 3600), ("opencode web", _T - 2 * 3600),
+                ("opencoode", _T - 5400), ("opencode", _T - 3600), ("opencoe", _T)):
+    eng_p.add(_c, cwd="/w", exit_code=0, ts=_ts)
+_saved_E, _saved_STALE, _saved_WHICH = _pred._E, _pred._STALE, dict(_pred._WHICH)
+try:
+    _pred._E, _pred._STALE = eng_p, frozenset()
+    _pred._WHICH.update({"opencode": True, "opencoe": False,
+                         "opencoode": False, "opencode2": False})
+    _names = [c["cmd"] for c in
+              _pred.suggest("openc", cwd="/w", limit=6)["choices"]]
+    assert _names[:1] == ["opencode"], _names
+finally:
+    _pred._E, _pred._STALE = _saved_E, _saved_STALE
+    _pred._WHICH.clear()
+    _pred._WHICH.update(_saved_WHICH)
+print("OK — an installed command outranks an uninstalled word, all else equal.")
+
+# The snapshot the plugins read carries the same two rules: the phantom is
+# nowhere in it — not in the scores, not as a first-word key, not as a
+# sequence entry — while the line that ran stays publishable.
+_now2 = int(time.time())
+with session() as _con:
+    for _cmd, _code, _ts in (("opencoe", 127, _now2 - 60),
+                             ("echo gone-typo", 127, _now2 - 50),
+                             ("echo kept", 0, _now2 - 40)):
+        _con.execute(
+            "INSERT INTO commands(cmd, cwd, exit_code, ts) VALUES (?, '', ?, ?)",
+            (_cmd, _code, _ts))
+    _con.commit()         # session() does not commit; a raw insert says so
+build()
+_text = pathlib.Path(SCRATCH_INDEX).read_text()
+assert "'opencoe'" not in _text, "a command-not-found line is not published"
+assert "'echo gone-typo'" not in _text, "every-127 lines are phantoms, whatever the word"
+assert "'echo kept'" in _text
+print("OK — the index does not publish a line the shell never ran.")

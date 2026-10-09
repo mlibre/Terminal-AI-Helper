@@ -120,6 +120,11 @@ These are not edge cases; they are the product.
 - **A typo is answered by what it is a typo of.** When nothing extends the
   line, the learned lines that hold every word you typed appear; a one-off
   typo ranks below the habit it shadows, in the index itself.
+- **A name the shell never found is not a suggestion.** Exit 127 is the shell
+  refusing a word, not a command failing — so a name you mistyped and never
+  once ran does not sit above the tool it was a typo of. And a tool you have
+  installed outranks a word you do not have, all else equal: `opencode` beats
+  `opencoe` because it exists, here, on your PATH.
 - **A tool you have never run still gets an answer.** `tool --help` — the
   only honest thing to say about a command the history has never seen. Run
   it once and the real `--help` is learned in the background:

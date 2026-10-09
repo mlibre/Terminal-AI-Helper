@@ -90,14 +90,23 @@ torn file: the generator `os.replace`s a temporary one, so one cannot exist.
 
 ## Ranking
 
-`tai/engine.py`. Eight signals, all read from SQLite at build time:
+`tai/engine.py`. Eight signals read from SQLite at build time:
 
 ```text
 freq · recency · cwd · repo · branch · hour-of-day · exit code · what ran before
 ```
 
 plus a token bigram/trigram for flags (`logs -f --tail 50`) and typo tolerance
-on the first word (`tai/typo.py`). The same module owns the shadow rule
+on the first word (`tai/typo.py`). A ninth — is the command's first word
+installed — is a property of the machine, not the history, so the engine never
+reads it: the caller answers `on_path` (one cached `which` per word; the index
+resolves its whole vocabulary at rebuild time), and a line whose tool exists
+gains `W_INSTALLED` over a line whose word resolves to nothing, all evidence
+equal. The same exit-code signal hides a line the shell never ran: every
+recorded run exit 127 — command not found — is not a command failing, it is a
+command not existing, so such a line is dropped before ranking in the engine
+and is not published by the index at all, its rows kept in SQLite. The same
+module owns the shadow rule
 (`shadow_map`): a rare line that nearly duplicates a stronger one is ranked
 just below it, in the engine and the index alike, however the rows'
 frequencies, timestamps and exit codes tie. The full weight list lives at the

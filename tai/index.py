@@ -23,7 +23,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from tai.engine import (Engine, LEN_PENALTY_DIV, MAX_LEN_PEN, W_FREQ,
-                        W_RECENCY, W_SUCCESS)
+                        W_RECENCY, W_SUCCESS, W_INSTALLED)
 from tai.knowledge import load_all as load_tool_knowledge
 from tai.paths import destinations_first, takes_file
 from tai.seed import SEED_COMMANDS
@@ -35,9 +35,9 @@ from tai.typo import shadow_map
 # in the corpus — a band below anything the history actually saw.
 #
 # The band is the corpus length times the step, so 60 seeds span 0.003..0.18,
-# and the weakest real command scores 0.233 (one run, long ago, failed, and
-# long enough to pay the full length penalty below). That gap is the whole
-# invariant: generated vocabulary ranks below observed usage.
+# and the weakest real command scores 0.233 (one run, long ago, failed, not on
+# PATH, and long enough to pay the full length penalty below). That gap is the
+# whole invariant: generated vocabulary ranks below observed usage.
 #
 # This used to be a flat SEED_BONUS of 1500 added on top of a seed's real score.
 # That is not a tiebreak, it is a promotion, and it was large enough to invert
@@ -115,7 +115,11 @@ WORD_KEY_MAX_DEPTH = 8
 # and its evidence order live in tai/typo.py (shadow_map, imported above):
 # one rule, applied here to the integer scores the plugins read and in the
 # engine to the floats `tai suggest` answers with, so the two rankers cannot
-# drift apart.
+# drift apart. Two more rules travel the same road, for the same reason:
+# a line whose every recorded run was exit 127 is not published at all (the
+# engine drops it from its candidates instead), and a line whose first word
+# is installed carries the engine's W_INSTALLED bonus (the engine is handed
+# the same answer by its caller). Three rules, two rankers, no drift.
 
 
 def index_path() -> Path:
@@ -278,6 +282,43 @@ def build(max_commands: int = 20000) -> int:
         raise RuntimeError("every stored command names a path that is gone — "
                            "run 'tai purge --stale' to drop them, then refresh")
 
+    # A line the shell never ran is not a command, and it is not a suggestion.
+    # Exit 127 is not a command failing — it is the shell refusing the word — so
+    # a line whose every recorded run was command-not-found was never a tool on
+    # this machine. Ranking it as though it were one is how the typo of a name
+    # outranks the name it is a typo of: `opencoe` above `opencode`, every other
+    # signal tied. The engine drops such lines from its own candidates; here the
+    # same rule empties them out of the snapshot the plugins read — score,
+    # first-word and word keys, and both directions of the sequence table, the
+    # way the stale filter above does. The rows stay in SQLite: install the tool
+    # the name was aiming at later, and the first successful run returns a line
+    # on its own. Only history can be phantom — seeds and generated vocabulary
+    # are added with exit 0 and no attempt at all.
+    import shutil
+    phantoms = {cmd for cmd, st in eng.cmds.items() if st.nf and st.nf == st.freq}
+    if phantoms:
+        for cmd in phantoms:
+            eng.cmds.pop(cmd, None)
+        eng.sorted_cmds = [c for c in eng.sorted_cmds if c not in phantoms]
+        eng._cmds_dirty = True
+        eng.seq = {
+            prev: {cmd: n for cmd, n in counter.items() if cmd not in phantoms}
+            for prev, counter in eng.seq.items() if prev not in phantoms
+        }
+
+    # Which first words are installed — asked once per rebuild, offline, over
+    # the whole vocabulary, which is a luxury the keystroke path does not have
+    # and the reason the engine takes the answer from its caller there. A line
+    # whose tool exists is worth W_INSTALLED over a line whose word resolves to
+    # nothing, all evidence equal: the one signal a user reaches for first
+    # (`I have opencode installed — why is a typo of it winning?`) and the one
+    # the store alone cannot carry, because PATH is a property of the machine,
+    # not of the history. Pure seeds keep their corpus band — a convention gets
+    # no recency and no installed credit either; its place is the corpus. A
+    # generated line's bonus is cold-scaled with everything else of its kind.
+    installed = {w for w in {cmd.split(" ", 1)[0] for cmd in eng.cmds if cmd}
+                 if shutil.which(w)}
+
     # Keep the most useful distinct commands. The three signals the index can
     # evaluate without a process are the same three the engine weights, and they
     # are read from the engine rather than repeated: `tai tune` searches these
@@ -308,6 +349,8 @@ def build(max_commands: int = 20000) -> int:
         freq = min(math.log1p(st.freq) / math.log1p(20), 1.0)
         success = max(-0.5, min(1.0, (st.success - st.fail * 0.5) / max(st.freq, 1))) * 0.5 + 0.5
         score = W_FREQ * freq + W_RECENCY * recency + W_SUCCESS * success
+        if not pure and cmd.split(" ", 1)[0] in installed:
+            score += W_INSTALLED
         if cmd in generated and cmd not in seed_set:
             score *= COLD_FACTOR
         # The engine's length penalty, baked into the scores the plugins read —
