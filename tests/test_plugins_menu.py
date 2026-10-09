@@ -8,6 +8,7 @@ so these tests assert on an emulated screen rather than on the plugin's arrays.
 """
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -1029,6 +1030,17 @@ def test_first_word_menu() -> None:
 
     Both shells are asserted, because the two implementations of the rule are
     where the drift would start.
+
+    The report that returned here: the same Tab also echoed one `d=N` line
+    per matching key above the menu — `_tai_menu_first_lines` declared its
+    peel counter with `local d` *inside* the key loop, and zsh's `local`,
+    applied to a parameter that already exists, prints its value. Silent on
+    the first key, one echo per later key. This file ran green through all
+    of it, because noise() hears errors and the dump widget reads arrays,
+    not the screen — so the press's own bytes are now the assertion, and
+    the function is asked for its stdout directly. (bash is not wired for
+    the twin: its `local` never prints without -p, which is why the bug
+    was zsh-only.)
     """
     fixture = ["go mod vendor", "go mod download", "godot .", "got log",
                "goose web", "git status"]
@@ -1046,8 +1058,13 @@ def test_first_word_menu() -> None:
                   s.suggestion().split(" PD=")[0], "SUG=[o mod vendor]")
             # The dump above abandons the line, so the word is typed again.
             s.send("g")
+            mark = len(s.seen)
             s.write(TAB)
             s.settle()
+            stray = [ln for ln in (ANSI.sub("", raw).strip()
+                                   for raw in s.raw()[mark:].replace("\r", "\n").splitlines())
+                     if re.match(r"[A-Za-z_][A-Za-z_0-9]*=", ln)]
+            check("the Tab press echoes no variable assignment", stray, [])
             line, drawn, size, idx = s.menu(clear=False)
             # Whole learned lines are the rows here, and menu_entries' space
             # split would tear them into words; the rows are asserted as the
@@ -1065,6 +1082,13 @@ def test_first_word_menu() -> None:
             s.settle()
             check("Enter takes the whole line", s.line(), "go mod vendor")
             s.write("\x15")
+            # The same net at the source, where the screen cannot blur it:
+            # the function's stdout, captured, must be empty. Any future
+            # typeset echo inside it lands in this substitution verbatim.
+            s.run('tai_stray=$(_tai_menu_first_lines g); '
+                  'print -r -- "STRAY[$tai_stray]"')
+            check("_tai_menu_first_lines prints nothing",
+                  "STRAY[]" in s.raw(), True)
             s.close()
 
         if SHELLS["bash"]:

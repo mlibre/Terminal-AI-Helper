@@ -211,7 +211,17 @@ _tai_menu_stem() {
 # zero-padded `score line` strings, a Tab-press cost, not a keystroke cost.
 # No fork, the same rule as the rest of the menu.
 _tai_menu_first_lines() {
-  local word="$1" k values line s
+  # `d` is declared here and nowhere else, and the reason is the report that
+  # found this function: typing `g` and pressing Tab printed one `d=N` line on
+  # the terminal per matching key before the menu drew. The declaration used
+  # to sit inside the loop below, and zsh's `local` — `typeset` in local
+  # clothing — applied to a parameter that already exists prints its value:
+  # silent on the first key, which creates it, then one echo per later key
+  # carrying whatever the previous key's inner loop had left in it. An
+  # assignment keeps it quiet; a re-declaration does not, and `typeset_silent`
+  # is the user's option to set, not this plugin's to assume. Any variable a
+  # loop re-declares has to live in the function's one `local` line.
+  local word="$1" k values line s d
   local -a merged
   _TAI_MENU_LEARNED=()
   # A glob character in the word is refused for the same reason
@@ -224,7 +234,6 @@ _tai_menu_first_lines() {
     # Peel, don't split: a key's whole list is split nowhere else on the
     # keystroke path, and `git` holds thousands of lines when the first three
     # are all a menu can show.
-    local d
     for (( d = 0; d < _TAI_MENU_FIRST_DEPTH; d++ )); do
       line="${values%%$'\n'*}"
       [[ -n "$line" ]] || break
