@@ -97,6 +97,62 @@ def test_live_reload() -> None:
     write_index(base)
 
 
+def test_live_reload_bash() -> None:
+    """The live-reload rule in bash — "keep a case in both suites".
+
+    The zsh half above is the one the rule was born from; this is the same
+    question asked of the other implementation, because a rule that works in
+    one shell and not the other is how a split starts. Bash delivers its hint
+    by rewriting the readline buffer on the accept key, so each answer here is
+    read by pressing Ctrl-F and reading the line: an empty hint accepts
+    nothing, and a stale one accepts the stale line.
+    """
+    if not SHELLS["bash"]:
+        return
+    print("live index reload (bash)")
+    base = list(COMMANDS)
+    write_index(["docker ps -a"] + base)
+    s = Session("bash")
+    s.send("docker")
+    s.write(CTRL_F)
+    s.settle()
+    check("a new shell sees the new index", s.line(), "docker ps -a")
+    s.close()
+
+    write_index(base)
+    s = Session("bash")
+    s.send("docker")
+    s.write(CTRL_F)
+    s.settle()
+    check("before the rebuild", s.line(), "docker ps")
+    write_index(["docker compose up -d"] + base,
+                new_enough_than=pathlib.Path(str(BASH_INDEX) + ".stamp"))
+    s.send("docker")
+    s.write(CTRL_F)
+    s.settle()
+    check("still the old index, no prompt yet", s.line(), "docker ps")
+    s.send("\n")         # run an empty line, get a fresh prompt
+    s.send("docker")
+    s.write(CTRL_F)
+    s.settle()
+    check("the same shell sees it after one prompt", s.line(),
+          "docker compose up -d")
+    check("reload is clean", s.noise(), [])
+
+    # The forgetting half: a rebuild that removes a command must remove it
+    # from an open shell too. `docker ps` is the command whose own word key
+    # disappears with the rebuild — nothing else in the fixture shares it.
+    write_index([c for c in COMMANDS if not c.startswith("docker ")],
+                new_enough_than=pathlib.Path(str(BASH_INDEX) + ".stamp"))
+    s.send("\n")
+    s.send("docker p")
+    s.write(CTRL_F)
+    s.settle()
+    check("and it forgets what the rebuild removed", s.line(), "docker p")
+    s.close()
+    write_index(base)
+
+
 def test_recording() -> None:
     print("recording honours TAI_NO_AUTO_RECORD")
     typed = ["echo alpha-one", "echo beta-two"]
@@ -151,6 +207,8 @@ def main() -> int:
     setup()
     test_live_reload()
     check_fixture_intact("the run")
+    test_live_reload_bash()
+    check_fixture_intact("the bash run")
     test_recording()
     check_fixture_intact("the recording test")
     print("\nOK — a rebuild picked up by an open shell, and recording."

@@ -60,6 +60,10 @@ assert "data-theme" in page and "localStorage" in page, \
     "the page must carry the light/dark toggle and remember the choice"
 assert 'id="theme"' in page and 'id="toast"' in page, \
     "the friendly bits — theme button, copy toast — ship with the page"
+assert 'id="net"' in page, \
+    "a failed poll must show the reconnect banner, not blank panels"
+assert 'localStorage.setItem("tai-theme"' in page, \
+    "the theme choice is persisted under one name, not just flipped"
 print("OK — the page serves, names its box, and points at its own API.")
 
 # --- state: the numbers on the page are the store's numbers ------------------

@@ -784,6 +784,37 @@ def test_unpaintable_rows_are_never_drawn() -> None:
         write_index()
 
 
+def test_unpaintable_rows_are_never_drawn_bash() -> None:
+    """The control-byte rule's bash half — the candidate filter in bash.
+
+    The zsh twin above rides the glimpse; bash delivers the same row through
+    the ghost hint, accepted by rewriting the readline buffer on Ctrl-F. The
+    dirty row is the only answer the fixture holds for `zqx`, so an unfiltered
+    list would put raw escape bytes into the buffer, and the line after the
+    accept would be the paste envelope instead of what was typed.
+    """
+    if not SHELLS["bash"]:
+        return
+    print("a control byte in a row is never drawn (bash)")
+    text = BASH_INDEX.read_text()
+    dirty = '\x1b[200~zqx run~'
+    BASH_INDEX.write_text(
+        text + f"_TAI_SCORE[{_zq(dirty)}]=9\n"
+               f"_TAI_FIRST[{_zq('zqx')}]={_zq(dirty)}\n"
+               f"_TAI_WORD[{_zq('zqx run')}]={_zq(dirty)}\n")
+    try:
+        s = Session("bash")
+        s.send("zqx")
+        s.write(CTRL_F)
+        s.settle()
+        # An empty hint accepts nothing: the line must still be what was typed,
+        # never the envelope that arrived raw from an old store.
+        check("no raw bytes are hinted in bash", s.line(), "zqx")
+        check("and no noise from it", s.noise(), [])
+        s.close()
+    finally:
+        write_index()
+
 
 def test_stem_never_cuts_untyped_text() -> None:
     """A stem may only cut what the line already shows.
@@ -991,6 +1022,7 @@ def main() -> int:
     test_loose_tiers()
     test_pasted_text_is_not_a_typo()
     test_unpaintable_rows_are_never_drawn()
+    test_unpaintable_rows_are_never_drawn_bash()
     test_history_browsing_opens_no_list()
     test_cd_answers_directories()
     check_fixture_intact("the run")

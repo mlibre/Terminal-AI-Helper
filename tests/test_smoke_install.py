@@ -458,3 +458,49 @@ _plain = subprocess.run(["zsh", "-f", "-c", f"source {REPO}/plugins/tai.zsh; pri
                         env=_errexit_env, capture_output=True, text=True, timeout=60)
 assert "REACHED-END" in _plain.stdout and _plain.stderr == "", _plain.stderr
 print("OK — a shell with `set -e` loads the plugin and keeps its own setting.")
+
+# The same guest rule for bash, which is the shell most likely to be sourced
+# from a `set -e` rc file. Both halves, exactly like the zsh one: the load
+# survives errexit, and errexit is still on afterwards to kill a real failure.
+_b_loaded = subprocess.run(
+    ["bash", "--noprofile", "--norc", "-c",
+     f"set -e; source {REPO}/plugins/tai.bash; echo REACHED-END"],
+    env=_errexit_env, capture_output=True, text=True, timeout=60)
+assert "REACHED-END" in _b_loaded.stdout, f"set -e killed bash: {_b_loaded.stderr}"
+_b_still_on = subprocess.run(
+    ["bash", "--noprofile", "--norc", "-c",
+     f"set -e; source {REPO}/plugins/tai.bash; false; echo LEAKED"],
+    env=_errexit_env, capture_output=True, text=True, timeout=60)
+assert "LEAKED" not in _b_still_on.stdout, "the bash plugin left errexit off"
+print("OK — bash under `set -e` loads the plugin and keeps its own setting.")
+
+# "A shell parameter is not an environment variable; a plugin is the only
+# bridge." HISTFILE is set, not exported, so every tai subprocess used to see
+# nothing and `tai refresh` imported only the default paths. The plugin is the
+# one place that knows the file, so it exports TAI_HISTORY_FILES at load time —
+# but only when the user has not already said it themselves. printenv reads the
+# environment, which is the thing the rule is about.
+_hist_env = dict(_errexit_env)
+_hist_env.pop("TAI_HISTORY_FILES", None)
+_hist_val = f"{_errexit_home}/.zhistory"
+_z_hist = subprocess.run(
+    ["zsh", "-f", "-c",
+     f"HISTFILE={_hist_val}; source {REPO}/plugins/tai.zsh; printenv TAI_HISTORY_FILES"],
+    env=_hist_env, capture_output=True, text=True, timeout=60)
+assert _z_hist.stdout.strip() == _hist_val, \
+    f"the zsh plugin did not export HISTFILE: {_z_hist.stdout!r} {_z_hist.stderr}"
+_hist_val_b = f"{_errexit_home}/.bash_history"
+_b_hist = subprocess.run(
+    ["bash", "--noprofile", "--norc", "-c",
+     f"HISTFILE={_hist_val_b}; source {REPO}/plugins/tai.bash; printenv TAI_HISTORY_FILES"],
+    env=_hist_env, capture_output=True, text=True, timeout=60)
+assert _b_hist.stdout.strip() == _hist_val_b, \
+    f"the bash plugin did not export HISTFILE: {_b_hist.stdout!r} {_b_hist.stderr}"
+_kept = subprocess.run(
+    ["bash", "--noprofile", "--norc", "-c",
+     f"HISTFILE={_hist_val_b}; source {REPO}/plugins/tai.bash; printenv TAI_HISTORY_FILES"],
+    env=dict(_hist_env, TAI_HISTORY_FILES="mine"),
+    capture_output=True, text=True, timeout=60)
+assert _kept.stdout.strip() == "mine", \
+    f"the plugin overwrote what the user said: {_kept.stdout!r}"
+print("OK — the plugins export TAI_HISTORY_FILES once, and only when unset.")

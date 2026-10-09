@@ -248,9 +248,9 @@ turns it off. `tai record` hand-parses its five flags so the once-per-command
 process never imports argparse; keep its imports lazy and its wrapper on
 `python3 -S -E`.
 
-Measured shapes the keystroke path now relies on — each has its full rule in
-[AGENTS.md](../AGENTS.md); a change here should re-measure on a fixture big
-enough to feel:
+Measured shapes the keystroke path now relies on — each is a promise in
+[AGENTS.md](../AGENTS.md) whose letter a suite holds; a change here should
+re-measure on a fixture big enough to feel:
 
 - **`_tai_lines` works in C-level parameter expansion** — one `(f)` split, one
   `(M)` filter, one cap; a per-line walk cost ~1.9ms per keystroke on a real

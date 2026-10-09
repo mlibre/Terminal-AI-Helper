@@ -99,8 +99,9 @@ one-shot paths, keyed on the store file itself — a new row invalidates it
 
 Three rules are about what may be *ranked* rather than how, and they live in
 `tai/paths.py` because they are about whether a candidate still exists. Each
-has a full statement in [AGENTS.md](../AGENTS.md): path liveness (a command
-whose path is gone is not suggested; unknown never removes anything), `cd`
+is a promise in [AGENTS.md](../AGENTS.md) and a check in the suites: path
+liveness (a command whose path is gone is not suggested; unknown never removes
+anything), `cd`
 destinations (`..`, `.`, `-` rank below every real destination, never removed),
 and file arguments (a line ending in a *file* is answered from the filesystem,
 learned from what the command means and written into `_TAI_FILE`).
@@ -127,8 +128,8 @@ exists it is worth a lot: `gh --help` yields no verbs to the parser and
 `gh __complete ""` yields all of them, each with a description.
 
 Anything read this way is a *convention*, and conventions rank below anything
-the history actually saw — see "Generated vocabulary ranks below observed
-usage" in [AGENTS.md](../AGENTS.md).
+the history actually saw — a promise in [AGENTS.md](../AGENTS.md), asserted on
+real built scores in the suites.
 
 ## The optional model layer
 
