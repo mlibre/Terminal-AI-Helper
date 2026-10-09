@@ -19,9 +19,13 @@ _tai_prompt() {
     _TAI_LAST="$last_cmd"
     # The unit cache pre-loads itself in the background after a command that
     # mentions systemctl has run — the next Tab or hint on a systemctl line
-    # then answers from an array instead of forking. Off the critical path.
+    # then answers from an array instead of forking. Off the critical path,
+    # and off the job table: the outer fork makes the loader the grandchild
+    # of a subshell that exits at once, so it is nobody's job and the shell
+    # has nothing to announce — a plain `&` here had bash printing `[N] pid`
+    # and `[N]+ Done` around every systemctl command.
     if [[ "$last_cmd" == *systemctl* ]]; then
-      ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) &
+      ( ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) & )
     fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions
     # but skips the durable write. Read per prompt so it can be set per command.

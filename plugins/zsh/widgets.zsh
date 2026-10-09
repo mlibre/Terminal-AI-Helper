@@ -579,9 +579,14 @@ _tai_precmd() {
     _TAI_LAST="$_TAI_CMD"
     # The unit cache pre-loads itself in the background after a command that
     # mentions systemctl has run — the next Tab on a systemctl line then
-    # answers from an array instead of forking. Off the critical path, silent.
+    # answers from an array instead of forking. Off the critical path, silent,
+    # and off the job table: the outer fork makes the loader the grandchild of
+    # a subshell that exits at once, so it is nobody's job and the shell has
+    # nothing to announce — the same parenthesised-fork rule the flush and the
+    # record fallback already follow, and a plain `&` here left the loader
+    # where zsh reports it: `[3] 14436`, then `[3] + done ( ... )`.
     if [[ "$_TAI_CMD" == *systemctl* ]]; then
-      ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) &
+      ( ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) & )
     fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions
     # but skips the durable write. Read per prompt so it can be set per command.

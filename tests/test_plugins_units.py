@@ -152,12 +152,53 @@ def test_units_cache_is_reused() -> None:
     check("cache reuse clean", s.noise(), [])
 
 
+def test_preload_makes_no_job_noise() -> None:
+    """The prompt hook's preload is nobody's job, so nothing announces it.
+
+    A plain `&` in the prompt hook made the loader a job of the interactive
+    shell, and the shell reported it: bash printed `[N] pid` at spawn and
+    `[N]+ Done` before the next prompt, zsh the same in its own words — the
+    user saw both around every systemctl command. The parenthesised fork
+    (the rule the flush and the record fallback always followed) makes the
+    loader the grandchild of a subshell that exits at once. The work still
+    happens — both cache files land — and the terminal stays silent.
+    """
+    for shell in ("bash", "zsh"):
+        if not SHELLS[shell]:
+            continue
+        print(f"{shell}: the systemctl preload works and stays quiet")
+        s = Session(shell, env_extra=units_env())
+        mark = len(s.seen)
+        # A command that mentions systemctl, at the prompt: the prompt hook
+        # answers it with the background preload. Both cache files appearing
+        # is the observable end of that work.
+        s.run("systemctl --user disable nothing.service")
+        end = time.monotonic() + 15.0
+        while not (cache_text("system") and cache_text("user")) \
+                and time.monotonic() < end:
+            time.sleep(0.01)
+        check(f"{shell} preload wrote the system cache",
+              "herm.service" in cache_text("system"), True)
+        check(f"{shell} preload wrote the user cache",
+              "user-a.service" in cache_text("user"), True)
+        # Job-state reports are printed before the next prompt, so give the
+        # shell one more prompt to speak in.
+        s.run("true")
+        s.close()
+        seen = s.seen[mark:].replace("\r", "")
+        notes = sorted(set(re.findall(r"\[\d+\]\s*(?:\d+|\+)", seen)))
+        check(f"{shell} preload leaves no job announcements", notes, [])
+        if notes:
+            print(f"       terminal tail:\n{indent(tail(s.raw(), 400))}")
+
+
 def main() -> int:
     setup()
     setup_units()
     test_zsh_units()
     test_bash_units()
     test_units_cache_is_reused()
+    test_preload_makes_no_job_noise()
     print("\nOK — systemctl units complete from a cached list, in both shells."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
     return 1 if failures else 0
