@@ -8,7 +8,8 @@ for the rules that came out of reported failures, read
 
 ```text
 tai/engine.py       ranker; the W_* weights live at the top and `tai tune` rewrites them
-tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`
+tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`;
+                    `shadow_map` ranks a rare near-duplicate line under its stronger twin
 tai/store.py        SQLite log (WAL), schema, oldest-first loader, history import
 tai/paths.py        path liveness, `cd` destinations, "does this line end in a file"
 tai/fresh.py        the files a path argument could be — the one-shot half

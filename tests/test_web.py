@@ -20,7 +20,7 @@ from smoke_env import *  # noqa: F401,F403  (scratch db, REPO, the tai modules)
 import tai.web as tw
 
 # --- the fixture: a small history, straight through the real writer ---------
-from tai.store import append_and_count, count
+from tai.store import append_and_count, count, session
 
 for _cmd, _n in (("git status", 3), ("docker ps", 2), ("ls -la", 1)):
     for _ in range(_n):
@@ -56,6 +56,10 @@ assert "try a prefix" in page, "the page is missing the box that makes it a dash
 assert "/api/state" in page and "/api/suggest" in page, \
     "the page must talk to the same server it was served from"
 assert "127.0.0.1" in page, "the page should say where it is bound"
+assert "data-theme" in page and "localStorage" in page, \
+    "the page must carry the light/dark toggle and remember the choice"
+assert 'id="theme"' in page and 'id="toast"' in page, \
+    "the friendly bits — theme button, copy toast — ship with the page"
 print("OK — the page serves, names its box, and points at its own API.")
 
 # --- state: the numbers on the page are the store's numbers ------------------
@@ -69,6 +73,34 @@ assert s["learned"]["commands"] >= 3, s["learned"]
 assert {"cmd", "cwd", "exit", "ts"} <= set(s["recent"][0].keys()), s["recent"][0]
 assert s["indexes"]["zsh"]["exists"] in (True, False)   # reported, not assumed
 print("OK — /api/state shows the seeded store: rows, top, learned, recent.")
+
+# --- the history's monsters arrive bounded -------------------------------------
+# Real stores carry rows from before the recorder rejected multi-kilobyte and
+# multi-line input — pasted JSON blobs, heredoc fragments. Written straight to
+# the store the way an old import leaves them, they must reach the page as one
+# bounded line: the table they render in stays a table, and the state answer
+# stays small enough to fetch (a user saw NetworkError where `state` should
+# have been, on rows exactly like these).
+monster = '{"content": "' + "x" * 6000 + '"\nsecond "line"\n\tend}'
+with session() as con:
+    con.execute("INSERT INTO commands(cmd, cwd, exit_code, ts) VALUES(?,?,0,?)",
+                (monster, "/home/u/proj\nsecond dir", int(time.time())))
+    con.commit()          # the raw insert mimics an old database, not the recorder
+code, body = get("/api/state")
+s = json.loads(body)
+assert code == 200
+assert len(body) < 100_000, f"the state answer must stay fetchable, was {len(body)}"
+assert all("\n" not in r["cmd"] and "\t" not in r["cmd"]
+           for r in s["recent"] + s["top"]), "one line, always"
+assert all("\n" not in r["cwd"] and len(r["cwd"]) <= 81 for r in s["recent"]), \
+    "cwd collapses and bounds too"
+assert all(len(r["cmd"]) <= 121 for r in s["recent"] + s["top"]), \
+    s["recent"][0]["cmd"][:200]
+assert any(r["cmd"].endswith("…") for r in s["recent"]), \
+    "the giant row is clamped, not dropped"
+assert s["top"][0]["cmd"] == "git status" and s["top"][0]["n"] == 3, \
+    "clamping never reorders"
+print("OK — monster history rows arrive as one bounded line; the answer stays small.")
 
 # --- suggest: the same engine the prompt uses --------------------------------
 code, body = get("/api/suggest?q=git%20st")

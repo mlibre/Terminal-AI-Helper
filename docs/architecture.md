@@ -88,7 +88,11 @@ freq · recency · cwd · repo · branch · hour-of-day · exit code · what ran
 ```
 
 plus a token bigram/trigram for flags (`logs -f --tail 50`) and typo tolerance
-on the first word (`tai/typo.py`). The full weight list lives at the top of
+on the first word (`tai/typo.py`). The same module owns the shadow rule
+(`shadow_map`): a rare line that nearly duplicates a stronger one is ranked
+just below it, in the engine and the index alike, however the rows'
+frequencies, timestamps and exit codes tie. The full weight list lives at the
+top of
 `tai/engine.py`, and the built engine is pickled beside the store for the
 one-shot paths, keyed on the store file itself — a new row invalidates it
 (`tai/engcache.py`); the keystroke path never touches it.

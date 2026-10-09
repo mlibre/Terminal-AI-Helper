@@ -491,7 +491,7 @@ print("OK — `cd ` answers with a destination; `cd ..` is ranked, not removed."
 # `tai sintall` haunted the `tai ` hint forever, because one run scored like
 # one run. The index builder demotes the typo under the command it shadows;
 # nothing is deleted, and a typo with no more-frequent neighbour is left alone.
-from tai.index import build, TYPO_FREQ_MAX, TYPO_FREQ_RATIO  # noqa: E402
+from tai.index import build  # noqa: E402
 from tai.store import append_and_count  # noqa: E402
 
 for cmd, n in (("tai install", 6), ("tai uninstall", 4), ("tai sintall", 1),
@@ -515,6 +515,41 @@ assert scores["git stash"] > 0, "an unrelated one-off is not demoted"
 # The habit itself is never demoted for shadowing something rarer.
 assert scores["tai install"] > scores["tai sintall"]
 print("OK — a one-off typo ranks below the habit it shadows, and stays indexed.")
+
+# The report that reopened the rule: `tai unsintall` and `tai unisntall`
+# recorded beside `tai uninstall`, each once, within the same second, every
+# row exit 0 — frequency, recency and success all tied, the score tie fell
+# to lexical order, and the ghost offered `tai unsintall` for `tai un`.
+# tai/typo.py's shadow_map resolves that: the strongest spelling stands,
+# and a full evidence tie falls to the smallest spelling, which here is the
+# right one. Both rankers — the engine below, the index above — share it.
+from tai.engine import Engine  # noqa: E402
+from tai.typo import shadow_map  # noqa: E402
+
+eng = Engine()
+for cmd in ("tai unsintall", "tai unisntall", "tai uninstall"):
+    eng.add(cmd, ts=1_700_000_000)
+sh = shadow_map(eng)
+assert sh.get("tai unsintall") == "tai uninstall", sh
+assert sh.get("tai unisntall") == "tai uninstall", sh
+assert "tai uninstall" not in sh, "the real spelling is nobody's shadow"
+r = eng.suggest("tai un")
+assert r["choice"] == "tai uninstall", r["choices"]
+
+# Success is evidence too: a spelling that never worked is a shadow of one
+# that did, even when the working one is the older line.
+eng2 = Engine()
+eng2.add("tai unsintall", exit_code=2, ts=1_700_000_000)
+eng2.add("tai uninstall", exit_code=0, ts=1_700_000_000 - 86400)
+assert eng2.suggest("tai un")["choice"] == "tai uninstall"
+
+# Two edits is the bound because that is what a real typo spans; three is
+# a different word, and a different word is nobody's shadow.
+eng3 = Engine()
+eng3.add("git stash", ts=1_700_000_000)
+eng3.add("git status", ts=1_700_000_000)
+assert shadow_map(eng3) == {}, shadow_map(eng3)
+print("OK — `tai un` answers `tai uninstall` even when every signal ties.")
 
 # A record reaches the index without waiting a hundred records: when the index
 # on disk is older than the newest row, past a short debounce, the background

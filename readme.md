@@ -153,7 +153,11 @@ When nothing extends the line, the glimpse shows the learned lines that hold
 every word you typed. A word one letter from a word the history holds verbatim
 (`forestt` → the `beauty-forest` lines) is answered *as that word*, and a
 one-off that shadows a habit — `tai sintall` typed once beside `tai install`
-typed a dozen times — is ranked below the habit in the index itself.
+typed a dozen times — is ranked below the habit in the index itself. Even when
+the evidence ties outright — `tai un` faced with `tai unsintall` and
+`tai unisntall` recorded beside `tai uninstall`, each once, every row exit 0 —
+the strongest spelling stands and the typos rank under it, in the prompt and
+in `tai suggest` alike.
 
 ### A tool you have never run still gets an answer
 
@@ -189,8 +193,11 @@ One page, served by the tool itself: a box where typing a prefix answers
 exactly what the prompt would answer — through the same engine, not a copy —
 plus the most-run commands, the latest recorded rows, and the state of the
 store and both indexes. It binds `127.0.0.1` only, answers GETs only, and can
-write nothing: the database is your shell history. `--port N` moves it;
-`--no-browser` skips the auto-open.
+write nothing: the database is your shell history. A light/dark toggle sits in
+the corner and the choice is remembered; clicking a suggestion copies it; and
+multi-kilobyte history rows arrive bounded, so the page stays quick on stores
+that hold pasted JSON. `--port N` moves it; `--no-browser` skips the
+auto-open.
 
 ## Commands
 

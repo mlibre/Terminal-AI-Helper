@@ -112,3 +112,86 @@ def near_miss_lines(eng, prefix: str, limit: int = 50) -> list[str]:
                     if len(out) >= limit:
                         return out
     return out
+
+
+# A one-off that nearly duplicates a stronger line is a typo of it, and it is
+# demoted just below that line instead of ranking beside it. `TYPO_FREQ_MAX`
+# bounds how rare the shadow may be: a line the user has run three times is
+# a habit, even when a twin runs more often, and habits are not demoted.
+TYPO_FREQ_MAX = 2
+
+
+def shadow_map(eng, lines=None) -> dict[str, str]:
+    """Rare lines that are two edits from a stronger line, mapped to it.
+
+    The report that shaped this: `tai unsintall`, `tai unisntall` and
+    `tai uninstall` each recorded once, within the same second, every row
+    exit 0 — frequency, recency and success all tied, the score tie fell to
+    lexical order, and the ghost offered `tai unsintall` for `tai un`. The
+    old rule (one Damerau edit, target three times more frequent) covered
+    none of it. This one covers all of it:
+
+      * the shadow ran at most `TYPO_FREQ_MAX` times — rarer than its target;
+      * the two share their first word and are within two edits whole-line,
+        which is the shape a mistyped word takes (`unsintall`/`uninstall` is
+        two adjacent swaps, invisible to a one-edit rule);
+      * the target is the *stronger* spelling: more successes, then more
+        runs, then more recent — and when the evidence ties outright, the
+        lexically smallest of the near-duplicates stands, which is the one
+        honest way to break a tie the store carries no other evidence for;
+      * the population both sides come from is `lines`: the index passes the
+        lines the user actually ran (a corpus convention is not a typo and
+        not a habit one shadows), the engine passes the candidates it is
+        ranking, which keeps the pairwise search proportional to the
+        question instead of to the whole history.
+
+    The result feeds both rankers — the index applies it to the integer
+    scores the plugins read, the engine to the floats `tai suggest` answers
+    with — so neither can disagree with the other about which spelling is
+    the real one.
+    """
+    names = list(eng.cmds) if lines is None else \
+        [c for c in lines if c in eng.cmds]
+    # Per-line letter sets: the cheap gate before the edit distance. Two
+    # lines within two edits can differ by at most two distinct letters per
+    # side, and two set differences answer that at C speed — which is what
+    # keeps a pairwise search over a real history from turning into a walk.
+    # Sound, not just fast: every edit touches at most one letter, so a pair
+    # the gate rejects is a pair the distance would reject too.
+    sets = {c: set(c) for c in names}
+    groups: dict[str, dict[int, list[str]]] = {}
+    for c in names:
+        groups.setdefault(c.split(" ", 1)[0], {}).setdefault(len(c), []).append(c)
+    out: dict[str, str] = {}
+    for cmd in names:
+        st = eng.cmds[cmd]
+        if st.freq > TYPO_FREQ_MAX:
+            continue
+        buckets = groups.get(cmd.split(" ", 1)[0])
+        if not buckets:
+            continue
+        s_set = sets[cmd]
+        ev = (st.success, st.freq, st.last_ts)
+        best: tuple[tuple[int, int, int], str] | None = None
+        for ln in range(len(cmd) - 2, len(cmd) + 3):
+            for other in buckets.get(ln, ()):
+                if other == cmd:
+                    continue
+                o_set = sets[other]
+                if len(o_set - s_set) > 2 or len(s_set - o_set) > 2:
+                    continue
+                ost = eng.cmds[other]
+                oev = (ost.success, ost.freq, ost.last_ts)
+                # The target must be the stronger spelling — or, on a full
+                # tie, the smaller one. Anything weaker is somebody else's
+                # shadow, not this line's habit.
+                if oev < ev or (oev == ev and other > cmd):
+                    continue
+                if lev1(cmd, other, 2) > 2:
+                    continue
+                if best is None or oev > best[0] or \
+                        (oev == best[0] and other < best[1]):
+                    best = (oev, other)
+        if best is not None:
+            out[cmd] = best[1]
+    return out

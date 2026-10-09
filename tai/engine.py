@@ -12,7 +12,7 @@ import math
 import time
 
 from tai.paths import destinations_first
-from tai.typo import near_miss_lines
+from tai.typo import near_miss_lines, shadow_map
 
 
 # Tunable weights (see tai tune). Defaults from smoke + manual tuning.
@@ -381,6 +381,32 @@ class Engine:
             # handled softly via success_s; keep hard rule out for recall.
             scored.append((score, name))
 
+        # A one-off that nearly duplicates a stronger line ranks just below it
+        # (tai/typo.py, which owns the rule and its evidence order). The index
+        # applies the same map to the scores the shell plugins read — one
+        # rule, two rankers — so `tai un` offers `tai uninstall` here and in
+        # the prompt, never the `unsintall` recorded beside it. Computed over
+        # the candidates, because the cap only means something when both
+        # spellings are on offer, and a candidate set this narrow is a
+        # handful of lines rather than a walk over the history. Wide answers
+        # skip it: a demotion at rank 400 of 20000 is not a thing anyone sees.
+        if len(cand_names) <= 64:
+            shadows = shadow_map(self, cand_names)
+            if shadows:
+                by_name = {n: s for s, n in scored}
+                demoted = False
+                # Two passes, so a shadow of a shadow lands below its own
+                # target whichever order the map iterates in.
+                for _ in range(2):
+                    for typo, canon in shadows.items():
+                        cs = by_name.get(canon)
+                        cs_ts = by_name.get(typo)
+                        if cs is not None and cs_ts is not None \
+                                and cs_ts > cs - 0.01:
+                            by_name[typo] = cs - 0.01
+                            demoted = True
+                if demoted:
+                    scored = [(s, n) for n, s in by_name.items()]
         # `cd ..` and `cd -` are true in every directory there is, so how often
         # they were typed is not evidence about where the user wants to be. They
         # are ranked below every real destination and never removed, and the
