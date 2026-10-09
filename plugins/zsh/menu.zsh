@@ -224,6 +224,17 @@ _tai_menu_first_lines() {
   local word="$1" k values line s d
   local -a merged
   _TAI_MENU_LEARNED=()
+  # An empty word is refused, and the reason is the report that found this one
+  # too: pressed on an empty line it is a subscript that matches every key in
+  # the index, each key lent its best lines, and the top sixteen of the whole
+  # history drew — which sixteen the scores of the moment decided, accidental
+  # Enter presses on stray characters among them, one band of one-key entries
+  # above the directory listing. An empty line asks nothing, so no ranking of
+  # the history can answer it: the ghost refuses an empty word
+  # (_tai_first_values), bash's completion refuses it (_tai_first_lines), and
+  # this source refuses it as well. The menu then has the filesystem's answer
+  # alone, which is the one listing an empty line has that is not arbitrary.
+  [[ -n "$word" ]] || return 1
   # A glob character in the word is refused for the same reason
   # _tai_first_values refuses it: the match below would mean something other
   # than "begins with the word".

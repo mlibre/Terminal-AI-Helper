@@ -1117,6 +1117,71 @@ def test_first_word_menu() -> None:
         write_index()         # every other suite reads the default fixture
 
 
+def test_empty_line_menu() -> None:
+    """Tab on an empty line answers with the directory, not with the history.
+
+    The report: Tab on an empty prompt filled the first two rows of the menu —
+    `godot .`, `cd`, then a band of one-key entries (`y`, `s`, `n`, `d`, `c`),
+    paste fragments (`\\`, `)`, `"`, a run of markdown backticks), a word in
+    Persian — before the directory listing drew underneath. How that was
+    calculated: the menu's learned source looks the index up by the first word,
+    and an empty word is every key in it. Each key lent its best lines, the
+    merge ranked them by score, and the top sixteen drew. The score rewards
+    what ran recently, and an accidental Enter on a stray character is recorded
+    like any other command — so the entries an empty line drew were whichever
+    ones the recency of a typo had put at the top, out of thousands.
+
+    An empty line asks nothing, so no ranking of the whole history can be the
+    answer. Two sources of this plugin had already decided exactly that, and
+    the menu now agrees with them: the ghost text refuses an empty word
+    (_tai_first_values), bash's completion refuses it (_tai_first_lines), and
+    the menu's first-word source refuses it too. What Tab answers with is the
+    one listing an empty line has that is not arbitrary — the current
+    directory. Typing any first word brings the learned lines back ahead of
+    the rest; test_first_word_menu owns that half.
+    """
+    fixture = ["go mod vendor", "go mod download", "godot .", "got log",
+               "git status", "y", "n", ")", "ca"]
+    learned = ["go mod vendor", "go mod download", "godot .", "got log",
+               "git status"]
+    junk = ["y", "n", ")", "ca"]
+    try:
+        write_index(fixture)
+
+        if SHELLS["zsh"]:
+            print("zsh empty-line menu")
+            s = Session("zsh")
+            s.run(f"cd {MENU_DIR}")
+            s.write(TAB)
+            s.settle()
+            line, drawn, size, idx = s.menu(clear=False)
+            check("the empty line's menu is the directory listing",
+                  size > 0 and "tzz_dir/" in drawn, True)
+            check("the line it stood on is still empty", line, "")
+            check("no learned line stands in it",
+                  [r for r in learned if r in drawn], [])
+            check("no one-key entry from the history either",
+                  [e for e in menu_entries(drawn) if e in junk], [])
+            check("no noise from the empty-line menu", s.noise(), [])
+            s.close()
+
+        if SHELLS["bash"]:
+            print("bash empty-line completion")
+            s = Session("bash")
+            s.run(f"cd {MENU_DIR}")
+            REPLY.unlink(missing_ok=True)
+            s.run('COMP_LINE=""; COMP_POINT=0; COMPREPLY=(); _tai_complete; '
+                  f'printf "%s\\n" "${{#COMPREPLY[@]}}" '
+                  f'"${{COMPREPLY[@]}}" > {REPLY}')
+            s.wait_file(REPLY, "the empty-line completion list")
+            got = REPLY.read_text().splitlines()
+            got = got[1:] if got and got[0].isdigit() else got
+            check("bash declines an empty line outright", got, [])
+            s.close()
+    finally:
+        write_index()         # every other suite reads the default fixture
+
+
 def main() -> int:
     setup()
     test_bash_menu()
@@ -1131,6 +1196,7 @@ def main() -> int:
     test_history_browsing_opens_no_list()
     test_cd_answers_directories()
     test_first_word_menu()
+    test_empty_line_menu()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
