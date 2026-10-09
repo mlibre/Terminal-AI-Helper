@@ -13,7 +13,6 @@ Build **simple, fast, smart, delightful software** that works immediately.
 - Make failure recoverable and preserve the last good state; write clean, small,
   understandable code; omit information that does not help users decide, act,
   or recover.
-- **No cosmetic git commands.**
 
 ## Project direction
 
