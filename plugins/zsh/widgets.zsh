@@ -60,6 +60,7 @@ _tai_paste_state() {
 # any edit of one character — because the rule is about what arrived, not a
 # permanent mode.
 tai-bracketed-paste() {
+  _TAI_ISEARCH=0
   _TAI_PASTE_QUIET=1
   zle .bracketed-paste
 }
@@ -214,6 +215,7 @@ typeset -g _TAI_HINT=""
 
 # Accept widgets.
 tai-accept() {
+  _TAI_ISEARCH=0
   _tai_shown_hint || return
   # A name off the disk is quoted on the way in, or the line says `cat My
   # Document.pdf` and what runs is `cat My Document.pdf` with two arguments. The
@@ -252,6 +254,7 @@ zle -N tai-accept
 # guessing at what you meant, from no evidence at all. It stays a hint — `→`
 # takes it — and Tab still lists the honest completion (`--help`) and the files.
 tai-tab() {
+  _TAI_ISEARCH=0
   (( CURSOR == ${#BUFFER} )) || { zle expand-or-complete; return }
   tai-menu
 }
@@ -269,6 +272,7 @@ zle -N tai-tab
 # a single candidate is committed, which is what `cd t<Tab>` does when the
 # only thing starting with `t` is one directory.
 tai-menu() {
+  _TAI_ISEARCH=0
   # The index is keyed on whole lines, so there is no history behind a word in
   # the middle of one, and replacing a word the cursor is not on is not a
   # completion. That case is zsh's, and it is better at it than this is.
@@ -314,6 +318,7 @@ zle -N tai-menu
 # what you are about to run. A second Enter runs it, and between the two the line
 # says exactly what it will do. With no menu open, Enter is Enter.
 tai-enter() {
+  _TAI_ISEARCH=0
   if (( _TAI_MENU_IDX )) && (( _TAI_MENU_ARMED )); then
     _tai_menu_commit
     return
@@ -343,6 +348,7 @@ zle -N tai-enter
 # to take it is the report. Wrapping the widget catches both forms, and a user
 # who has bound the arrow to something of their own never reaches this at all.
 tai-forward-char() {
+  _TAI_ISEARCH=0
   # The arrow keys are the ghost's keys. With a menu open there is no ghost to
   # take, so the arrow puts the menu away and the next redraw brings it back.
   (( _TAI_MENU_IDX )) && _tai_menu_close
@@ -434,6 +440,7 @@ unset _tai_apps_d _tai_apps_u _TAI_REPLY
 fi
 
 tai-arrow-down() {
+  _TAI_ISEARCH=0
   if (( _TAI_MENU_IDX )); then
     if (( _TAI_MENU_ARMED )); then
       _TAI_MENU_IDX=$(( _TAI_MENU_IDX % ${#_TAI_MENU} + 1 ))
@@ -458,6 +465,7 @@ tai-arrow-down() {
 }
 zle -N tai-arrow-down
 tai-arrow-up() {
+  _TAI_ISEARCH=0
   if (( _TAI_MENU_IDX )); then
     if (( _TAI_MENU_ARMED )) && (( _TAI_MENU_IDX > 1 )); then
       _TAI_MENU_IDX=$(( _TAI_MENU_IDX - 1 ))
@@ -485,11 +493,13 @@ bindkey '^[OA' tai-arrow-up
 
 
 tai-accept-or-complete() {
+  _TAI_ISEARCH=0
   if [[ -n "$_TAI_SUGGESTION" ]]; then zle tai-accept; else zle expand-or-complete; fi
 }
 zle -N tai-accept-or-complete
 
 tai-accept-word() {
+  _TAI_ISEARCH=0
   (( _TAI_MENU_IDX )) && _tai_menu_close
   # Whatever drew the hint, for the same reason the arrow does:
   # _tai_shown_hint.
@@ -539,6 +549,47 @@ _tai_line_init() {
 typeset -gi _TAI_ISEARCH=0
 _tai_isearch_update() { _TAI_ISEARCH=1 }
 _tai_isearch_exit() { _TAI_ISEARCH=0 }
+
+# The flag's third leg, and the one no hook timing can miss: the search is
+# raised by its own widget. The report came back a second time with the
+# search's two halves behaving differently — ^R stepping through the matches
+# silent, typing into the pattern loud — and typed steps loud is the
+# signature of a shell whose isearch-update hook does not fire, or fires
+# after the redraw it should precede, for the pattern steps: measured, such a
+# shell pays a full query per character typed into the pattern, exactly the
+# hang the user described. The wrap below does not argue with the shell about
+# when its hooks fire. ^R at the prompt dispatches
+# history-incremental-search-backward like any widget, so replacing that name
+# with a wrapper that raises the flag and hands the key to the builtin puts
+# the stand-down in force before the search draws its first frame — whatever
+# the update hook later does, the flag is already up. Inside the search the
+# builtin runs its own repeats, so the wrapper executes once per search, not
+# once per step, and the flag comes down the way it always did: the exit
+# hook, tai's own widgets — which only ever run once the search has handed
+# the line back — or the next line.
+#
+# The wrap is conservative where the arrow capture is deliberate: it replaces
+# the widget name only while the name still IS the builtin. A shell or
+# another plugin that has already put its own widget there keeps it, this leg
+# is simply absent, and the search costs what it cost before this fix. The
+# value in $widgets says `builtin` for the shell's own widget and `user:name`
+# for a wrapped one — the same array the bracketed-paste wrap above reads.
+tai-isearch-backward() {
+  _TAI_ISEARCH=1
+  zle .history-incremental-search-backward
+}
+tai-isearch-forward() {
+  _TAI_ISEARCH=1
+  zle .history-incremental-search-forward
+}
+zle -N tai-isearch-backward
+zle -N tai-isearch-forward
+case "${widgets[history-incremental-search-backward]:-}" in
+  builtin*) zle -N history-incremental-search-backward tai-isearch-backward ;;
+esac
+case "${widgets[history-incremental-search-forward]:-}" in
+  builtin*) zle -N history-incremental-search-forward tai-isearch-forward ;;
+esac
 
 # Both hook helpers ship with zsh but are only autoloadable, so a minimal
 # config (or `zsh -f`) leaves them unloaded. Without this the line-pre-redraw

@@ -29,6 +29,20 @@ line itself (`ls /tmp`, left in the buffer by the arrow that exits the
 search) is the opposite case: editing it is ordinary editing, and its first
 draw after the search is tai working again, once, at a prompt.
 
+The report came back a second time with the search's two halves behaving
+differently: ^R again to step through the matches silent, typing into the
+pattern loud. Typed steps loud is the signature of a shell whose
+isearch-update hook does not fire — or fires after the redraw it should
+precede — for the pattern steps, so the flag the first fix reads was down for
+every character paid for. The plugin's answer is a leg that does not lean on
+hook timing at all: the search is raised by its own widget. ^R at the prompt
+dispatches `history-incremental-search-backward` like any widget, and the
+plugin's wrapper of that name raises the flag before the builtin runs a
+single step. The second test below makes the update hook blind on purpose —
+the user's shell — and holds the same line for the pattern steps: a
+pattern-step query would name a line typed nowhere in the test
+(`cd tzz_dir`), and it must not appear.
+
 Every read of the log happens after the session is closed, because the log
 is written from inside the very hooks the keystrokes drive.
 
@@ -120,11 +134,90 @@ def test_isearch_costs_nothing() -> None:
     check("the ^R session clean", s.noise(), [])
 
 
+# The wrap's own footprint, read to a file because the terminal interleaves
+# its echoes with anything printed: after the plugin is sourced, the search
+# widget's name must carry tai's wrapper.
+WRAP_VALUE = pathlib.Path("/tmp/tai/tai_isearch_wrap_value.txt")
+
+# The instruments, and the user's shell: the update hook is replaced with a
+# no-op, so the flag can rise only through the wrap. The exit hook stays live.
+BLIND_SETUP = (
+    "functions[_tai_update_orig]=${functions[_tai_update]}; "
+    f"_tai_update() {{ print -r -- \"U ${{_TAI_ISEARCH:-0}}\" >> {LOG}; "
+    "_tai_update_orig \"$@\" }; "
+    "functions[_tai_qdo_orig]=${functions[_tai_query_do]}; "
+    f"_tai_query_do() {{ print -r -- \"Q $BUFFER\" >> {LOG}; "
+    "_tai_qdo_orig \"$@\" }; "
+    "_tai_isearch_update() { :; }; "
+    "print blind"
+)
+
+
+def test_pattern_steps_cost_nothing_without_the_update_hook() -> None:
+    """The second report: typing into the pattern, on a shell whose update
+    hook never raises the flag.
+
+    With the update hook blind, the flag can only come from the wrap — the
+    search raised by its own widget at ^R's dispatch, before the search draws
+    anything. Measured on the bundled zsh with this exact blindness, every
+    match-changing pattern character paid for a full query before the wrap:
+    `d` and `o` each queried. The discriminator here is `cd tzz_dir`, the
+    newest seeded line holding a `d`, typed nowhere in this test.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("the pattern steps cost nothing with the update hook blind (zsh)")
+    HISTFILE.write_text("\n".join(HISTORY_SEED) + "\n")
+    s = Session("zsh")
+    s.run(BLIND_SETUP)
+    s.run(f"print -r -- \"${{widgets[history-incremental-search-backward]:-}}\" > {WRAP_VALUE}")
+    s.run(f": > {LOG}")
+    # A fresh history list, pushed last and by explicit filename, so the
+    # search sees only the seeded lines: the harness's own commands otherwise
+    # sit in the list — every run() line carries the done_N__ marker, a "do"
+    # substring — and outrank the seeds as the newest matches. fc -p with no
+    # arguments unsets HISTFILE, which is why the filename travels with it.
+    # Nothing is typed after this, so the newest entries are the seeds.
+    s.run(f"fc -p {HISTFILE} 30 30; fc -R {HISTFILE}")
+    mark = len(s.seen)
+    # `d` lands on `cd tzz_dir`, `o` narrows to `docker ps`, `c` changes
+    # nothing, and the arrow ends the search keeping the line it found —
+    # whose first ordinary draw is tai working again, once.
+    s.write(ISEARCH)
+    s.settle()
+    s.write("d")
+    s.settle()
+    s.write("o")
+    s.settle()
+    s.write("c")
+    s.settle()
+    s.write(RIGHT)
+    s.settle(0.5)
+    found = s.line()
+    s.close()
+    log = LOG.read_text().splitlines()
+    hook_flags = [line[2:] for line in log if line.startswith("U ")]
+    queried = [line[2:] for line in log if line.startswith("Q ")]
+    check("the search ran (zsh's own prompt came up)",
+          "bck-i-search" in s.raw()[mark:], True)
+    check("the search's widget is tai's wrapper",
+          "tai-isearch-backward" in WRAP_VALUE.read_text(), True)
+    check("the flag was up inside the search, hook or no hook",
+          "1" in hook_flags, True)
+    check("no pattern step ran the query", "cd tzz_dir" in queried, False)
+    check("the found line's first draw asked tai once",
+          queried.count("docker ps"), 1)
+    check("the found line was still there", found, "docker ps")
+    check("the ^R session clean", s.noise(), [])
+
+
 def main() -> int:
     setup()
     test_isearch_costs_nothing()
+    test_pattern_steps_cost_nothing_without_the_update_hook()
     check_fixture_intact("the ^R test")
-    print("\nOK — the search is the shell's, and editing the found line is tai's."
+    print("\nOK — the search is the shell's, its pattern steps are nobody's "
+          "query, and editing the found line is tai's."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
     return 1 if failures else 0
 
