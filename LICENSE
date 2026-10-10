@@ -19,18 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-In plain words: Terminal-AI-Helper is free to use — for any purpose, personal
-or commercial, in source or in the packaged .deb — as long as the notice above
-travels with it. There is no warranty.
-
-Third-party components, which stay under their own terms:
-
-- VitePress and Vite are used only as dev tools to build the documentation
-  site; they are not part of the plugin itself and do not ship in it. Both
-  are MIT-licensed, (c) Evan You and the Vite & VitePress contributors.
-- A compiled copy of zsh, with two of its shipped function files, is vendored
-  under tests/bin to run the test suite. zsh carries its own MIT-style
-  licence, (c) Paul Falstad and the zsh contributors.
