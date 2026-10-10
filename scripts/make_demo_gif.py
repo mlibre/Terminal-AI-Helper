@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Re-record the readme demo GIF: a real zsh running the real plugin on a pty.
 
-    python3 scripts/make_demo_gif.py                  # -> assets/demo.gif
-    python3 scripts/make_demo_gif.py --out /tmp/x.gif --debug
+    python3 scripts/make_demo_gif.py                  # -> assets/demo.gif, 2x
+    python3 scripts/make_demo_gif.py --out /tmp/x.gif --scale 1 --debug
 
 What it does, in order:
 
@@ -12,9 +12,12 @@ What it does, in order:
      beats, one keystroke at a time, snapshotting a pyte screen after each
      and remembering which key produced the frame;
   3. renders the frames GitHub-dark under window chrome, with a keycap strip
-     along the bottom showing every key the "user" strokes — the key just
-     pressed lit up, older ones fading — and drops QA stills of the
-     well-known moments next to the recording.
+     along the bottom telling the story in the plugin's own keys — the arrow
+     that takes a hint, the chords that open a menu, the Enters that run.
+     Typed characters are not keys, they are what the keys produce, so they
+     live on the line above and nowhere else. The key just pressed lights
+     up, older ones fade, and QA stills of the well-known moments land next
+     to the recording.
 
 Nothing on screen is drawn by hand: every frame is the plugin's own bytes
 turned back into a screen by pyte. When the product's look or story moves,
@@ -93,13 +96,14 @@ def build_world() -> None:
 # A frame is (screen snapshot, display milliseconds, keys pressed for it).
 # The snapshot is pyte's screen: one tuple of styled cells per row plus the
 # cursor position. `keys` drives the keycap strip in the renderer.
-def record(debug: bool = False) -> list:
+def record(debug: bool = False) -> tuple:
     import pyte
 
     build_world()
     os.chdir(CWD)
     s = Session("zsh", env_extra={"HOME": str(DEMO_HOME), "PS1": PS1})
     frames: list[tuple] = []
+    qa: dict = {}   # beat -> frame index, pinned where the beat happens
     try:
         # A real `clear`, run by the shell, so ZLE's own idea of the screen and
         # pyte's start from the same place. The mark goes down BEFORE the
@@ -136,14 +140,26 @@ def record(debug: bool = False) -> list:
 
         def push(ms: int, keys: tuple = ()) -> None:
             feed()
-            frames.append((snap(screen), ms, keys))
+            st = snap(screen)
+            # Identical neighbours merge — but only when neither holds a
+            # keystroke. A frame with keys must survive on its own, or the
+            # keycap strip would never light up on a screen that did not
+            # change.
+            if frames and not keys and not frames[-1][2] \
+                    and frames[-1][0] == st:
+                frames[-1] = (st, frames[-1][1] + ms, ())
+            else:
+                frames.append((st, ms, keys))
 
         def type(text: str, ms: int = 100) -> None:
+            # Characters appear one by one, but a character is not a key of
+            # the plugin: the strip under the window tells the story in
+            # TAI's own keys — the arrow, the chords, the Enters. What is
+            # typed is what those keys produce, and the line above shows it.
             for ch in text:
-                label = "\u2423" if ch == " " else ch
                 s.write(ch)
                 s.settle()
-                push(ms, (label,))
+                push(ms)
 
         def key(seq: str, ms: int, label: str,
                 quiet: float | None = None) -> None:
@@ -171,15 +187,18 @@ def record(debug: bool = False) -> list:
         push(1000)                       # fresh prompt, hold
         type("git st")
         push(850)                        # ghost visible, hold
+        qa["ghost"] = len(frames) - 1
         checkpoint("beat1 hint")
         key(RIGHT, 500, "\u2192")        # take the hint
         run_enter("git status", "nothing to commit")
+        qa["ran1"] = len(frames) - 1
         checkpoint("beat1 ran")
 
         # -- beat 2: a bare first word opens the ranked list -----------------
         type("git", 110)
         push(350)
         key(CTRL_SPACE, 900, "Ctrl \u2423")   # the habits, ranked
+        qa["menu1"] = len(frames) - 1
         checkpoint("beat2 menu")
         key(DOWN, 400, "\u2193")
         key(DOWN, 400, "\u2193")
@@ -196,6 +215,7 @@ def record(debug: bool = False) -> list:
         type("/", 140)
         push(300)
         key(CTRL_SPACE, 900, "Ctrl \u2423")   # Clip/  Movies/  Projects/
+        qa["fs_menu"] = len(frames) - 1
         checkpoint("beat3 menu")
         key(DOWN, 380, "\u2193")
         key(DOWN, 380, "\u2193")
@@ -211,13 +231,16 @@ def record(debug: bool = False) -> list:
         # corrected line answers with a hint of its own.
         type("git statsu")
         push(1600)                       # the list the typo brought up, hold
+        qa["typo_preview"] = len(frames) - 1
         checkpoint("beat4 preview")
         preview = seen_text()
         assert "git status" in preview and "git status --short" in preview, \
             f"the typo preview never showed the list:\n{preview}"
         key(DOWN, 900, "\u2193")         # the preview becomes the selection
+        qa["typo_armed"] = len(frames) - 1
         checkpoint("beat4 armed")
         key(ENTER, 900, "\u23ce")        # take it: the typo becomes the habit
+        qa["typo_taken"] = len(frames) - 1
         assert "git statsu" not in seen_text(), \
             "the take never landed: the typo is still on the line"
         push(1900)                       # the corrected line, holding
@@ -227,17 +250,7 @@ def record(debug: bool = False) -> list:
     finally:
         s.close()
 
-    # Identical neighbours merge — but only when neither holds a keystroke.
-    # A frame with keys must survive on its own, or the keycap strip would
-    # never light up on a screen that did not change.
-    merged: list[tuple] = []
-    for snap_tuple, ms, keys in frames:
-        if merged and not keys and not merged[-1][2] \
-                and merged[-1][0] == snap_tuple:
-            merged[-1] = (snap_tuple, merged[-1][1] + ms, ())
-        else:
-            merged.append((snap_tuple, ms, keys))
-    return merged
+    return frames, qa
 
 
 # -- the rendering -----------------------------------------------------------
@@ -247,9 +260,6 @@ def record(debug: bool = False) -> list:
 FONT_DIRS = ["/usr/share/fonts/truetype/dejavu",
              "/usr/share/fonts/dejavu",
              "/usr/share/fonts/TTF"]
-
-FS = 16
-CELL_W, CELL_H = 10, 23
 
 PAGE = (1, 4, 9)
 WIN_BG = (13, 17, 23)
@@ -275,8 +285,6 @@ NAMED = {
 # The keycap strip: the key just pressed lights up in the accent blue, the
 # ones before it cool off with age, the oldest fade into the page.
 KEY_MAX = 14
-KEY_H, KEY_PAD, KEY_GAP, KEY_R = 32, 9, 7, 6
-HUD_GAP, HUD_H = 16, 44
 CAP_BG, CAP_BORDER, CAP_FG = (33, 38, 45), (63, 68, 77), (166, 175, 186)
 HOT_BG, HOT_BORDER, HOT_FG = (31, 111, 235), (89, 157, 255), (240, 246, 252)
 
@@ -311,10 +319,36 @@ def _font_path(name: str) -> str:
              "install the DejaVu font package (ttf-dejavu / fonts-dejavu).")
 
 
-MARGIN, TITLE_H, PAD, BORDER_W = 20, 42, 14, 1
-TEXT_X = MARGIN + BORDER_W + PAD
-TEXT_Y = MARGIN + BORDER_W + TITLE_H + PAD
-W = MARGIN * 2 + BORDER_W * 2 + PAD * 2 + COLS * CELL_W
+def set_scale(k: float) -> None:
+    """Derive every pixel constant from the scale factor.
+
+    The recording is always 80x24 characters; the scale is how many pixels
+    each character is worth. 2 is the default: GitHub shows the readme at
+    the container width on 1x screens and uses every pixel of a 2x take on
+    the retina ones, so the text stays sharp where a 1x render goes soft.
+    """
+    global SCALE, FS, CELL_W, CELL_H, MARGIN, TITLE_H, PAD, BORDER_W
+    global TEXT_X, TEXT_Y, W, WIN_R, DOT_Y, DOT_OFF, DOT_GAP, DOT_R
+    global KEY_H, KEY_PAD, KEY_GAP, KEY_R, HUD_GAP, HUD_H, Y_OFF, CURSOR_R
+    SCALE = k
+    g = lambda v: max(1, int(round(v * k)))
+    FS = g(16)
+    CELL_W, CELL_H = g(10), g(23)
+    MARGIN, TITLE_H, PAD, BORDER_W = g(20), g(42), g(14), g(1)
+    TEXT_X = MARGIN + BORDER_W + PAD
+    TEXT_Y = MARGIN + BORDER_W + TITLE_H + PAD
+    W = MARGIN * 2 + BORDER_W * 2 + PAD * 2 + COLS * CELL_W
+    WIN_R = g(11)
+    DOT_Y = MARGIN + TITLE_H // 2
+    DOT_OFF, DOT_GAP, DOT_R = g(24), g(22), g(6)
+    KEY_H, KEY_PAD, KEY_GAP, KEY_R = g(32), g(9), g(7), g(6)
+    HUD_GAP, HUD_H = g(16), g(44)
+    Y_OFF = (CELL_H - FS) // 2 + 1
+    CURSOR_R = g(2)
+
+
+set_scale(2)  # the default; --scale overrides before rendering
+
 WIN_H = 0   # set in render_all: the height the demo's own rows need
 TOTAL_H = 0  # WIN_H plus the keycap strip
 STRIP_Y = 0  # top of the keycap strip
@@ -323,8 +357,6 @@ font_r = None
 font_b = None
 ui_r = None
 hud_font = None
-DOT_Y = MARGIN + TITLE_H // 2
-Y_OFF = (CELL_H - FS) // 2 + 1
 
 
 def _fonts() -> None:
@@ -332,8 +364,10 @@ def _fonts() -> None:
     from PIL import ImageFont
     font_r = ImageFont.truetype(_font_path("DejaVuSansMono.ttf"), FS)
     font_b = ImageFont.truetype(_font_path("DejaVuSansMono-Bold.ttf"), FS)
-    ui_r = ImageFont.truetype(_font_path("DejaVuSans.ttf"), 13)
-    hud_font = ImageFont.truetype(_font_path("DejaVuSans.ttf"), 14)
+    ui_r = ImageFont.truetype(_font_path("DejaVuSans.ttf"),
+                              max(10, round(13 * SCALE)))
+    hud_font = ImageFont.truetype(_font_path("DejaVuSans.ttf"),
+                                  max(11, round(14 * SCALE)))
 
 
 def rows_used(frames) -> int:
@@ -352,46 +386,57 @@ def chrome() -> "Image.Image":
     img = Image.new("RGB", (W, TOTAL_H), PAGE)
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([MARGIN, MARGIN, W - MARGIN - 1, WIN_H - MARGIN - 1],
-                        radius=11, fill=BAR_BG, outline=BORDER, width=BORDER_W)
+                        radius=WIN_R, fill=BAR_BG, outline=BORDER,
+                        width=BORDER_W)
     d.rounded_rectangle([MARGIN, MARGIN + TITLE_H, W - MARGIN - 1,
-                         WIN_H - MARGIN - 1], radius=11, fill=WIN_BG)
+                         WIN_H - MARGIN - 1], radius=WIN_R, fill=WIN_BG)
     d.rectangle([MARGIN + 1, MARGIN + TITLE_H - 11,
                  W - MARGIN - 2, MARGIN + TITLE_H], fill=BAR_BG)
     d.rounded_rectangle([MARGIN, MARGIN, W - MARGIN - 1, WIN_H - MARGIN - 1],
-                        radius=11, outline=BORDER, width=BORDER_W)
+                        radius=WIN_R, outline=BORDER, width=BORDER_W)
     for i, col in enumerate(DOTS):
-        x = MARGIN + 24 + i * 22
-        d.ellipse([x - 6, DOT_Y - 6, x + 6, DOT_Y + 6], fill=col)
+        x = MARGIN + DOT_OFF + i * DOT_GAP
+        d.ellipse([x - DOT_R, DOT_Y - DOT_R, x + DOT_R, DOT_Y + DOT_R],
+                  fill=col)
     title = "tai — zsh"
     tw = d.textlength(title, font=ui_r)
-    d.text(((W - tw) // 2, MARGIN + (TITLE_H - 17) // 2 - 1), title,
+    d.text(((W - tw) // 2, MARGIN + (TITLE_H - ui_r.size - 4) // 2), title,
            font=ui_r, fill=TITLE_FG)
     return img
 
 
 def draw_hud(d, history: list, hot: tuple) -> None:
-    """The keycap strip under the window: the story told in keys.
+    """The keycap strip under the window: the story told in TAI's keys.
 
     The keys of this frame glow in the accent colour — that is the stroke
     happening now — and the keys before it cool toward the page as they age.
+    If even the plugin's own keys outgrow the strip, the oldest drop off the
+    left: the stroke of the moment is never the one that gets clipped.
     """
-    visible = list(history[-KEY_MAX:])
-    hot_n = min(len(hot), len(visible))
+    if not history:
+        return
+    widths = [int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
+              for label in history]
+    n = min(len(history), KEY_MAX)
+    while n > 1 and sum(widths[-n:]) + KEY_GAP * (n - 1) > W - TEXT_X * 2:
+        n -= 1
+    visible = history[-n:]
+    hot_n = min(len(hot), n)
     x = TEXT_X
     y = STRIP_Y + (HUD_H - KEY_H) // 2
     for i, label in enumerate(visible):
-        is_hot = i >= len(visible) - hot_n
+        is_hot = i >= n - hot_n
         if is_hot:
             bg, border, fg = HOT_BG, HOT_BORDER, HOT_FG
         else:
-            t = max(0.30, 1.0 - 0.13 * (len(visible) - 1 - i))
+            t = max(0.30, 1.0 - 0.13 * (n - 1 - i))
             bg = mix(PAGE, CAP_BG, t)
             border = mix(PAGE, CAP_BORDER, t)
             fg = mix(PAGE, CAP_FG, t)
-        w = int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
+        w = widths[-n + i]
         d.rounded_rectangle([x, y, x + w - 1, y + KEY_H - 1], radius=KEY_R,
                             fill=bg, outline=border, width=1)
-        d.text((x + KEY_PAD, y + (KEY_H - 14) // 2 - 1), label,
+        d.text((x + KEY_PAD, y + (KEY_H - hud_font.size) // 2 - 1), label,
                font=hud_font, fill=fg)
         x += w + KEY_GAP
 
@@ -420,7 +465,7 @@ def render(snap, history: list, hot: tuple) -> "Image.Image":
                        font=font_b if bold else font_r, fill=cellfg)
     px, py = TEXT_X + cx * CELL_W, TEXT_Y + cy * CELL_H
     d.rounded_rectangle([px, py, px + CELL_W - 1, py + CELL_H - 1],
-                        radius=2, fill=CURSOR_BG)
+                        radius=CURSOR_R, fill=CURSOR_BG)
     ch = cells[cy][cx][0]
     if ch.strip():
         d.text((px, py + Y_OFF), ch, font=font_r, fill=CURSOR_FG)
@@ -428,12 +473,8 @@ def render(snap, history: list, hot: tuple) -> "Image.Image":
     return img
 
 
-def text(snap) -> str:
-    cells, _ = snap
-    return "\n".join("".join(c[0] for c in row) for row in cells)
-
-
-def render_all(frames, out: pathlib.Path, qa: pathlib.Path) -> None:
+def render_all(frames, beats: dict, out: pathlib.Path,
+               qa_dir: pathlib.Path) -> None:
     from PIL import Image
     global WIN_H, TOTAL_H, STRIP_Y
     _fonts()
@@ -441,7 +482,7 @@ def render_all(frames, out: pathlib.Path, qa: pathlib.Path) -> None:
         + rows_used(frames) * CELL_H
     TOTAL_H = WIN_H + HUD_GAP + HUD_H
     STRIP_Y = WIN_H - MARGIN + HUD_GAP
-    qa.mkdir(parents=True, exist_ok=True)
+    qa_dir.mkdir(parents=True, exist_ok=True)
 
     images, durations = [], []
     history: list = []
@@ -450,12 +491,16 @@ def render_all(frames, out: pathlib.Path, qa: pathlib.Path) -> None:
         images.append(render(snap, history, keys))
         durations.append(ms)
 
-    # One shared palette from the busiest frames, so nothing shifts between
-    # them — the keycap strip's blues included.
-    strip = Image.new("RGB", (W, TOTAL_H * min(6, len(images))))
-    for k in range(min(6, len(images))):
-        strip.paste(images[k], (0, TOTAL_H * k))
-    pal = strip.quantize(colors=96, method=Image.MEDIANCUT,
+    # One shared palette, sampled from frames spread across the whole take —
+    # the ending keycaps and menus included, not just how it opens — so
+    # nothing shifts between them.
+    k = min(8, len(images))
+    picks = sorted({round(j * (len(images) - 1) / (k - 1))
+                    for j in range(k)}) if k > 1 else [0]
+    strip = Image.new("RGB", (W, TOTAL_H * len(picks)))
+    for slot, j in enumerate(picks):
+        strip.paste(images[j], (0, TOTAL_H * slot))
+    pal = strip.quantize(colors=128, method=Image.MEDIANCUT,
                          dither=Image.Dither.NONE)
     pq = [im.quantize(palette=pal, dither=Image.Dither.NONE) for im in images]
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -466,56 +511,14 @@ def render_all(frames, out: pathlib.Path, qa: pathlib.Path) -> None:
     print(f"{out}  {len(pq)} frames  {total:.1f}s  {kb:.0f} KB  ({W}x{TOTAL_H})")
 
     # QA stills at the well-known moments, so a broken beat is one image read
-    # away from a diagnosis.
-    def find(pred, start=0):
-        hit = None
-        for i in range(start, len(frames)):
-            if pred(frames[i][0]):
-                hit = i
-        return hit
-
-    def find_key(label: str, start: int = 0):
-        for i in range(start, len(frames)):
-            if label in frames[i][2]:
-                return i
-        return None
-
-    marks = {}
-    # The ghost moment is pinned by its keystrokes, not by text alone: bare
-    # "git" also reads "git status" (its own grey hint), and after the arrow
-    # takes the hint the line reads the same again. Only the history of keys
-    # — ending in s, then t — witnesses the "git st" moment.
-    hist: list = []
-    for i, (snap_i, _ms, keys) in enumerate(frames):
-        hist.extend(keys)
-        if len(hist) >= 2 and hist[-2] == "s" and hist[-1] == "t" \
-                and "➜  ~/Projects/tai git status" in text(snap_i) \
-                and "On branch" not in text(snap_i):
-            marks["ghost"] = i
-            break
-    for name, (pred, first) in {
-        "menu1": (lambda s: "git-receive-pack" in text(s), False),
-        "fs_menu": (lambda s: "Clip/" in text(s), False),
-        "ran1": (lambda s: "On branch main" in text(s), True),
-        "typo_preview": (lambda s: "git statsu" in text(s)
-                         and "git status --short" in text(s), True),
-    }.items():
-        i = find(pred) if not first else next(
-            (i for i, (s_, _m, _k) in enumerate(frames) if pred(s_)), None)
-        if i is not None:
-            marks[name] = i
-    armed = None
-    if "typo_preview" in marks:
-        armed = find_key("\u2193", marks["typo_preview"])
-        if armed is not None:
-            marks["typo_armed"] = armed
-            taken = find_key("\u23ce", armed)
-            if taken is not None:
-                marks["typo_taken"] = taken
+    # away from a diagnosis. The recorder pins each beat where it happens —
+    # it knows, the pixels do not.
+    marks = dict(beats)
     marks["final"] = len(frames) - 1
-    for name, i in marks.items():
-        images[i].save(qa / f"{name}.png")
-    print("qa stills:", ", ".join(f"{k}={v}" for k, v in sorted(marks.items())))
+    for name, i in sorted(marks.items()):
+        images[i].save(qa_dir / f"{name}.png")
+    print("qa stills:",
+          ", ".join(f"{name}={i}" for name, i in sorted(marks.items())))
 
 
 # -- the command -------------------------------------------------------------
@@ -535,13 +538,18 @@ def main() -> None:
     ap.add_argument("--qa-dir", type=pathlib.Path,
                     default=pathlib.Path("/tmp/tai/tai_demo_qa"),
                     help="where the QA stills land")
+    ap.add_argument("--scale", type=float, default=2.0,
+                    help="pixel density multiplier, 1 to 4 (default 2: the "
+                         "readme shows it at container width, so the extra "
+                         "pixels are what keep the text sharp on retina)")
     ap.add_argument("--debug", action="store_true",
                     help="print the screen at every beat checkpoint")
     args = ap.parse_args()
 
-    frames = record(debug=args.debug)
+    set_scale(min(max(args.scale, 1.0), 4.0))
+    frames, beats = record(debug=args.debug)
     # /tmp/tai holds the QA stills; the frames themselves are not kept.
-    render_all(frames, args.out.resolve(), args.qa_dir.resolve())
+    render_all(frames, beats, args.out.resolve(), args.qa_dir.resolve())
 
 
 if __name__ == "__main__":
