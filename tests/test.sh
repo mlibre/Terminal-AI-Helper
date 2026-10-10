@@ -2,8 +2,8 @@
 # tai — run every check, in the order that fails fastest, and stop at the first
 # failure so the output you read is the one that matters.
 #
-#     ./test.sh              all suites
-#     ./test.sh --fast       skip the pty suite, which is nearly all the time
+#     ./tests/test.sh              all suites
+#     ./tests/test.sh --fast       skip the pty suite, which is nearly all the time
 #
 # Every suite is a script of assertions that prints what it found, and each has a
 # `main()` nothing calls except this. The three smoke scripts and the six pty
@@ -15,7 +15,7 @@
 # owed, and a `close()` that never closed anything. See the module docstring in
 # tests/plugin_pty.py.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 fast=0
 for arg in "$@"; do
@@ -85,7 +85,7 @@ fi
 
 printf '\n'
 if (( fail )); then
-  printf '\033[31mFAILED\033[0m — fix and re-run; ./test.sh --fast skips the pty suite.\n'
+  printf '\033[31mFAILED\033[0m — fix and re-run; ./tests/test.sh --fast skips the pty suite.\n'
   exit 1
 fi
 printf '\033[32mall suites passed\033[0m\n'

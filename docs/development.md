@@ -72,7 +72,7 @@ tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
 ```
 
 Seventeen entry points, each a script of assertions that prints what it found,
-and each runnable on its own; `./test.sh` runs them all. Three share
+and each runnable on its own; `./tests/test.sh` runs them all. Three share
 `smoke_env.py` and seven share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences: **a test function no
 `main()` calls is not a test** — adding a test means adding the call — and
@@ -91,8 +91,8 @@ in code.
 ## Tests
 
 ```sh
-./test.sh          # everything, on the order of a minute
-./test.sh --fast   # skips the pty suite, a fraction of that
+./tests/test.sh          # everything, on the order of a minute
+./tests/test.sh --fast   # skips the pty suite, a fraction of that
 ```
 
 The pty suite is roughly half the runtime and it is the one that matters for

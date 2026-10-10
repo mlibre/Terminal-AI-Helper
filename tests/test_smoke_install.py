@@ -367,8 +367,8 @@ print("OK — install: two lines and one command, and no ✓ it cannot back up."
 # Everything below speaks to a real zsh: the pause is install.sh editing a
 # zshrc, which it only does when zsh itself is present, and the errexit checks
 # source the plugin in one. A machine without zsh skips from here instead of
-# failing — the rest of test.sh still runs, which is the deal test.sh offers a
-# bash-only box.
+# failing — the rest of tests/test.sh still runs, which is the deal it offers
+# a bash-only box.
 if not zsh_bin():
     print("SKIP — the remaining install checks need the zsh binary; none here.")
     sys.exit(0)
