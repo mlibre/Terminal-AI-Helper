@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 plugins/zsh/*.zwc
 .coverage
+.freebuff
