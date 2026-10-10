@@ -282,13 +282,3 @@ and our help. Even a small act can matter. Please do what you can. 🤲
 And if you ever doubt what is right and what is wrong, remember: when someone
 kills a baby to loot baby’s belongings, he is the devil — and he stands on the
 wrong side. ✊
-
-## Licence
-
-Terminal-AI-Helper is free software under the [MIT licence](LICENSE): free to
-use, modify and share, for any purpose, personal or commercial, with no
-warranty. Third-party parts keep their own terms — the documentation site is
-built with VitePress and Vite, both MIT, used only as dev tools to render
-these pages (nothing of theirs ships in the plugin), and the test suite runs
-against a vendored copy of zsh under tests/bin, which carries zsh's own
-MIT-style licence.
