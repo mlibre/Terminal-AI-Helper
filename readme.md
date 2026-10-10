@@ -21,15 +21,29 @@ answered by the habit it shadows](assets/demo.gif)
 
 [Docs](docs/architecture.md) · [Development](docs/development.md) · [Docs site](https://mlibre.github.io/Terminal-AI-Helper/) · [فارسی](readme-fa.md)
 
-## Install
+## Install Or Update
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+# Or using npm
+npm i -g terminal-ai-helper@latest
 ```
 
-npm is a door to the same install: `npm i -g terminal-ai-helper` unpacks the
-same files and runs the same installer itself, and `tai update` knows an npm
-install and updates it from the registry.
+## Commands
+
+```sh
+tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
+tai refresh     # import new history rows, then rebuild the indexes
+tai discover    # learn --help from installed tools (cached, ~5-35s)
+tai doctor      # what is indexed, and what is held back
+tai bench       # build time, latency, memory, each shell's index read time
+tai web         # a read-only localhost dashboard (alias: tai dashboard)
+tai eval        # candidate coverage against your own history
+tai version     # print the release this install is running
+tai purge       # drop unusable rows, then rebuild
+tai forget git sta   # drop every stored row for a command, exactly as typed
+tai uninstall   # remove everything tai added
+```
 
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
 again later and it updates in place. It enables both shells, imports your
@@ -67,16 +81,16 @@ machine. New commands show up within seconds; no restart, ever.
 
 ## The keys
 
-| key                     | what it does                                                                                                   |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `→`                     | take the hint at the end of the line, else move right                                                          |
-| `Ctrl-F`                | take the hint                                                                                                  |
-| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`)                                   |
+| key                     | what it does                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `→`                     | take the hint at the end of the line, else move right                                                                                                  |
+| `Ctrl-F`                | take the hint                                                                                                                                          |
+| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`)                                                                           |
 | `Tab`                   | write what every candidate shares, then cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
-| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection (zsh)                                        |
-| `Down`                  | peek at what usually follows — opens the list when the typed line shows no hint; history otherwise (zsh)        |
-| `Enter`                 | take the selected entry and stop; a second `Enter` runs the line                                               |
-| `Alt-G`                 | the command that followed the last one (bash)                                                                  |
+| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection (zsh)                                                                                |
+| `Down`                  | peek at what usually follows — opens the list when the typed line shows no hint; history otherwise (zsh)                                               |
+| `Enter`                 | take the selected entry and stop; a second `Enter` runs the line                                                                                       |
+| `Alt-G`                 | the command that followed the last one (bash)                                                                                                          |
 
 A paste is not a query — pasted text never opens a list, and one typed
 character brings it back. `Enter` fills a selection in and stops; running it
@@ -132,32 +146,12 @@ memory, an array hit in microseconds.
 tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
 ```
 
-![the tai web dashboard — the try box answering `git `, the state of the
+![the tai web dashboard — the try box answering `git`, the state of the
 store, and the ranked panels](assets/web.png)
 
 One server, read-only: it binds `127.0.0.1`, answers GETs only, and writes
 nothing. Clicking a suggestion copies it; `--port N` moves it; `--no-browser`
 skips the auto-open.
-
-## Commands
-
-```sh
-tai refresh     # import new history rows, then rebuild the indexes
-tai discover    # learn --help from installed tools (cached, ~5-35s)
-tai doctor      # what is indexed, and what is held back
-tai bench       # build time, latency, memory, each shell's index read time
-tai web         # a read-only localhost dashboard (alias: tai dashboard)
-tai eval        # candidate coverage against your own history
-tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
-tai version     # print the release this install is running
-tai purge       # drop unusable rows, then rebuild
-tai forget git sta   # drop every stored row for a command, exactly as typed
-tai uninstall   # remove everything tai added
-```
-
-The plugins call `flush` themselves, and every command drains what is pending
-first — no answer lags a few records behind what you just did, and no restart
-is needed: the index is re-read at the next prompt.
 
 ## Configuration
 
