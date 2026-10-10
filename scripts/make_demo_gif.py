@@ -12,13 +12,13 @@ What it does, in order:
      beats, one keystroke at a time, snapshotting a pyte screen after each
      and remembering which key produced the frame;
   3. renders the frames GitHub-dark under window chrome, with one big keycap
-     under the window — the TAI key of the moment, and nothing else. No
-     typed characters: they are what the key produces, and the line above
-     shows them. No history either: one cap, big enough to read, lit for
-     exactly as long as its frame — and every TAI key holds a beat longer
-     than the typing around it, so the stroke is something a viewer
-     catches instead of misses. QA stills of the well-known moments land
-     next to the recording.
+     centered under the window — the TAI key of the moment, and nothing
+     else. No typed characters: they are what the key produces, and the
+     line above shows them. No history either: one cap, big enough to
+     read, lit for exactly as long as its frame — and every TAI key holds
+     a beat longer than the typing around it, so the stroke is something
+     a viewer catches instead of misses. QA stills of the well-known
+     moments land next to the recording.
 
 Nothing on screen is drawn by hand: every frame is the plugin's own bytes
 turned back into a screen by pyte. When the product's look or story moves,
@@ -37,7 +37,7 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tests"))
 
-from plugin_pty import Session, CTRL_SPACE, RIGHT, DOWN, ENTER, CTRL_U  # noqa: E402
+from plugin_pty import Session, CTRL_SPACE, RIGHT, DOWN, ENTER  # noqa: E402
 from plugin_env import write_index  # noqa: E402
 
 # -- the world ---------------------------------------------------------------
@@ -248,10 +248,12 @@ def record(debug: bool = False) -> tuple:
         qa["typo_taken"] = len(frames) - 1
         assert "git statsu" not in seen_text(), \
             "the take never landed: the typo is still on the line"
-        push(1900)                       # the corrected line, holding
+        # The closing shot is the payoff itself: the typo corrected, its
+        # habit on the line, the hint answering. No Ctrl-U wipe before it —
+        # clearing a line is zsh's own kill-whole-line, not the plugin's,
+        # and a demo has no business teaching what every shell already does.
+        push(2300)                       # the corrected line, holding
         checkpoint("beat4 taken")
-        key(CTRL_U, 500, "Ctrl U")       # a fresh line for the outro
-        push(1400)
     finally:
         s.close()
 
@@ -287,8 +289,9 @@ NAMED = {
     "brightwhite": (240, 246, 252),
 }
 
-# The keycap: one cap under the window, the key of the moment, always lit —
-# there is no history to cool off, so there is no cooled-cap palette either.
+# The keycap: one cap centered under the window, the key of the moment,
+# always lit — there is no history to cool off, so there is no cooled-cap
+# palette either.
 HOT_BG, HOT_BORDER, HOT_FG = (31, 111, 235), (89, 157, 255), (240, 246, 252)
 
 
@@ -405,19 +408,20 @@ def chrome() -> "Image.Image":
 
 
 def draw_hud(d, keys: tuple) -> None:
-    """The keycap under the window: the key of the moment, and only that.
+    """The keycap centered under the window: the key of the moment, only that.
 
     Not the typed characters — they are what the key produces, and the line
     above shows them. Not the keys before it either — one cap, big enough
     to read, lit for exactly as long as its frame holds: the stroke
-    happening now.
+    happening now, mid-frame where the eye already is.
     """
     if not keys:
         return
-    x = TEXT_X
+    widths = [int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
+              for label in keys]
+    x = (W - (sum(widths) + KEY_GAP * (len(keys) - 1))) // 2
     y = STRIP_Y + (HUD_H - KEY_H) // 2
-    for label in keys:
-        w = int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
+    for label, w in zip(keys, widths):
         d.rounded_rectangle([x, y, x + w - 1, y + KEY_H - 1], radius=KEY_R,
                             fill=HOT_BG, outline=HOT_BORDER, width=1)
         d.text((x + KEY_PAD, y + (KEY_H - hud_font.size) // 2 - 1), label,
