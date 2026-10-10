@@ -514,6 +514,15 @@ typeset -gi _TAI_LOOSE_MAX_LINE=200
 # the same visible answer for exact text, 85ms rather than 34s on a 6KB token.
 # It is matched, not dropped — see the note where `rxs` is built.
 typeset -gi _TAI_LOOSE_MAX_WORD=32
+# The most lines one tier's loop will regex-test for one word. The filters
+# before each loop are necessary conditions, so what they hand over is bounded
+# only by arithmetic: a word whose letters sit in order across a long history
+# leaves the loop hundreds of candidates and every one of them costs a regex.
+# Measured on a 7,600-line index, one such keystroke cost 1.2s. Past the cap
+# the loop stops testing — the tier answers _TAI_LOOSE_CAP lines either way,
+# and lines the cap cuts were offered to it by coincidence of letters, not by
+# anything the user remembered.
+typeset -gi _TAI_LOOSE_FLOOD=400
 
 # The in-order check for one word, as a regex: its letters joined by a bounded
 # gap, each escaped so a word holding `-`, `/` or `[` is letters and not syntax.
@@ -642,23 +651,43 @@ _tai_loose() {
   # A pasted command is not a half-remembered one. Checked before the cache key
   # and before any line is read, so the answer is nothing and the cost is one
   # comparison.
+  local mkey="$prefix|$_TAI_LOOSE_GEN" mem_slot
   if (( ${#prefix} > _TAI_LOOSE_MAX_LINE )); then
-    _TAI_LOOSE_LINES=(); _TAI_LOOSE_CACHED=()
-    _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
-    _TAI_LOOSE_PAR=""; _TAI_LOOSE_PAR_IDX=()
+    # The answer is nothing, and it is memoised like any other: redraws of the
+    # same pasted line ask again, and each of those used to pay the guard's
+    # cost of a comparison and then rebuild the empty answer's state.
+    _TAI_LOOSE_LINES=()
+    _TAI_LOOSE_PAR=""; _TAI_LOOSE_PAR_LOW=()
+    _TAI_MEM_PUT_KEY="$mkey"; _TAI_MEM_PUT_VAL=""; _TAI_MEM_PUT_LOW=""
+    _tai_loose_memo_put
     return
   fi
-  # The same question twice has the same answer: ZLE redraws without the buffer
-  # changing when the cursor moves, the window is resized or a menu is painted,
-  # and each of those used to pay for a full pass over every learned line. The
-  # answer is *restored*, not just skipped — `_tai_query` clears
-  # `_TAI_LOOSE_LINES` before it calls, so returning early would hand back an
-  # empty list and the glimpse would vanish on the second redraw. The generation
-  # is part of the key because a reloaded index is a different index with the
-  # same prefix: _tai_load_index bumps it, so a cached answer can never speak for
+  # The same question twice has the same answer — and in a storm of rapid
+  # edits, most questions ARE repeats. The report: a word typed out and then
+  # taken apart letter by letter, the fastest way to edit, retraces prefixes
+  # the scan has already answered — and every one of them paid the full
+  # three-tier scan again, because the parent shortcut below only serves a
+  # prefix that *extends* its parent, and a deletion never does. Measured on a
+  # 7,600-line index: 171ms per delete key, individual keys past a second, the
+  # prompt visibly dead under auto-repeat. So the answers live in a bounded
+  # memo instead of a single slot, and a revisit is a lookup. The answer is
+  # *restored*, not just skipped — `_tai_query` clears `_TAI_LOOSE_LINES`
+  # before it calls, so returning early would hand back an empty list and the
+  # glimpse would vanish on the second redraw. The parent state rides along:
+  # a memoised prefix was fully scanned under this generation, so an extension
+  # of it may scan its survivors, and without the restore the first retype
+  # after a delete would pay a full scan for nothing. The generation is part
+  # of the key because a reloaded index is a different index with the same
+  # prefix: _tai_load_index bumps it, so a memoised answer can never speak for
   # lines that are no longer installed.
-  if [[ "$prefix|$_TAI_LOOSE_GEN" == "${_TAI_LOOSE_FOR-}" ]]; then
-    _TAI_LOOSE_LINES=( "${_TAI_LOOSE_CACHED[@]}" )
+  for (( mem_slot = 1; mem_slot <= _TAI_LOOSE_MEM_N; mem_slot++ )); do
+    [[ "${_TAI_LOOSE_MEM_KEYS[mem_slot]}" == "$mkey" ]] && break
+  done
+  if (( mem_slot <= _TAI_LOOSE_MEM_N )); then
+    _tai_q_split "${_TAI_LOOSE_MEM_VALS[mem_slot]}"; _TAI_LOOSE_LINES=( "${REPLY[@]}" )
+    _tai_q_split "${_TAI_LOOSE_MEM_LOWS[mem_slot]}"; _TAI_LOOSE_PAR_LOW=( "${REPLY[@]}" )
+    _TAI_LOOSE_PAR="$prefix"
+    _TAI_LOOSE_PAR_GEN=$_TAI_LOOSE_GEN
     return
   fi
   for w in "${(@s: :)prefix}"; do
@@ -798,7 +827,17 @@ _tai_loose() {
       (( ${#cand_l[@]} )) || break
       cand_l=( "${(@M)cand_l:#*${~rxs_g[k]}*}" )
     done
+    # The flood bound. A word the history holds near-spelled can leave hundreds
+    # of candidates holding a one-edit spelling, and the loop below regex-tests
+    # them one by one — the answers are capped at _TAI_LOOSE_CAP anyway, so
+    # once the tier is full the tests buy nothing. The input cap bounds the
+    # same loop from the other side: it can only ever bite where the filter
+    # left hundreds of lines, which is the arithmetic-coincidence case this
+    # tier exists to be cautious about, not a memory it would have kept.
+    (( ${#cand_l[@]} > _TAI_LOOSE_FLOOD )) && \
+      cand_l=( "${cand_l[@]:0:_TAI_LOOSE_FLOOD}" )
     for ll in "${cand_l[@]}"; do
+      (( ${#var_lw[@]} >= _TAI_LOOSE_CAP )) && break
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
         w=$want[k]; rxb=$rxs_b[k]
@@ -828,8 +867,8 @@ _tai_loose() {
     # matcher implies: a line the gap matcher accepts holds every letter of
     # every word in order, so the letters-in-order glob per word is one
     # C-level filter that hands the loop below the lines that can possibly
-    # match. Measured, the loop over the whole history was the rest of a dead
-    # word's cost; over the survivors it is the tail of a millisecond.
+    # match. The loop's cost is its survivors' count — bounded below, once
+    # the flood cap was measured into it.
     local -a gap_l
     gap_l=( "${rest3[@]}" )
     for (( k = 1; k <= ${#want}; k++ )); do
@@ -837,7 +876,18 @@ _tai_loose() {
       _tai_word_order_glob "${want[k]}"
       gap_l=( "${(@M)gap_l:#*${~_TAI_RE_OUT}*}" )
     done
+    # The same flood bound the one-edit tier got, and for the same measured
+    # reason: a word whose letters sit in order across hundreds of long lines
+    # (`opencode-s` against a history of `opencode serve --host …`) left the
+    # loop below regex-testing all of them — 1.2s for one keystroke on a
+    # 7,600-line index. The tier answers at most _TAI_LOOSE_CAP lines, so once
+    # it is full the tests buy nothing; and the input cap only bites where
+    # hundreds of lines already passed the letters-in-order glob, which is
+    # arithmetic offering itself as a memory, not one.
+    (( ${#gap_l[@]} > _TAI_LOOSE_FLOOD )) && \
+      gap_l=( "${gap_l[@]:0:_TAI_LOOSE_FLOOD}" )
     for ll in "${gap_l[@]}"; do
+      (( ${#fuzz_lw[@]} >= _TAI_LOOSE_CAP )) && break
       [[ -z "${_TAI_LOOSE_CLAIMED[$ll]:-}" ]] || continue
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
@@ -886,11 +936,15 @@ _tai_loose() {
   local c
   _TAI_LOOSE_LINES=()
   for c in "${ranked[@]}"; do _tai_clean "$c" && _TAI_LOOSE_LINES+=( "$c" ); done
-  _TAI_LOOSE_CACHED=( "${_TAI_LOOSE_LINES[@]}" )
-  _TAI_LOOSE_FOR="$prefix|$_TAI_LOOSE_GEN"
   _TAI_LOOSE_PAR="$prefix"
   _TAI_LOOSE_PAR_GEN="$_TAI_LOOSE_GEN"
   _TAI_LOOSE_PAR_LOW=( "${hits_lw[@]}" )
+  # Into the ring: the answer and the scan set an extension of this prefix
+  # may walk, under the key the lookup above reads.
+  _TAI_MEM_PUT_KEY="$mkey"
+  _TAI_MEM_PUT_VAL="${(pj:\n:)_TAI_LOOSE_LINES}"
+  _TAI_MEM_PUT_LOW="${(pj:\n:)_TAI_LOOSE_PAR_LOW}"
+  _tai_loose_memo_put
 }
 
 # One line into the bounded, best-first list _TAI_RANKED, by _TAI_SCORE. The
@@ -930,12 +984,55 @@ _tai_ranked_insert() {
   (( ${#_TAI_RANKED} > $_TAI_LOOSE_CAP )) && \
     _TAI_RANKED=( "${_TAI_RANKED[@]:0:$_TAI_LOOSE_CAP}" )
 }
-# The generation the cache above is keyed on, and the key itself. A reload
-# bumps the generation because the answer for a prefix is an answer about the
-# lines that were installed when it was asked.
+# The generation the memo is keyed on. A reload bumps the generation because
+# the answer for a prefix is an answer about the lines that were installed
+# when it was asked.
 typeset -gi _TAI_LOOSE_GEN=0
-typeset -g _TAI_LOOSE_FOR=""
-typeset -ga _TAI_LOOSE_CACHED=()
+# The answers the scan has given, as a ring: three parallel arrays, one slot
+# per remembered prefix, oldest overwritten first. One keystroke used to be
+# one remembered answer; a delete run used to be none — the report that
+# brought the memo in is at the lookup that reads it. Bounded, because a
+# session edits a handful of words and the memo holds the neighbourhood of
+# the current one: the paste's redraws, the delete run back down the word,
+# the retype. The key carries its own generation, so an answer that outlives
+# its index can never be served — it only waits to be overwritten.
+#
+# Parallel arrays, and not an associative array, on purpose: the key is the
+# user's own text, and an assoc key comes back out through pattern and
+# subscript syntax on every removal — `foo]bar`, `pull --qqzz|0` (the pipe is
+# glob alternation, and `${(b)}` does not quote it) — where an array slot
+# holds the same text as plain data, compared with `==` and never parsed.
+typeset -ga _TAI_LOOSE_MEM_KEYS=()
+typeset -ga _TAI_LOOSE_MEM_VALS=()
+typeset -ga _TAI_LOOSE_MEM_LOWS=()
+typeset -gi _TAI_LOOSE_MEM_N=0
+typeset -gi _TAI_LOOSE_MEM_I=0
+typeset -gi _TAI_LOOSE_MEM_MAX=16
+# The three values a `_tai_loose_memo_put` call writes, set by the caller:
+# the answer, the scan set an extension of the prefix may walk, and the key
+# both are filed under.
+typeset -g _TAI_MEM_PUT_KEY=""
+typeset -g _TAI_MEM_PUT_VAL=""
+typeset -g _TAI_MEM_PUT_LOW=""
+
+# One answer into the ring. Full: the cursor walks the oldest slot over.
+# An integer slot and plain assignment, never an `unset` through a subscript
+# built from the user's own text — see the ring note above.
+_tai_loose_memo_put() {
+  # A cap that moved below the ring's count is honoured on the next put: the
+  # live region is slots 1..N, and the lookup scans only those, so clamping N
+  # is the whole change. Slots beyond it hold nothing the memo can serve.
+  (( _TAI_LOOSE_MEM_N > _TAI_LOOSE_MEM_MAX )) && _TAI_LOOSE_MEM_N=_TAI_LOOSE_MEM_MAX
+  if (( _TAI_LOOSE_MEM_N < _TAI_LOOSE_MEM_MAX )); then
+    _TAI_LOOSE_MEM_I=$((_TAI_LOOSE_MEM_N + 1))
+    _TAI_LOOSE_MEM_N=$((_TAI_LOOSE_MEM_N + 1))
+  else
+    _TAI_LOOSE_MEM_I=$((_TAI_LOOSE_MEM_I % _TAI_LOOSE_MEM_MAX + 1))
+  fi
+  _TAI_LOOSE_MEM_KEYS[_TAI_LOOSE_MEM_I]="$_TAI_MEM_PUT_KEY"
+  _TAI_LOOSE_MEM_VALS[_TAI_LOOSE_MEM_I]="$_TAI_MEM_PUT_VAL"
+  _TAI_LOOSE_MEM_LOWS[_TAI_LOOSE_MEM_I]="$_TAI_MEM_PUT_LOW"
+}
 # The lowercase scan copy is rebuilt when the generation moves on, and not
 # before: the first redraw after a reload pays for it.
 typeset -gi _TAI_LOOSE_SNAP=-1

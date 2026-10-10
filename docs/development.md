@@ -73,6 +73,7 @@ tests/plugin_screen.py      a terminal-screen model, so "which cell is selected"
 tests/test_plugins.py       lookups: completions, wrappers, per-shell index
 tests/test_plugins_case.py  case-insensitive answers: the ghost, the menu, the disk, the unit list
 tests/test_plugins_menu.py  the Tab menu: entries, selection, the stem, the shared head
+tests/test_plugins_storm.py the rapid-edit storm: the loose memo, its bound, the flood bound
 tests/test_plugins_draw.py  what is drawn: ghost text, hints, colours, load order
 tests/test_plugins_isearch.py the ^R search: tai answers nothing inside it, blind hooks included
 tests/test_plugins_files.py a line ending in a file, its caps and roots agreement
@@ -83,9 +84,9 @@ tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
                             the system's, then this — the pty suite runs anywhere
 ```
 
-Twenty-one entry points, each a script of assertions that prints what it found,
+Twenty-two entry points, each a script of assertions that prints what it found,
 and each runnable on its own; `./tests/test.sh` runs them all. Seven share
-`smoke_env.py` and nine share the `plugin_*` modules, so a scratch database, a
+`smoke_env.py` and ten share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences: **a test function no
 `main()` calls is not a test** — adding a test means adding the call — and
 **the shared modules are the only copy**: a test that defines its own fixture,

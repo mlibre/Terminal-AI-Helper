@@ -76,7 +76,7 @@ if (( ! fast )); then
   # Order is cheapest-first: plain lookups, then the case rules and the menu,
   # then what is drawn, then the ^R search, then the filesystem, and last the
   # index lifecycle, which rebuilds fixtures.
-  for part in lookups case menu draw isearch files wide index units; do
+  for part in lookups case menu draw isearch storm files wide index units; do
     case "$part" in
       lookups) entry=tests/test_plugins.py ;;
       *)       entry="tests/test_plugins_$part.py" ;;
