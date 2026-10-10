@@ -25,12 +25,14 @@ answered by the habit it shadows](assets/demo.gif)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+exec zsh
 ```
 
 Or using npm
 
 ```sh
 npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
+exec zsh
 ```
 
 The flag is npm's: newer npm blocks install scripts by default, and without

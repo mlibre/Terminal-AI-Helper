@@ -27,12 +27,14 @@ cd D<Tab>          Desktop/  Documents/  Downloads/
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+exec zsh
 ```
 
 یا با npm
 
 ```sh
 npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
+exec zsh
 ```
 
 پرچم از آنِ npm است: نسخه‌های تازه‌ی npm اسکریپت‌های نصب را به‌پیش‌فرض مسدود
@@ -123,7 +125,7 @@ npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
 tai web              # یا: tai dashboard  →  http://127.0.0.1:8247/
 ```
 
-![داشبوردِ tai web — جعبه‌ی پاسخ به `git `، وضعیت مخزن و فهرست‌های
+![داشبوردِ tai web — جعبه‌ی پاسخ به `git`، وضعیت مخزن و فهرست‌های
 رتبه‌دار](assets/web.png)
 
 تک سرویسِ محصول: روی `127.0.0.1` می‌نشیند، فقط GET پاسخ می‌دهد و نمی‌نویسد.
