@@ -603,10 +603,10 @@ def _forget_rows() -> list[str]:
 
 def _seed_forget() -> None:
     con = sqlite3.connect(_forget_db)
-    con.execute(
-        "CREATE TABLE IF NOT EXISTS commands(id INTEGER PRIMARY KEY, "
-        "cmd TEXT NOT NULL, cwd TEXT DEFAULT '', repo TEXT DEFAULT '', "
-        "branch TEXT DEFAULT '', exit_code INTEGER DEFAULT 0, ts INTEGER DEFAULT 0)")
+    # The schema is the store's own, never restated here: a fixture written
+    # with a hand-copied DDL would keep seeding a table the product moved past.
+    from tai.store import ensure_db
+    ensure_db(con)
     con.executemany(
         "INSERT INTO commands(cmd,cwd,repo,branch,exit_code,ts) VALUES(?,?,?,?,?,?)",
         [("tai-junk-opencoe", "/w", "", "", 0, 1728500000),

@@ -38,22 +38,6 @@ exec zsh
 The flag is npm's: newer npm blocks install scripts by default, and without
 it the package unpacks and nothing is wired — no `tai` command, no rc lines.
 
-## Commands
-
-```sh
-tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
-tai refresh     # import new history rows, then rebuild the indexes
-tai discover    # learn --help from installed tools (cached, ~5-35s)
-tai doctor      # what is indexed, and what is held back
-tai bench       # build time, latency, memory, each shell's index read time
-tai web         # a read-only localhost dashboard (alias: tai dashboard)
-tai eval        # candidate coverage against your own history
-tai version     # print the release this install is running
-tai purge       # drop unusable rows, then rebuild
-tai forget git sta   # drop every stored row for a command, exactly as typed
-tai uninstall   # remove everything tai added
-```
-
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
 again later and it updates in place. It enables both shells, imports your
 history, and builds the first index:
@@ -74,6 +58,22 @@ history, and builds the first index:
 
 That last line matters: a terminal that is already open keeps the old
 version until you open a new one — same after `tai update`.
+
+## Commands
+
+```sh
+tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
+tai refresh     # import new history rows, then rebuild the indexes
+tai discover    # learn --help from installed tools (cached, ~5-35s)
+tai doctor      # what is indexed, and what is held back
+tai bench       # build time, latency, memory, each shell's index read time
+tai web         # a read-only localhost dashboard (alias: tai dashboard)
+tai eval        # candidate coverage against your own history
+tai version     # print the release this install is running
+tai purge       # drop unusable rows, then rebuild
+tai forget git sta   # drop every stored row for a command, exactly as typed
+tai uninstall   # remove everything tai added
+```
 
 ## Your first minute
 
@@ -112,8 +112,7 @@ a list below the line and has no menu key: `Tab` completes directly — after
 ## What it suggests, and what it will not
 
 One loop makes all of it go. The shell appends each command to a local spool
-file and it lands in a local SQLite database seconds later — secrets,
-multi-line pastes and one-key accidents never become vocabulary. The first
+file and it lands in a local SQLite database seconds later. The first
 time you run an unknown tool, its real `--help` is read in the background, so
 `tool <Tab>` knows its subcommands and flags from then on. `tai refresh`
 turns the database into two index files ranked your way — how often, how
@@ -152,7 +151,7 @@ memory, an array hit in microseconds.
 ## A dashboard of what it learned
 
 ```sh
-tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
+tai web              # →  http://127.0.0.1:8247/
 ```
 
 ![the tai web dashboard — the try box answering `git`, the state of the
@@ -199,20 +198,11 @@ A ready-to-install `tai_<version>_all.deb` is attached to every GitHub
 release; it puts `tai` on `PATH` and prints the two `source` lines for your
 rc file.
 
-```sh
-tai update      # newest version — GitHub for a checkout, npm for an npm install; alias: tai upgrade
-```
-
-It stops rather than overwrite a copy you have edited yourself.
-
-```sh
-tai uninstall
-```
-
-Removes the shell integration, the wrapper, the indexes, the SQLite history
-and the cached knowledge. The `~/.tai` folder stays — on an npm install,
-`npm rm -g terminal-ai-helper` removes the package itself. Restart the
-terminal afterwards.
+`tai update` stops rather than overwrite a copy you have edited yourself.
+`tai uninstall` removes the shell integration, the wrapper, the indexes, the
+SQLite history and the cached knowledge. The `~/.tai` folder stays — on an
+npm install, `npm rm -g terminal-ai-helper` removes the package itself.
+Restart the terminal afterwards.
 
 ## Why it stays fast
 

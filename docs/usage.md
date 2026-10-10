@@ -14,27 +14,11 @@ npm is a door to the same install: `npm i -g terminal-ai-helper@latest
 installer itself, and `tai update` knows an npm install and updates it from
 the registry.
 
-The line downloads TAI to `~/.tai` and runs the installer from there; run it
-again later and it updates in place. It enables both shells, imports your
-history, and builds the first index:
-
-```text
-→ cloning tai to /home/you/.tai…
-→ learning from your history, building the index…
-✓ zsh installed
-✓ bash installed
-
-  1. Type a few letters — tai finishes the command in grey. → takes it.
-  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
-  3. It learns from your history — offline, private, no account.
-
-  Try it now: type "cd " and watch the grey.
-→ exec zsh
-```
-
-That last line matters: a terminal that is already open keeps the old
-version until you open a new one — same after `tai update`. A ready-to-install
-`.deb` is attached to every GitHub release.
+The line downloads TAI to `~/.tai`, enables both shells, imports your
+history and builds the first index; run it again later and it updates in
+place. Open a new terminal afterwards — one that is already open keeps the
+old version, same after `tai update`. A ready-to-install `.deb` is attached
+to every GitHub release.
 
 ## Your first minute
 
@@ -95,7 +79,7 @@ whatever is on screen, and tai never overwrites a hint it did not draw.
 ## A dashboard of what it learned
 
 ```sh
-tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
+tai web              # →  http://127.0.0.1:8247/
 ```
 
 ![the tai web dashboard — the try box answering `git `, the state of the

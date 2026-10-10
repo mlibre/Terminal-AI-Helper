@@ -82,12 +82,14 @@ def db_rows(env: dict) -> list[tuple]:
 
 
 def seed_rows(env: dict, rows: list[tuple]) -> None:
-    """Seed the store directly, the way an older install would have left it."""
+    """Seed the store directly, the way an older install would have left it.
+    The DDL is the store's own `ensure_db`, never a hand copy: a fixture that
+    restates the schema would keep building the table of a version that no
+    longer exists."""
+    sys.path.insert(0, str(REPO))
+    from tai.store import ensure_db
     con = sqlite3.connect(env["TAI_DB"])
-    con.execute(
-        "CREATE TABLE IF NOT EXISTS commands(id INTEGER PRIMARY KEY, "
-        "cmd TEXT NOT NULL, cwd TEXT DEFAULT '', repo TEXT DEFAULT '', "
-        "branch TEXT DEFAULT '', exit_code INTEGER DEFAULT 0, ts INTEGER DEFAULT 0)")
+    ensure_db(con)
     con.executemany(
         "INSERT INTO commands(cmd,cwd,repo,branch,exit_code,ts) VALUES(?,?,?,?,?,?)",
         rows)

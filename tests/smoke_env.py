@@ -64,6 +64,20 @@ shutil.rmtree(tai_maintenance._lock_path(), ignore_errors=True)
 # put it back rather than only being able to swap it out.
 real_build = tai_index.build
 
+
+def sandbox_env(home: str, extra: dict | None = None) -> dict:
+    """One process world redirected into `home`, for the suites that fork the
+    installer, the CLI or a fake npm. HOME and the paths beneath it move
+    together, and HISTFILE is cleared: an exported one would import the
+    developer's real history into the sandboxed database, which is slow and
+    asserts nothing."""
+    env = dict(os.environ, HOME=home, XDG_DATA_HOME=f"{home}/share",
+               BIN_DIR=f"{home}/bin", TAI_DB=f"{home}/history.db",
+               TAI_INDEX=f"{home}/zsh-index.zsh", HISTFILE="",
+               TAI_HISTORY_FILES="")
+    env.update(extra or {})
+    return env
+
 # A build that does nothing and reports three commands, and the calls it saw.
 # Two tests need one — refresh has to be able to assert that it rebuilt at all,
 # and the lock tests want a rebuild that returns without touching anything — and

@@ -27,7 +27,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from smoke_env import REPO, _quiet  # noqa: F402
+from smoke_env import REPO, _quiet, sandbox_env  # noqa: F402
 from tai import cli as tai_cli  # noqa: E402
 
 # The package name is the directory npm makes under node_modules, and the
@@ -37,12 +37,7 @@ PKG = "terminal-ai-helper"
 
 
 def _sandbox_env(home: str, extra: dict | None = None) -> dict:
-    env = dict(os.environ, HOME=home, XDG_DATA_HOME=f"{home}/share",
-               BIN_DIR=f"{home}/bin", TAI_DB=f"{home}/history.db",
-               TAI_INDEX=f"{home}/zsh-index.zsh", HISTFILE="",
-               TAI_HISTORY_FILES="")
-    env.update(extra or {})
-    return env
+    return sandbox_env(home, extra)
 
 
 def _stage_npm_tree(root: str) -> str:

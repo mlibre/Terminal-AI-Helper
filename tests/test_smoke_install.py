@@ -283,13 +283,7 @@ import subprocess
 
 
 def _install_env(home: str) -> dict:
-    # HOME and the index paths are redirected together; HISTFILE is cleared
-    # because an exported one would import the developer's real history into the
-    # sandboxed database, which is slow and asserts nothing.
-    return dict(os.environ, HOME=home, XDG_DATA_HOME=f"{home}/share",
-                BIN_DIR=f"{home}/bin", TAI_DB=f"{home}/history.db",
-                TAI_INDEX=f"{home}/zsh-index.zsh", HISTFILE="",
-                TAI_HISTORY_FILES="")
+    return sandbox_env(home)
 
 
 def _install(home: str) -> subprocess.CompletedProcess:
@@ -464,10 +458,8 @@ with tempfile.TemporaryDirectory() as fake_home:
     plugin.write_text("_zsh_autosuggest_start() { : }\n"
                       "autoload -Uz add-zsh-hook\n")
     zshrc.write_text(f"source {plugin}\n")
-    env = dict(os.environ, HOME=fake_home, ZDOTDIR=fake_home,
-               XDG_DATA_HOME=f"{fake_home}/share", BIN_DIR=f"{fake_home}/bin",
-               TAI_DB=f"{fake_home}/history.db", TAI_INDEX=f"{fake_home}/i.zsh",
-               HISTFILE="", TAI_HISTORY_FILES="", TAI_KEEP_AUTOSUGGEST="0")
+    env = sandbox_env(fake_home, {"ZDOTDIR": fake_home,
+                                  "TAI_KEEP_AUTOSUGGEST": "0"})
     done = subprocess.run(["bash", f"{REPO}/install.sh"], env=env,
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
