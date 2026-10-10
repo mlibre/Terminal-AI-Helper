@@ -1,13 +1,11 @@
-# The npm package rides the same tag the release workflow cuts: every green
-# push to main gets its v<VERSION> tag, and this publishes the same tree to
-# the registry. Publishing a version that is already out is a no-op, so the
-# build-number tags (v1.3.0-2 from an unchanged VERSION) stay green without
-# pretending they shipped something.
+# The manual door for the npm publish. The automatic one lives inside the
+# release workflow — a tag pushed by GITHUB_TOKEN starts no other workflow, so
+# a `push: tags` trigger here would never fire for the tags that workflow cuts.
+# Dispatch publishes whatever VERSION says, with the same no-op guard: a
+# version already on the registry goes green without shipping again.
 name: npm
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 jobs:

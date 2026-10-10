@@ -55,3 +55,35 @@ jobs:
           name: "${{ steps.tag.outputs.tag }}"
           files: dist/*.deb
           generate_release_notes: true
+
+  # The registry rides the same green tree the tag marks. It lives inside this
+  # workflow rather than behind a `push: tags` trigger of its own because a tag
+  # pushed by GITHUB_TOKEN starts no other workflow — the recursion guard — so
+  # a tag-only trigger would never fire for the tags this workflow cuts. The
+  # publish is a no-op when the version is already out, which is exactly what
+  # the build-number tags are: v1.3.1-2 carries a VERSION that is already on
+  # the registry, and the job goes green without pretending it shipped again.
+  npm-publish:
+    runs-on: ubuntu-latest
+    needs: test-and-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      - name: Publish (a no-op when this version is already out)
+        run: |
+          set -e
+          version="$(tr -d '[:space:]' < VERSION)"
+          if npm view "terminal-ai-helper@$version" version >/dev/null 2>&1; then
+            echo "terminal-ai-helper@$version is already on the registry — nothing to do"
+            exit 0
+          fi
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
