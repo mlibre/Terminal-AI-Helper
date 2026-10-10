@@ -1265,6 +1265,32 @@ def test_first_word_menu() -> None:
         write_index()         # every other suite reads the default fixture
 
 
+def test_glob_words_are_not_patterns() -> None:
+    """A word the shell would refuse to compile is a quiet no-op, not an error.
+
+    `_tai_globable` exists because a word can be a pattern the shell refuses —
+    `foo[bar` is an unclosed class — and the report that found it was Tab
+    printing `bad pattern: foo[bar*(N)` from inside the widget. The guard sits
+    on the ghost's path and on the menu's, and this pins the menu's half, in a
+    directory where nothing else could answer either: no menu, the key handed
+    to zsh's own completion, and nothing on the terminal but the prompt.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh menu refuses to compile a word")
+    s = Session("zsh")
+    s.run(f"cd {EMPTY_DIR}")
+    for word in ("cat foo[bar", "cat foo(bar", "cat foo<bar"):
+        s.send(word)
+        s.write(TAB)
+        s.settle()
+        line, drawn, size, idx = s.menu(clear=False)
+        check(f"{word!r} opens no menu", (size, idx), (0, 0))
+        s.write("\x15")
+    check("and no word became a pattern error", s.noise(), [])
+    s.close()
+
+
 def test_empty_line_menu() -> None:
     """Tab on an empty line answers with the directory, not with the history.
 
@@ -1418,6 +1444,7 @@ def main() -> int:
     test_cd_answers_directories()
     test_first_word_menu()
     test_junk_first_word_key()
+    test_glob_words_are_not_patterns()
     test_empty_line_menu()
     check_fixture_intact("the run")
     print("\nOK — the Tab menu in bash and zsh, entry by entry."
