@@ -25,7 +25,11 @@ answered by the habit it shadows](assets/demo.gif)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
-# Or using npm
+```
+
+Or using npm
+
+```sh
 npm i -g terminal-ai-helper@latest
 ```
 
