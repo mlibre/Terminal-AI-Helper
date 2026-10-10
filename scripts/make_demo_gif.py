@@ -11,13 +11,14 @@ What it does, in order:
   2. drives the repo's own pty harness (tests/plugin_pty.py) through four
      beats, one keystroke at a time, snapshotting a pyte screen after each
      and remembering which key produced the frame;
-  3. renders the frames GitHub-dark under window chrome, with a keycap strip
-     along the bottom telling the story in the plugin's own keys — the arrow
-     that takes a hint, the chords that open a menu, the Enters that run.
-     Typed characters are not keys, they are what the keys produce, so they
-     live on the line above and nowhere else. The key just pressed lights
-     up, older ones fade, and QA stills of the well-known moments land next
-     to the recording.
+  3. renders the frames GitHub-dark under window chrome, with one big keycap
+     under the window — the TAI key of the moment, and nothing else. No
+     typed characters: they are what the key produces, and the line above
+     shows them. No history either: one cap, big enough to read, lit for
+     exactly as long as its frame — and every TAI key holds a beat longer
+     than the typing around it, so the stroke is something a viewer
+     catches instead of misses. QA stills of the well-known moments land
+     next to the recording.
 
 Nothing on screen is drawn by hand: every frame is the plugin's own bytes
 turned back into a screen by pyte. When the product's look or story moves,
@@ -70,6 +71,10 @@ DEMO_COMMANDS = [
 
 PS1 = "%F{green}➜%f  %F{cyan}%~%f "
 COLS, ROWS = 80, 24
+# Every TAI key's frame holds this much longer than the beat asked for: the
+# single keycap is on screen exactly as long as its frame, and a stroke the
+# viewer can barely see teaches nothing.
+KEY_HOLD = 1.6
 
 
 def build_world() -> None:
@@ -153,7 +158,7 @@ def record(debug: bool = False) -> tuple:
 
         def type(text: str, ms: int = 100) -> None:
             # Characters appear one by one, but a character is not a key of
-            # the plugin: the strip under the window tells the story in
+            # the plugin: the one keycap under the window is reserved for
             # TAI's own keys — the arrow, the chords, the Enters. What is
             # typed is what those keys produce, and the line above shows it.
             for ch in text:
@@ -165,7 +170,7 @@ def record(debug: bool = False) -> tuple:
                 quiet: float | None = None) -> None:
             s.write(seq)
             s.settle(quiet)
-            push(ms, (label,))
+            push(int(ms * KEY_HOLD), (label,))
 
         def seen_text() -> str:
             return text_of(snap(screen))
@@ -282,10 +287,8 @@ NAMED = {
     "brightwhite": (240, 246, 252),
 }
 
-# The keycap strip: the key just pressed lights up in the accent blue, the
-# ones before it cool off with age, the oldest fade into the page.
-KEY_MAX = 14
-CAP_BG, CAP_BORDER, CAP_FG = (33, 38, 45), (63, 68, 77), (166, 175, 186)
+# The keycap: one cap under the window, the key of the moment, always lit —
+# there is no history to cool off, so there is no cooled-cap palette either.
 HOT_BG, HOT_BORDER, HOT_FG = (31, 111, 235), (89, 157, 255), (240, 246, 252)
 
 
@@ -304,10 +307,6 @@ def color(name: str, fallback: tuple) -> tuple:
             return NAMED[order[idx]]
         return DEFAULT_FG
     return DEFAULT_FG
-
-
-def mix(a: tuple, b: tuple, t: float) -> tuple:
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 def _font_path(name: str) -> str:
@@ -341,8 +340,8 @@ def set_scale(k: float) -> None:
     WIN_R = g(11)
     DOT_Y = MARGIN + TITLE_H // 2
     DOT_OFF, DOT_GAP, DOT_R = g(24), g(22), g(6)
-    KEY_H, KEY_PAD, KEY_GAP, KEY_R = g(32), g(9), g(7), g(6)
-    HUD_GAP, HUD_H = g(16), g(44)
+    KEY_H, KEY_PAD, KEY_GAP, KEY_R = g(44), g(12), g(10), g(8)
+    HUD_GAP, HUD_H = g(16), g(60)
     Y_OFF = (CELL_H - FS) // 2 + 1
     CURSOR_R = g(2)
 
@@ -367,7 +366,7 @@ def _fonts() -> None:
     ui_r = ImageFont.truetype(_font_path("DejaVuSans.ttf"),
                               max(10, round(13 * SCALE)))
     hud_font = ImageFont.truetype(_font_path("DejaVuSans.ttf"),
-                                  max(11, round(14 * SCALE)))
+                                  max(12, round(20 * SCALE)))
 
 
 def rows_used(frames) -> int:
@@ -405,43 +404,28 @@ def chrome() -> "Image.Image":
     return img
 
 
-def draw_hud(d, history: list, hot: tuple) -> None:
-    """The keycap strip under the window: the story told in TAI's keys.
+def draw_hud(d, keys: tuple) -> None:
+    """The keycap under the window: the key of the moment, and only that.
 
-    The keys of this frame glow in the accent colour — that is the stroke
-    happening now — and the keys before it cool toward the page as they age.
-    If even the plugin's own keys outgrow the strip, the oldest drop off the
-    left: the stroke of the moment is never the one that gets clipped.
+    Not the typed characters — they are what the key produces, and the line
+    above shows them. Not the keys before it either — one cap, big enough
+    to read, lit for exactly as long as its frame holds: the stroke
+    happening now.
     """
-    if not history:
+    if not keys:
         return
-    widths = [int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
-              for label in history]
-    n = min(len(history), KEY_MAX)
-    while n > 1 and sum(widths[-n:]) + KEY_GAP * (n - 1) > W - TEXT_X * 2:
-        n -= 1
-    visible = history[-n:]
-    hot_n = min(len(hot), n)
     x = TEXT_X
     y = STRIP_Y + (HUD_H - KEY_H) // 2
-    for i, label in enumerate(visible):
-        is_hot = i >= n - hot_n
-        if is_hot:
-            bg, border, fg = HOT_BG, HOT_BORDER, HOT_FG
-        else:
-            t = max(0.30, 1.0 - 0.13 * (n - 1 - i))
-            bg = mix(PAGE, CAP_BG, t)
-            border = mix(PAGE, CAP_BORDER, t)
-            fg = mix(PAGE, CAP_FG, t)
-        w = widths[-n + i]
+    for label in keys:
+        w = int(d.textlength(label, font=hud_font)) + KEY_PAD * 2
         d.rounded_rectangle([x, y, x + w - 1, y + KEY_H - 1], radius=KEY_R,
-                            fill=bg, outline=border, width=1)
+                            fill=HOT_BG, outline=HOT_BORDER, width=1)
         d.text((x + KEY_PAD, y + (KEY_H - hud_font.size) // 2 - 1), label,
-               font=hud_font, fill=fg)
+               font=hud_font, fill=HOT_FG)
         x += w + KEY_GAP
 
 
-def render(snap, history: list, hot: tuple) -> "Image.Image":
+def render(snap, keys: tuple) -> "Image.Image":
     from PIL import ImageDraw
     img = chrome()
     d = ImageDraw.Draw(img)
@@ -469,7 +453,7 @@ def render(snap, history: list, hot: tuple) -> "Image.Image":
     ch = cells[cy][cx][0]
     if ch.strip():
         d.text((px, py + Y_OFF), ch, font=font_r, fill=CURSOR_FG)
-    draw_hud(d, history, hot)
+    draw_hud(d, keys)
     return img
 
 
@@ -485,10 +469,8 @@ def render_all(frames, beats: dict, out: pathlib.Path,
     qa_dir.mkdir(parents=True, exist_ok=True)
 
     images, durations = [], []
-    history: list = []
     for snap, ms, keys in frames:
-        history.extend(keys)
-        images.append(render(snap, history, keys))
+        images.append(render(snap, keys))
         durations.append(ms)
 
     # One shared palette, sampled from frames spread across the whole take —
