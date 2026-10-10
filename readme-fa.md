@@ -18,6 +18,9 @@ git <Ctrl-Space>   pull      status          ← فهرست، زیر خط
 git <Ctrl-Space> <Enter>   git pull         ← یک مورد انتخاب شد، خط آماده است
 ```
 
+![tai در حال کار — راهنما، فهرست رده‌بندی‌شده، پاسخِ سیستم فایل و تایپوی
+که با عادتش پاسخ می‌گیرد](assets/demo.gif)
+
 [معماری](docs/architecture.md) · [توسعه](docs/development.md) · [English](readme.md)
 
 ## نصب

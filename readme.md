@@ -16,6 +16,9 @@ git <Ctrl-Space>      pull      status        ← your habits, ranked
 cd media/mlibre/B/<Ctrl-Space>   Clip/  Movies/  Projects/
 ```
 
+![tai in action — the hint, the ranked list, the filesystem, a typo
+answered by the habit it shadows](assets/demo.gif)
+
 [Docs](docs/architecture.md) · [Development](docs/development.md) · [فارسی](readme-fa.md)
 
 ## Install
