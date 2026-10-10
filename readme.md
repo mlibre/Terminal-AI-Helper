@@ -2,7 +2,7 @@
 
 ![tai](assets/tai.png)
 
-**tai learns the commands you actually run and suggests them as you type.**
+**TAI learns the commands you actually run and suggests them as you type.**
 Native zsh and bash — no server, no daemon, no Python on your keystrokes.
 Everything runs on your machine, offline, stdlib only.
 
@@ -72,7 +72,7 @@ Four words: watch, learn, rank, answer.
   lands in a local SQLite database. The store's filter is the only gate:
   secret-looking tokens, session-harness markers, multi-line commands and
   one-key accidents never become vocabulary.
-- **Learn.** The first time you run an unknown tool, tai reads its real
+- **Learn.** The first time you run an unknown tool, `TAI` reads its real
   `--help` in the background, so `tool <Tab>` knows its subcommands and
   flags from then on.
 - **Rank.** `tai refresh` turns the database into two ordinary
@@ -86,15 +86,15 @@ GETs only, and it can write nothing.
 
 ## The keys
 
-| key                     | what it does                                                      |
-| ----------------------- | ----------------------------------------------------------------- |
-| `→`                     | take the hint at the end of the line, else move right             |
-| `Ctrl-F`                | take the hint                                                     |
-| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`) |
+| key                     | what it does                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `→`                     | take the hint at the end of the line, else move right                                                          |
+| `Ctrl-F`                | take the hint                                                                                                  |
+| `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`)                                   |
 | `Tab`                   | cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
-| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection |
-| `Enter`                 | take the selected entry and stop; a second `Enter` runs the line  |
-| `Alt-G`                 | the command that followed the last one (bash)                     |
+| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection                                              |
+| `Enter`                 | take the selected entry and stop; a second `Enter` runs the line                                               |
+| `Alt-G`                 | the command that followed the last one (bash)                                                                  |
 
 Two things worth knowing. A paste is not a query — pasted text never opens a
 list on its own, and one typed character brings it back. And taking a
