@@ -308,6 +308,28 @@ def main() -> int:
     check("an unknown verb is argparse's error, not a traceback",
           (r.returncode, "invalid choice" in r.stderr), (2, True))
 
+    print("TAI_REBUILD_EVERY: the full-rebuild boundary is a knob")
+    def every(val):
+        e = dict(os.environ)
+        if val is None:
+            e.pop("TAI_REBUILD_EVERY", None)
+        else:
+            e["TAI_REBUILD_EVERY"] = val
+        # a fresh interpreter, so the constant is read the way the recorder
+        # reads it: once, at import, from the environment
+        r = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(REPO)!r}); "
+             "from tai import cli; print(cli.AUTO_REBUILD_EVERY)"],
+            env=e, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+        return int(r.stdout.strip())
+
+    check("the default boundary is 100", every(None), 100)
+    check("TAI_REBUILD_EVERY moves it", every("25"), 25)
+    check("a broken value keeps the default", every("soon"), 100)
+    check("zero is refused, not a crash", every("0"), 1)
+
     print("\nOK — every verb answers in words a user can act on."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")
     return 1 if failures else 0

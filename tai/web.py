@@ -347,64 +347,87 @@ _PAGE = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tai dashboard</title>
 <style>
-  :root{--bg:#0d1117;--fg:#e6edf3;--dim:#8b949e;--line:#21262d;
-        --acc:#3fb950;--warn:#d29922;--bad:#f85149;--card:#161b22;
-        --in:#0a0d12;--hov:#1c2129;--bar:#238636}
+  :root{--bg:#0b0f14;--fg:#e6edf3;--dim:#8b949e;--line:#1d2630;
+        --acc:#3fb950;--acc2:#58a6ff;--warn:#d29922;--bad:#f85149;
+        --card:#11161d;--in:#0a0e13;--hov:#161d26;--bar:#238636;
+        --shadow:0 1px 0 rgba(255,255,255,.03),0 8px 24px rgba(0,0,0,.35)}
   html[data-theme="light"]{--bg:#f6f8fa;--fg:#1f2328;--dim:#59636e;
-        --line:#d1d9e0;--acc:#1a7f37;--warn:#9a6700;--bad:#cf222e;
-        --card:#ffffff;--in:#ffffff;--hov:#eef1f4;--bar:#2da44e}
+        --line:#d8dee4;--acc:#1a7f37;--acc2:#0969da;--warn:#9a6700;--bad:#cf222e;
+        --card:#ffffff;--in:#ffffff;--hov:#eef1f4;--bar:#2da44e;
+        --shadow:0 1px 2px rgba(31,35,40,.06),0 8px 24px rgba(31,35,40,.08)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
        font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
-       padding:28px 20px 60px}
-  .wrap{max-width:980px;margin-inline:auto}
-  header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+       padding:30px 22px 70px}
+  .wrap{max-width:1120px;margin-inline:auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;align-items:center;gap:13px}
+  .logo{width:40px;height:40px;border-radius:11px;flex:none;
+        background:linear-gradient(135deg,#12261a,#0d1117);
+        border:1px solid var(--line);color:var(--acc);
+        display:flex;align-items:center;justify-content:center;
+        font:700 15px/1 ui-monospace,Menlo,Consolas,monospace}
+  html[data-theme="light"] .logo{background:linear-gradient(135deg,#e6f4ea,#f6f8fa)}
+  h1{font-size:19px;margin:0;letter-spacing:-.01em}
   h1 b{color:var(--acc)}
-  .sub{color:var(--dim);font-size:12.5px;margin-top:3px}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:2px}
   #theme{border:1px solid var(--line);background:var(--card);color:var(--dim);
-         border-radius:8px;padding:7px 14px;font:inherit;font-size:12.5px;
-         cursor:pointer;flex:none}
+         border-radius:9px;padding:8px 15px;font:inherit;font-size:12.5px;
+         cursor:pointer;flex:none;transition:color .15s,border-color .15s}
   #theme:hover{color:var(--fg);border-color:var(--dim)}
-  #net{display:none;margin:14px 0 0;padding:8px 14px;border-radius:8px;
-       border:1px solid var(--warn);color:var(--warn);font-size:12.5px}
-  h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;
-     color:var(--dim);margin:30px 0 10px;font-weight:600}
+  #net{display:none;margin:16px 0 0;padding:9px 15px;border-radius:9px;
+       border:1px solid var(--warn);color:var(--warn);font-size:12.5px;
+       background:var(--card)}
+  h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;
+     color:var(--dim);margin:26px 0 9px;font-weight:600}
   .card{background:var(--card);border:1px solid var(--line);
-        border-radius:10px;padding:16px 18px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
-  .grid .card{padding:12px 14px}
-  .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.07em}
-  .v{font-size:22px;margin-top:3px;font-variant-numeric:tabular-nums}
-  .v small{font-size:12px;color:var(--dim)}
+        border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+  .cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);
+        gap:18px;align-items:start}
+  .cols2{display:grid;grid-template-columns:1fr 1.25fr;gap:18px;align-items:start}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:11px;
+        padding:11px 13px;box-shadow:var(--shadow)}
+  .stat .k{color:var(--dim);font-size:10.5px;text-transform:uppercase;
+           letter-spacing:.08em}
+  .stat .v{font-size:19px;margin-top:2px;font-variant-numeric:tabular-nums;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat .v small{font-size:11.5px;color:var(--dim)}
   input{width:100%;background:var(--in);color:var(--fg);
-        border:1px solid var(--line);border-radius:8px;padding:10px 13px;
-        font:15px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-        outline:none;transition:border-color .15s}
-  input:focus{border-color:var(--acc)}
+        border:1px solid var(--line);border-radius:9px;padding:11px 14px;
+        font:15.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+        outline:none;transition:border-color .15s,box-shadow .15s}
+  input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(63,185,80,.12)}
   input::placeholder{color:var(--dim)}
   .cwd{margin-top:9px;display:flex;align-items:center;gap:9px;color:var(--dim);font-size:12px}
-  .cwd input{font-size:12.5px;padding:6px 10px}
+  .cwd input{font-size:12.5px;padding:6px 11px}
   #cwdhint{flex:none;font-size:11px;white-space:nowrap}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:13px}
   .ans{margin-top:14px}
-  .top{font:16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .top{font:17px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+       padding:2px 0 1px}
   .top .ghost{color:var(--dim)}
   .meta{color:var(--dim);font-size:11.5px;margin:5px 0 10px}
   table{border-collapse:collapse;width:100%}
-  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;
-     letter-spacing:.06em;text-align:left;padding:6px 10px 6px 0}
-  .ans td{padding:6px 10px 6px 0;font-size:13px;border-top:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;font-size:10.5px;text-transform:uppercase;
+     letter-spacing:.07em;text-align:left;padding:6px 10px 6px 0}
+  .ans td{padding:7px 10px 7px 0;font-size:13px;border-top:1px solid var(--line)}
   .ans tr:first-child td{border-top:none}
-  .ans tbody tr{cursor:pointer}
+  .ans tbody tr{cursor:pointer;transition:background .12s}
   .ans tbody tr:hover{background:var(--hov)}
   .ans td.cmd{font:13px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
-  .pbar{height:6px;background:var(--bar);border-radius:3px;opacity:.85}
+  .rk{display:inline-block;min-width:20px;text-align:center;color:var(--dim);
+      font-size:11px;font-variant-numeric:tabular-nums}
+  tr.best td.cmd{color:var(--acc)}
+  .pbar{height:6px;background:var(--bar);border-radius:3px;opacity:.85;
+        transition:width .2s}
   .num{color:var(--dim);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
   button.why{border:1px solid var(--line);background:transparent;color:var(--dim);
-             border-radius:6px;padding:2px 9px;font:inherit;font-size:11.5px;cursor:pointer}
+             border-radius:7px;padding:2px 10px;font:inherit;font-size:11.5px;
+             cursor:pointer;transition:color .12s,border-color .12s}
   button.why:hover{color:var(--fg);border-color:var(--dim)}
-  tr.xrow td{background:var(--in);padding:10px 14px;border-top:1px dashed var(--line)}
-  .xhead{font-size:12.5px;margin-bottom:7px;color:var(--fg)}
+  tr.xrow td{background:var(--in);padding:12px 15px;border-top:1px dashed var(--line)}
+  .xhead{font-size:12.5px;margin-bottom:8px;color:var(--fg)}
   .xhead b{color:var(--acc)}
   table.xt{width:100%;border-collapse:collapse}
   table.xt td{border:none;padding:3px 14px 3px 0;font-size:12px;vertical-align:top}
@@ -415,53 +438,75 @@ _PAGE = r"""<!doctype html>
   #recent tbody tr:hover{background:var(--hov)}
   td.cmd,td.cwd{font:12.5px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
   .dim{color:var(--dim)}
-  .badge{display:inline-block;min-width:22px;text-align:center;border-radius:5px;
-         padding:1px 6px;font-size:11.5px;font-variant-numeric:tabular-nums}
+  td.cwd{cursor:pointer}
+  td.cwd:hover{color:var(--acc2)}
+  .badge{display:inline-block;min-width:22px;text-align:center;border-radius:6px;
+         padding:1px 7px;font-size:11.5px;font-variant-numeric:tabular-nums}
   .ok{color:var(--acc)} .warn{color:var(--warn)} .err{color:var(--bad)}
-  .row{display:grid;grid-template-columns:1fr 110px;gap:12px;align-items:center;
-       margin:8px 0;font-size:13px}
+  .row{display:grid;grid-template-columns:1fr 96px;gap:12px;align-items:center;
+       margin:9px 0;font-size:13px;cursor:pointer}
   .row .c{word-break:break-all;font:13px ui-monospace,Menlo,Consolas,monospace}
   .row:hover .c{color:var(--acc)}
-  .row .n{display:block;margin-bottom:3px}
-  .row .bar{height:8px;background:var(--bar);border-radius:4px;opacity:.8}
-  .foot{color:var(--dim);font-size:11.5px;margin-top:34px;line-height:1.6}
+  .row .n{display:block;margin-bottom:3px;text-align:right;color:var(--dim);
+          font-size:11.5px;font-variant-numeric:tabular-nums}
+  .row .bar{height:7px;background:var(--bar);border-radius:4px;opacity:.8;
+            transition:opacity .12s}
+  .row:hover .bar{opacity:1}
+  .foot{color:var(--dim);font-size:11.5px;margin-top:36px;line-height:1.7;
+        border-top:1px solid var(--line);padding-top:16px}
   code{color:var(--acc);font-size:.95em}
+  @media (max-width:940px){.cols,.cols2{grid-template-columns:1fr}
+    .grid{grid-template-columns:1fr 1fr}}
   #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
-         background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;
-         font-size:12.5px;opacity:0;pointer-events:none;transition:all .18s}
+         background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:9px;
+         font-size:12.5px;opacity:0;pointer-events:none;transition:all .18s;z-index:5}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style></head><body>
 <div class="wrap">
 <header>
-  <div><h1><b>tai</b> dashboard</h1>
-  <div class="sub">what the helper learned from your shell — read-only, 127.0.0.1</div></div>
+  <div class="brand"><span class="logo">&gt;_</span>
+    <div><h1><b>tai</b> dashboard</h1>
+    <div class="sub">what the helper learned from your shell — read-only, 127.0.0.1</div></div>
+  </div>
   <button id="theme" aria-label="toggle color theme">light</button>
 </header>
 <div id="net">lost the server — retrying…</div>
 
-<h2>try a prefix</h2>
-<div class="card">
-  <input id="q" placeholder="git st…" autofocus spellcheck="false" autocomplete="off">
-  <div class="cwd">cwd <input id="cwd" placeholder="auto-fills from your latest record"
-       spellcheck="false" autocomplete="off"><span id="cwdhint" class="dim"></span></div>
-  <div class="ans" id="ans"></div>
+<div class="cols">
+<section>
+  <h2>try a prefix</h2>
+  <div class="card">
+    <input id="q" placeholder="git st…" autofocus spellcheck="false" autocomplete="off">
+    <div class="cwd">cwd <input id="cwd" placeholder="auto-fills from your latest record"
+         spellcheck="false" autocomplete="off"><span id="cwdhint" class="dim"></span></div>
+    <div class="ans" id="ans"><div class="hint">type a few letters — this box answers
+      exactly what the prompt would, from the same engine</div></div>
+  </div>
+</section>
+<section>
+  <h2>state</h2>
+  <div class="grid" id="state"></div>
+</section>
 </div>
 
-<h2>state</h2>
-<div class="grid" id="state"></div>
-
-<h2>most-run commands</h2>
-<div class="card" id="top"></div>
-
-<h2>latest recorded</h2>
-<div class="card" style="padding:8px 18px"><table id="recent"></table></div>
+<div class="cols2">
+<section>
+  <h2>most-run commands</h2>
+  <div class="card" id="top"></div>
+</section>
+<section>
+  <h2>latest recorded</h2>
+  <div class="card" style="padding:8px 18px"><table id="recent"></table></div>
+</section>
+</div>
 
 <div class="foot">the server binds 127.0.0.1 only and answers GETs alone;
 nothing on this page can write to the store. Feed it the way you feed the
 prompt: just keep using the shell — the shell index rebuilds itself within
 seconds of new commands — or <code>tai refresh</code> in a terminal.
-Click a suggestion to copy it; click a cwd below to ask about that directory;
-<code>why</code> opens its arithmetic.</div>
+Click a suggestion or a most-run row to copy it; click a cwd below to ask
+about that directory; <code>why</code> opens its arithmetic. <code>/</code>
+jumps back to the try box.</div>
 </div>
 <div id="toast"></div>
 
@@ -565,7 +610,7 @@ function copy(cmd) {
 }
 
 function card(k, v) {
-  return `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 }
 
 // A failed poll shows the banner and keeps the last good page on screen —
@@ -608,9 +653,11 @@ function state() {
       (s.db.broken ? card("store error", `<span class="err">${E(s.db.broken)}</span>`) : "");
     const mx = s.top.length ? s.top[0].n : 1;
     $("top").innerHTML = s.top.length ? s.top.map(r =>
-      `<div class="row"><span class="c">${E(r.cmd)}</span>` +
+      `<div class="row" title="click to copy"><span class="c">${E(r.cmd)}</span>` +
       `<span><span class="k n">${r.n}</span><span class="bar" style="display:block;width:${Math.max(3, 100 * r.n / mx)}%"></span></span></div>`).join("") :
       `<div class="k">nothing recorded yet — run commands in the shell</div>`;
+    $("top").querySelectorAll(".row").forEach((el, i) =>
+      el.addEventListener("click", () => copy(s.top[i].cmd)));
     const now = (Date.now() / 1000) | 0;
     // The cwd rides in a side array like the commands do — innerHTML escaping
     // does not touch quotes, and a quoted path in an attribute would break out.
@@ -620,7 +667,7 @@ function state() {
       s.recent.map((r, i) =>
         `<tr><td class="dim" title="${new Date(r.ts * 1000).toLocaleString()}">${ago(Math.max(0, now - r.ts))}</td>` +
         `<td class="cmd">${E(r.cmd)}</td>` +
-        `<td class="cwd dim" data-i="${i}" title="ask this directory" style="cursor:pointer">${E(r.cwd)}</td>` +
+        `<td class="cwd dim" data-i="${i}" title="ask this directory">${E(r.cwd)}</td>` +
         `<td>${r.exit ? `<span class="badge warn">${r.exit}</span>` : `<span class="badge ok">0</span>`}</td></tr>`).join("") +
       "</tbody>" :
       `<tbody><tr><td class="k">no rows</td></tr></tbody>`;
@@ -634,7 +681,9 @@ function suggest() {
   clearTimeout(tm);
   tm = setTimeout(() => {
     const q = $("q").value, cwd = $("cwd").value;
-    if (!q) { $("ans").innerHTML = ""; return; }
+    if (!q) { $("ans").innerHTML =
+      `<div class="hint">type a few letters — this box answers exactly what the prompt would, from the same engine</div>`;
+      return; }
     const u = "/api/suggest?q=" + encodeURIComponent(q) +
               "&cwd=" + encodeURIComponent(cwd);
     fetch(u).then(r => r.json()).then(res => {
@@ -648,15 +697,15 @@ function suggest() {
         `<span class="ghost">${E(best.slice(q.length))}</span>` : "";
       const top = ch.length ? ch[0].prob || 1 : 1;
       const rows = ch.map((c, i) =>
-        `<tr data-i="${i}" title="click to copy">` +
-        `<td class="cmd">${E(c.cmd)}</td>` +
+        `<tr data-i="${i}" title="click to copy"${i === 0 ? ` class="best"` : ""}>` +
+        `<td class="cmd"><span class="rk">${i + 1}</span>${E(c.cmd)}</td>` +
         `<td style="width:90px"><span class="pbar" style="display:block;width:${Math.max(2, 100 * (c.prob || 0) / (top || 1))}%"></span></td>` +
         `<td class="num">${((c.prob || 0) * 100).toFixed(1)}%</td>` +
         `<td class="num">${c.score}</td>` +
         `<td style="width:1px"><button class="why" data-w="${i}" aria-label="why this score">why</button></td></tr>`).join("");
       $("ans").innerHTML =
         `<div class="top">${E(q)}${ghost}</div>` +
-        `<div class="meta">engine ${(res.latency_ms || 0).toFixed ? (res.latency_ms || 0).toFixed(2) : res.latency_ms}ms · ${res.source || "ranking"}</div>` +
+        `<div class="meta">engine ${(res.latency_ms || 0).toFixed ? (res.latency_ms || 0).toFixed(2) : res.latency_ms}ms · ${res.source || "ranking"} · click a row to copy</div>` +
         (rows ? `<table>${rows}</table>` : `<div class="k">no answer</div>`);
       $("ans").querySelectorAll("tr[data-i]").forEach(tr =>
         tr.addEventListener("click", () => copy(cmds[+tr.dataset.i])));
@@ -666,6 +715,14 @@ function suggest() {
   }, 120);
 }
 $("q").addEventListener("input", suggest);
+
+// "/" returns the hand to the try box, the way the shell's own search does.
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && document.activeElement !== $("q") &&
+      document.activeElement !== $("cwd")) {
+    e.preventDefault(); $("q").focus();
+  }
+});
 
 state(); setInterval(state, 5000);
 </script></body></html>

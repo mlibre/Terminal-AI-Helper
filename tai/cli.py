@@ -201,13 +201,23 @@ def cmd_update(a) -> int:
 # The two knobs of the record path's self-refresh, named where the web page
 # can quote them: a rebuild at most once per this many seconds (bursts of
 # records coalesce into one background build), and one unconditional build
-# every this many recorded commands.
+# every this many recorded commands — TAI_REBUILD_EVERY moves the hundred.
 _REBUILD_MIN_INTERVAL = 5.0
-AUTO_REBUILD_EVERY = 100
+
+
+def _env_count(name: str, default: int) -> int:
+    """One knob read as a count; a broken or zero value keeps the default."""
+    try:
+        return max(1, int(os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+AUTO_REBUILD_EVERY = _env_count("TAI_REBUILD_EVERY", 100)
 
 
 def _auto_maintain(total: int, newest_ts: int = 0) -> None:
-    """Rebuild at 100-command boundaries without blocking the shell."""
+    """Rebuild at every-Nth-record boundaries without blocking the shell."""
     if total % AUTO_REBUILD_EVERY:
         _rebuild_when_stale(newest_ts)
         return

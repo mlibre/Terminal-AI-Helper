@@ -101,9 +101,9 @@ whatever is on screen, and tai never overwrites a hint it did not draw.
 tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
 ```
 
-One page: a try box that answers exactly what the prompt would — through the
-same engine, not a copy — the most-run commands, the latest recorded rows,
-and a `why` on every suggestion that opens the factors behind its score.
+![the tai web dashboard — the try box answering `git `, the ranked panel, and
+the `why` factors behind a score](web.png)
+
 The one server in the product: you start it, it binds `127.0.0.1`, it answers
 GETs only, and it can write nothing.
 

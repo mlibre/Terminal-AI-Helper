@@ -72,27 +72,6 @@ are filtered out before anything is stored, and what you run never leaves the
 machine. New commands show up in the running shell within seconds — no
 restart, ever.
 
-## How it works
-
-Four words: watch, learn, rank, answer.
-
-- **Watch.** Each command is appended to a local spool file by the shell
-  itself — one builtin write, no process — and a few seconds later a batch
-  lands in a local SQLite database. The store's filter is the only gate:
-  secret-looking tokens, session-harness markers, multi-line commands and
-  one-key accidents never become vocabulary.
-- **Learn.** The first time you run an unknown tool, `TAI` reads its real
-  `--help` in the background, so `tool <Tab>` knows its subcommands and
-  flags from then on.
-- **Rank.** `tai refresh` turns the database into two ordinary
-  shell-sourceable index files. The ranking is yours: how often, how
-  recently, in this directory, after what.
-- **Answer.** The shell looks the answer up in its own memory — an
-  associative-array hit, microseconds. Nothing sits between you and the key.
-
-The one server is `tai web`: you start it, it binds `127.0.0.1`, it answers
-GETs only, and it can write nothing.
-
 ## The keys
 
 | key                     | what it does                                                                                                   |
@@ -117,39 +96,38 @@ after every command with `TAI_COMPLETE_ALL=1`.
 
 ## What it suggests, and what it will not
 
-These are not edge cases; they are the product.
+These are not edge cases; they are the product — and they come out of one
+small loop. **Watch:** each command is appended to a local spool file by the
+shell itself and lands in a local SQLite database seconds later;
+secret-looking tokens, multi-line pastes and one-key accidents never become
+vocabulary. **Learn:** the first time you run an unknown tool, TAI reads its
+real `--help` in the background, so `tool <Tab>` knows its subcommands and
+flags from then on. **Rank:** `tai refresh` turns the database into two
+index files ranked your way — how often, how recently, in this directory,
+after what. **Answer:** the shell looks the answer up in its own memory, an
+array hit in microseconds; nothing sits between you and the key.
 
 - **It has to extend your line.** `ls -l` suggests `ls -la`, never itself; a
   whole command suggests nothing.
 - **It has to exist.** A command whose path is gone is not offered, however
-  often you typed it — `cd ~/projects/myapp` stops being the top suggestion
-  the moment its directory is gone. `tai doctor` reports how much is held
-  back; `tai purge --stale` drops it.
+  often you typed it — `tai doctor` reports how much is held back, and
+  `tai purge --stale` drops it.
 - **A wrapper is not a wall.** `sudo`, `doas`, `nohup`, `time`, `nice` and
-  friends run what follows them, so the line behind one completes as if the
-  wrapper were not there.
-- **A path is answered by the filesystem.** The history can say which file
-  you used last time — never the one downloaded a minute ago. A line ending
-  in a file is answered by what is actually there, newest first.
+  friends complete as if the wrapper were not there.
+- **A path is answered by the filesystem** — what is actually there, newest
+  first; the history never resurfaces the file you downloaded a minute ago.
 - **`cd` is answered by directories that exist here.** A destination learned
-  elsewhere is judged from where you stand — a bare `vllm` recorded in
-  another project is not offered two directories away from vllm.
+  elsewhere is judged from where you stand, not offered two directories away.
 - **A typo is answered by what it is a typo of.** When nothing extends the
-  line, the learned lines that hold every word you typed appear; a one-off
+  line, the learned lines that hold every word you typed appear; the one-off
   typo ranks below the habit it shadows, in the index itself.
 - **A name the shell never found is not a suggestion.** Exit 127 is the shell
-  refusing a word, not a command failing — so a name you mistyped and never
-  once ran does not sit above the tool it was a typo of. And a tool you have
-  installed outranks a word you do not have, all else equal: `opencode` beats
-  `opencoe` because it exists, here, on your PATH.
-- **A tool you have never run still gets an answer.** `tool --help` — the
-  only honest thing to say about a command the history has never seen. Run
-  it once and the real `--help` is learned in the background:
-
-  ```text
-  9router --p   →  9router --port          (hint: ort)
-  9router --n   →  9router --no-browser
-  ```
+  refusing a word, not a command failing — and a tool you have installed
+  outranks a word you do not: `opencode` beats `opencoe` because it exists,
+  here, on your PATH.
+- **A tool you have never run still gets an answer:** `tool --help`, the only
+  honest thing to say about a command the history has never seen. Run it once
+  and the real `--help` is learned in the background.
 
 - **If another plugin also draws hints, both work.** `→`, `Ctrl-F` and
   `Alt-F` take whatever is on screen, and tai never overwrites a hint it did
@@ -163,12 +141,13 @@ These are not edge cases; they are the product.
 tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
 ```
 
-One page: a try box that answers exactly what the prompt would — through the
-same engine, not a copy — the most-run commands, the latest recorded rows,
-the state of the store and both indexes, and a `why` on every suggestion
-that opens the factors and evidence behind its score. A light/dark toggle
-sits in the corner and the choice is remembered; clicking a suggestion
-copies it. `--port N` moves it; `--no-browser` skips the auto-open.
+![the tai web dashboard — the try box answering `git `, the ranked panel,
+and the `why` factors behind a score](assets/web.png)
+
+The one server in the product: you start it, it binds `127.0.0.1`, it answers
+GETs only, and it can write nothing. A light/dark toggle sits in the corner
+and the choice is remembered; clicking a suggestion copies it. `--port N`
+moves it; `--no-browser` skips the auto-open.
 
 ## Commands
 
@@ -191,7 +170,7 @@ records — and every other command drains whatever is pending first, so no
 answer is ever a few records behind what you just did. No restart is needed:
 the plugin re-reads the index at the next prompt.
 
-## Knobs
+## Configuration
 
 All have working defaults; they are for when yours is wrong.
 
@@ -203,6 +182,7 @@ All have working defaults; they are for when yours is wrong.
 | `TAI_SPOOL_MAX`         | `8`                             | pending commands that force a batched flush             |
 | `TAI_SPOOL_SECONDS`     | `3`                             | idle seconds that force one                             |
 | `TAI_SPOOL`             | beside the database             | the spool file the plugins append to                    |
+| `TAI_REBUILD_EVERY`     | `100`                           | recorded commands between full index rebuilds           |
 | `TAI_FILE_ROOTS`        | —                               | extra places to look for a file argument, `:`-separated |
 | `TAI_SKIP_PATH_CHECK`   | off                             | suggest commands whose paths no longer exist            |
 | `TAI_COMPLETE_ALL`      | off                             | bash `Tab` completes every command                      |
