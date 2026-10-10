@@ -53,7 +53,7 @@ restart, ever.
 | `→`                     | take the hint at the end of the line, else move right             |
 | `Ctrl-F`                | take the hint                                                     |
 | `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`) |
-| `Tab`                   | cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
+| `Tab`                   | write what every candidate shares, then cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
 | `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection |
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line  |
 | `Alt-G`                 | the command that followed the last one (bash)                     |

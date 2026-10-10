@@ -125,6 +125,18 @@ STEM_NAMES = ["aaa_stem_a_very_long_directory_name/", "stem_alpha/", "stem_beta/
 # `notepad` and `note` in the same menu, the entries then shared only `note`, and
 # the rule under test (a stem has to end at a boundary) had nothing to cut.
 STEM_FILES = ["wombat book.txt", "wombat cards.txt"]
+# A directory for the shared-head rule on Tab: every name in it belongs to one
+# of the cases the rule answers, and none of them collides with another case's
+# word. `.zshrc` and `.zsh/` are the reported pair — two candidates that are the
+# same word until the `h`. `Downloads.zip` and `Downloads2.txt` answer a word
+# typed in the wrong case (`down`), folded by the file answer's snapshot filter —
+# the disk glob itself is case-sensitive, so the fold has to come from there; the
+# `Downloads/` directory beside them joins the matched-case menu and gives the
+# dedup something to do. `My Docs/`
+# and `My Docs2.txt` share a word that only exists quoted. `readme.txt` shares
+# nothing, so a prefix computation that overreaches has something to be caught
+# by: an empty-word menu here lists files whose common head is the empty string.
+PREFIX_DIR = pathlib.Path("/tmp/tai/tai_prefix_cwd")
 # The colours a menu is drawn in: the selected cell, and a directory's name.
 # Spelled out here because the tests read them off the screen rather than out of
 # the plugin — a selection that is drawn but never looked at is a selection
@@ -368,6 +380,16 @@ def setup() -> None:
         script.chmod(0o755)
     (MENU_DIR / "tzz_d").write_text("")
     (MENU_DIR / "tzz_dir").mkdir()
+    shutil.rmtree(PREFIX_DIR, ignore_errors=True)
+    PREFIX_DIR.mkdir(parents=True)
+    (PREFIX_DIR / ".zsh").mkdir()
+    (PREFIX_DIR / ".zshrc").write_text("")
+    (PREFIX_DIR / "Downloads").mkdir()
+    (PREFIX_DIR / "Downloads.zip").write_text("")
+    (PREFIX_DIR / "Downloads2.txt").write_text("")
+    (PREFIX_DIR / "My Docs").mkdir()
+    (PREFIX_DIR / "My Docs2.txt").write_text("")
+    (PREFIX_DIR / "readme.txt").write_text("")
     STEM_ROOT.mkdir()
     for name in STEM_NAMES:
         if name.endswith("/"):

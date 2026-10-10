@@ -1,8 +1,9 @@
 """The Tab menu: what it lists, what Enter takes, and when it opens.
 
 Menu behaviour is the part of the plugin most likely to be *nearly* right — the
-entries are correct, the line is untouched, and the selection is never drawn —
-so these tests assert on an emulated screen rather than on the plugin's arrays.
+entries are correct, the line advances only by what every entry shares, and the
+selection is never drawn — so these tests assert on an emulated screen rather
+than on the plugin's arrays.
 
     python3 tests/test_plugins_menu.py
 """
@@ -43,11 +44,11 @@ def test_bash_menu() -> None:
     s.settle()
     check("the first Tab lists the matches", "tzz_a" in s.raw()[mark:], True)
     line = s.line()
-    # readline also inserts the longest common prefix of the matches, which is
-    # the one thing it does that a zsh listing does not: `tzz` becomes `tzz_`
-    # here, because every name in that directory shares it. What must not happen
-    # is a whole match being chosen — the line being rewritten before the list
-    # has even been read — and a common prefix is not that.
+    # readline also inserts the longest common prefix of the matches — once the
+    # one thing it did that a zsh listing did not; the zsh menu writes the same
+    # head now, and test_zsh_menu_prefix pins both shells on it. What must not
+    # happen is a whole match being chosen — the line being rewritten before the
+    # list has even been read — and a common prefix is not that.
     check("and no match is chosen", [n for n in MENU_ENTRIES if n in line], [])
     check("no noise from the listing", s.noise(), [])
     s.send(CTRL_U)
@@ -108,15 +109,19 @@ def test_bash_menu() -> None:
 def test_zsh_menu() -> None:
     """Tab lists the completions, Tab moves the mark, Enter takes one.
 
-    The rule is that the line is not touched while the selection moves, and it
-    is worth a test of its own because zsh's own menu completion does the
-    opposite: each Tab rewrites the line with the entry it lands on. That is fine
-    when you already know which entry you want, and useless when the point of
-    opening a menu is to compare three candidates and then choose — with the line
-    rewritten, there is nothing left to choose between.
+    The rule is that the line moves only by what every entry shares: the press
+    that opens the list first writes the head all candidates start with — `tzz`
+    becomes `tzz_`, because every entry in the menu begins there — and after
+    that the line stands while the selection moves. That is worth a test of its
+    own because zsh's own menu completion does the opposite: each Tab rewrites
+    the line with the entry it lands on. That is fine when you already know
+    which entry you want, and useless when the point of opening a menu is to
+    compare three candidates and then choose — with the line rewritten, there
+    is nothing left to choose between.
 
-    So: every Tab below checks the line as well as the selection, and the last
-    one checks that Enter took the entry that was selected rather than the first.
+    So: the first Tab below checks the head it writes, every later Tab checks
+    the line as well as the selection, and the last one checks that Enter took
+    the entry that was selected rather than the first.
     """
     if not SHELLS["zsh"]:
         return
@@ -138,7 +143,9 @@ def test_zsh_menu() -> None:
     check("a directory is listed with its slash", "tzz_dir/" in menu_entries(drawn), True)
     check("a name on PATH that cannot be run is not offered",
           [name for name in MENU_UNRUNNABLE if name in menu_entries(drawn)], [])
-    check("Tab leaves the line alone", line, "tzz")
+    # The head every entry shares — `tzz_` — is in the line before the list
+    # draws, the same thing readline writes on this key (see test_bash_menu).
+    check("Tab writes the head every entry shares", line, "tzz_")
     check("the first entry is selected", selected_entry(screen_of(s)), MENU_ENTRIES[0])
 
     for step, want in enumerate(MENU_ENTRIES[1:], start=2):
@@ -146,7 +153,7 @@ def test_zsh_menu() -> None:
         s.settle()
         line, drawn, size, idx = s.menu(clear=False)
         check(f"Tab {step} selects the next entry", selected_entry(screen_of(s)), want)
-        check(f"Tab {step} still leaves the line alone", line, "tzz")
+        check(f"Tab {step} still leaves the line at the head", line, "tzz_")
         check(f"Tab {step} reports the same menu", size, len(MENU_ENTRIES))
 
     s.write(TAB)
@@ -154,7 +161,6 @@ def test_zsh_menu() -> None:
     line, drawn, size, idx = s.menu(clear=False)
     check("the selection wraps round", selected_entry(screen_of(s)), MENU_ENTRIES[0])
     s.write("\x15")
-
     # `tzz_d` is both a file in that directory and a prefix of the directory next
     # to it. Offering `tzz_d` for `tzz_d` would be a menu with one entry that says
     # nothing the line does not already say — the same rule the ghost text
@@ -250,14 +256,18 @@ def test_zsh_menu() -> None:
     s.write("\x15")
 
     # A key that was not Tab puts the menu away: the entries belonged to a line
-    # that is no longer the one being typed.
+    # that is no longer the one being typed. The line was left at the head the
+    # menu wrote — `tzz_` — and the keystroke lands after it. The menu's own
+    # rows are gone with it; what the dump may hold instead is the loose
+    # glimpse, which the edited word `tzz_X` is one deletion from earning —
+    # a reader's list, not the menu that was open.
     s.send("tzz")
     s.write(TAB)
     s.settle()
     s.send("X")
     line, drawn, size, idx = s.menu(clear=False)
-    check("typing closes the menu", (size, idx), (0, 0))
-    check("and the character is in the line", line, "tzzX")
+    check("typing closes the menu", "tzz_a" in drawn, False)
+    check("and the character is in the line", line, "tzz_X")
     s.write("\x15")
 
     # A name the directory does not have, and no command has either.
@@ -375,6 +385,138 @@ def test_zsh_menu() -> None:
     s.close()
 
 
+def test_zsh_menu_prefix() -> None:
+    """Tab writes the head every candidate already shares, then lists.
+
+    The reported case: `cat .zs` answered with `.zshrc` and `.zsh/` — two
+    candidates that are the same word until the `h` — and the menu drew them
+    under a line still reading `.zs`. Every shell completes the certain part
+    first, and readline had been doing it here all along (the bash half of
+    test_bash_menu pins `tzz` becoming `tzz_`); the menu made the user type the
+    shared tail personally, or take a whole entry to get it. So the press that
+    opens the list first advances the line to the longest head every entry
+    starts with, and the list draws under the advanced line.
+
+    Four ways to be wrong, each asserted: writing it twice (the second Tab
+    cycling must not append the head again); writing it when the word already
+    IS the head (`cat .zsh` stays `cat .zsh`); writing a head the typed word
+    does not start with (the case-folded head takes the candidates' case, and
+    only folds from the word onward); and writing anything at all when the
+    word is empty — `cat ` asks for a listing, not for a guess typed on the
+    user's behalf.
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("zsh menu writes the shared head first")
+    s = Session("zsh")
+    s.run(f"cd {PREFIX_DIR}")
+
+    # The reported pair. The file answer answers `.zs` with `.zshrc` from the
+    # disk's (#i) fallback — a directory is not a file, so `.zsh/` arrives from
+    # the directory listing — and the head of the two written forms is `.zsh`.
+    s.send("cat .zs")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("the line takes the head both candidates share", line, "cat .zsh")
+    check("and the list shows both candidates",
+          (".zshrc" in menu_entries(drawn), ".zsh/" in menu_entries(drawn)),
+          (True, True))
+    check("with the first one selected", selected_entry(screen_of(s)), ".zshrc")
+
+    # The next press is the choosing press it always was: the selection moves
+    # and the line stands. A head written twice would read `.zsh_` here.
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("the next Tab cycles without writing again",
+          (line, selected_entry(screen_of(s))), ("cat .zsh", ".zsh/"))
+
+    # Enter lays the whole entry over the span the head fills — head included,
+    # exactly once.
+    s.write(ENTER)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("Enter takes an entry over the advanced line",
+          (line, size), ("cat .zsh/", 0))
+    s.write("\x15")
+
+    # A word that already IS the head: nothing to write, the menu just lists.
+    s.send("cat .zsh")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("a word that is the head is not extended",
+          (line, size), ("cat .zsh", 2))
+    s.write("\x15")
+
+    # The head folds case, from the word onward: `down` is answered by two
+    # files whose shared head is `Downloads`, and the line takes the head's
+    # case — the rule every accept key already keeps.
+    s.send("cat down")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("a head reached through the case fold is written in the candidates' case",
+          line, "cat Downloads")
+    check("and both folded files are on the list",
+          ("Downloads.zip" in menu_entries(drawn),
+           "Downloads2.txt" in menu_entries(drawn)), (True, True))
+    s.write("\x15")
+
+    # A head that only exists quoted. Both candidates are `My Docs…`, so the
+    # head of the *written* forms is `My\ Docs` — one shell word, safe to stand
+    # in the line however long the user keeps typing. The rows are drawn raw,
+    # and read as names — which is a containment assertion on the drawn text,
+    # because menu_entries reads the space inside the name as a column gap.
+    s.send("cat My")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("a head with a space in it is written quoted", line, "cat My\\ Docs")
+    flat = drawn.replace("\\n", " ")
+    check("and the rows are drawn as the names they are",
+          ("My Docs2.txt" in flat, "My Docs/" in flat), (True, True))
+    # Cycle to the directory and take it: the entry replaces the head — no
+    # doubled `Docs`, no half a quote left behind.
+    s.write(TAB)
+    s.settle()
+    s.write(ENTER)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("Enter replaces the quoted head with the whole entry",
+          (line, size), ("cat My\\ Docs/", 0))
+    s.write("\x15")
+
+    # An empty word is nothing to extend: the line ends in a space, the menu
+    # is the listing, and nothing is typed on the user's behalf.
+    s.send("cat ")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("an empty word is listed, not filled in",
+          (line, size > 0), ("cat ", True))
+    s.write("\x15")
+    check("no noise from the shared head", s.noise(), [])
+    s.close()
+
+    # readline has been completing the certain part first for as long as it
+    # has existed; the point of the half above is that the shells now agree.
+    # (That readline also *lists* what remains ambiguous is test_bash_menu's
+    # own assertion; here the listing arrives coloured, and the colour's own
+    # bytes separate a directory's name from its slash.)
+    if SHELLS["bash"]:
+        print("bash writes the shared head first (readline's own)")
+        b = Session("bash")
+        b.run(f"cd {PREFIX_DIR}")
+        b.send("cat .zs")
+        b.write(TAB)
+        b.settle()
+        check("readline completes the shared head too", b.line(), "cat .zsh")
+        check("no noise from the bash head", b.noise(), [])
+        b.close()
+
+
 def test_zsh_menu_stem() -> None:
     """A menu shows what an entry adds, not what every entry shares.
 
@@ -436,12 +578,13 @@ def test_zsh_menu_stem() -> None:
     s.write("\x15")
 
     # Two file names that share a whole *word* — `wombat book.txt` and
-    # `wombat cards.txt` under a word typed as `womb`. What they share,
-    # `wombat `, runs past what was typed, and the rule above clamps it: the
-    # rows are drawn whole, because a row that reads `book.txt` beside a line
-    # reading `womb` asks the reader to glue two fragments into a name neither
-    # of them spells. The stem is a reminder of text that is already on
-    # screen; anything longer than the word is information taken away.
+    # `wombat cards.txt` under a word typed as `womb`. The head of the two
+    # written forms is `wombat\ ` — one shell word, every entry extending it —
+    # and Tab writes it before the list draws, so the line advances to the
+    # part that is certain. The rows are then drawn whole: the stem clamp
+    # cannot cut a shared word into the line when the line holds it quoted and
+    # the rows are raw, and a row that reads `book.txt` beside a line reading
+    # `wombat\ ` asks the reader to glue a quote into a name nobody typed.
     s.send("womb")
     s.write(TAB)
     s.settle()
@@ -451,7 +594,7 @@ def test_zsh_menu_stem() -> None:
     flat = drawn.replace("\\n", " ")
     check("entries sharing a word past the word are drawn whole",
           ("wombat book.txt" in flat and "wombat cards.txt" in flat), True)
-    check("and the line still says what was typed", line, "womb")
+    check("and the line took the quoted head they share", line, "wombat\\ ")
     s.write(ENTER)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
@@ -829,9 +972,13 @@ def test_stem_never_cuts_untyped_text() -> None:
     nothing offers. The stem is a reminder of text that is already on screen;
     anything longer than the typed word is information taken away.
 
-    Two halves are asserted: the untyped prefix stays on every row (`cd tm`),
-    and a prefix the user *did* type is still cut (`cd tmp/`), because that is
-    the half the original stem rule exists for.
+    Two halves are asserted: a prefix the user did *not* type is written into
+    the line by the shared-head rule (`cd tm` advances to `cd tmp/`, because
+    every candidate begins there) and the rows then carry only what it adds —
+    the head has moved out of the rows and into the line, which is the stem
+    rule's promise kept by a shorter road. And a prefix the user *did* type is
+    still cut (`cd tmp/`), because that is the half the original stem rule
+    exists for.
     """
     if not SHELLS["zsh"]:
         return
@@ -850,10 +997,11 @@ def test_stem_never_cuts_untyped_text() -> None:
         s.settle()
         line, drawn, size, idx = s.menu(clear=False)
         entries = menu_entries(drawn)
-        check("the untyped root is on every row", "tmp/vllm" in entries, True)
-        check("and on the directory row", "tmp/" in entries, True)
-        check("the word was not erased from the rows",
-              any(e == "vllm" or e == "x" for e in entries), False)
+        # The head every candidate shares is now in the line — `tmp/`, which
+        # the user had not typed — and the rows carry the tails alone.
+        check("the untyped root moves into the line", line, "cd tmp/")
+        check("the rows carry what it adds", "vllm" in entries, True)
+        check("and nothing is drawn twice", "tmp/vllm" in entries, False)
         s.write("\x15")
 
         # The half the stem rule is for: the prefix the user typed is drawn
@@ -1258,6 +1406,7 @@ def main() -> int:
     setup()
     test_bash_menu()
     test_zsh_menu()
+    test_zsh_menu_prefix()
     test_zsh_menu_stem()
     test_loose_menu()
     test_stem_never_cuts_untyped_text()

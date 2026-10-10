@@ -30,6 +30,13 @@ typeset -ga _TAI_MENU
 # _tai_menu_open for why the flag travels with the entry.
 typeset -ga _TAI_MENU_Q
 typeset -gi _TAI_MENU_IDX=0 _TAI_MENU_FROM=0 _TAI_MENU_TO=0 _TAI_MENU_LOOSE=0
+# 1 when the rows are whole learned lines that commit onto the word span as
+# whole lines (the first-word menu): _tai_menu_prefix refuses those, because a
+# shared head written into the line would then be written a second time by
+# _tai_menu_commit, which lays the whole entry over the span. Only a per-word
+# menu — every row one word, written over exactly the span the prefix now
+# fills — can take the extension.
+typeset -gi _TAI_MENU_WHOLE=0
 # How deep one first-word key is read, and how many learned whole lines the
 # first-word menu carries ahead of the installed names. Three per key is what
 # keeps a two-line `go mod …` pair beside each other — one per key is the
@@ -62,6 +69,7 @@ _tai_menu_close() {
   _TAI_MENU_IDX=0
   _TAI_MENU_ARMED=0
   _TAI_MENU_LOOSE=0
+  _TAI_MENU_WHOLE=0
   _TAI_MENU_STEM=""
 }
 
@@ -286,6 +294,7 @@ _tai_menu_open() {
   local -A isdir dup
   local word before c rest p real
   local -i len=${#BUFFER} i skip width term limit added=0 cap=0
+  _TAI_MENU_WHOLE=0
 
   # The width of the terminal, which the layout below is built to. Read once
   # here, because the command list is capped by it before the menu knows how
@@ -371,6 +380,7 @@ _tai_menu_open() {
     out+=( "${_TAI_MENU_LEARNED[@]}" )
     repeat ${#_TAI_MENU_LEARNED[@]}; do outq+=( 0 ); done
     learned_whole=1
+    _TAI_MENU_WHOLE=1
   fi
   # An installed command the history has never seen. Worth offering only once
   # the command name is complete, which is the same rule _tai_query keeps so
@@ -589,6 +599,7 @@ _tai_menu_open_loose() {
   _TAI_MENU_TO=${#BUFFER}
   _TAI_MENU_ARMED=0
   _TAI_MENU_LOOSE=1
+  _TAI_MENU_WHOLE=0
   _tai_menu_layout ""
   _TAI_MENU_ARMED=0
 }
@@ -664,6 +675,76 @@ _tai_menu_paint() {
   if (( _TAI_MENU_ARMED )); then
     region_highlight+=("$lo[_TAI_MENU_IDX] $hi[_TAI_MENU_IDX] $_TAI_MENU_STYLE")
   fi
+}
+
+# Write into the line what every entry already shares, before the list is drawn.
+#
+# The report: `cat .zs` answered with `.zsh/` and `.zshrc` — two candidates that
+# are the same word until the `h` — and the menu showed them under a line still
+# reading `.zs`. Every shell completes the part that is certain first, and
+# readline's was already doing it here (the bash listing test pins `tzz` becoming
+# `tzz_`); the menu made the user type the shared tail themselves, or take a whole
+# entry to get it. So the press that opens the list also advances the line to the
+# longest head every candidate starts with — `.zs` becomes `.zsh`, the list stands
+# under it, and the next press is the choosing press it always was.
+#
+# The head is computed over the forms that would be *written*, not the raw rows:
+# an entry a shell would split — `wombat book.txt` — is written quoted, and a
+# head cut from the quoted forms is the one string that is safe to leave in the
+# line when the user keeps typing instead of choosing. `womb` advances to
+# `wombat\ ` there, one shell word, every entry still extending it.
+#
+# Three refusals, each its own way of being wrong answered:
+#   * a word that is empty (the line ends in a space, or there is no line):
+#     nothing typed is nothing to extend, and the listing is the answer;
+#   * the loose list and the first-word menu, whose rows are whole lines laid
+#     over the whole span — a head written into the line would be written a
+#     second time by _tai_menu_commit, which replaces the span with the entire
+#     entry;
+#   * a head that does not reach past the word, or does not start with it: the
+#     first is no extension at all, and the second is a word the user did not
+#     type — `my doc` answered with the quoted `My\ Documents` head reads as
+#     two words where one was typed, so the list answers instead.
+#
+# The span moves with the text: _TAI_MENU_TO follows the head, the cursor lands
+# after it, and the layout runs again so the stem is cut against what the line
+# now shows and _TAI_MENU_LINE describes the line that is actually standing.
+# Committing an entry afterwards lays the whole entry over the span — the head
+# included — so nothing is written twice.
+_tai_menu_prefix() {
+  (( ${#_TAI_MENU} > 1 )) || return 1
+  (( _TAI_MENU_LOOSE || _TAI_MENU_WHOLE )) && return 1
+  local -i from=$_TAI_MENU_FROM to=$_TAI_MENU_TO k
+  # An empty word — the line ends in a space — has no span to extend.
+  (( from <= to )) || return 1
+  local -a forms
+  local c rest typed
+  forms=()
+  for (( k = 1; k <= ${#_TAI_MENU}; k++ )); do
+    c="${_TAI_MENU[k]}"
+    (( ${_TAI_MENU_Q[k]} )) && { _tai_quote "$c"; c="$_TAI_QUOTED" }
+    forms+=( "$c" )
+  done
+  # The longest head every written form starts with, found by shrinking the
+  # first form until the rest still begin with it — the same walk the stem
+  # makes over the raw rows.
+  rest="${forms[1]}"
+  for c in "${forms[@]}"; do
+    while [[ -n "$rest" && "$c" != "$rest"* ]]; do rest="${rest[1,-2]}"; done
+    [[ -n "$rest" ]] || break
+  done
+  [[ -n "$rest" ]] || return 1
+  typed="${BUFFER[from,to]}"
+  (( ${#rest} > ${#typed} )) || return 1
+  # Folded, like every lookup: `down` advances to `Downloads` when the disk
+  # says that is the word, and the case the candidates carry is the case the
+  # line takes — the same rule the commit below this one keeps.
+  [[ "${rest:l}" == "${typed:l}"* ]] || return 1
+  BUFFER="${BUFFER[1,$(( from - 1 ))]}$rest${BUFFER[$(( to + 1 )),-1]}"
+  CURSOR=${#BUFFER}
+  _TAI_MENU_TO=$(( from + ${#rest} - 1 ))
+  _tai_menu_layout "$rest"
+  return 0
 }
 
 # Put the selected entry where the word was, and close the menu. Nothing runs: the

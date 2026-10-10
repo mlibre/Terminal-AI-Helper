@@ -19,6 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from plugin_env import *  # noqa: F401,F403  (constants, fixture writers, setup)
 from plugin_pty import *  # noqa: F401,F403  (Session, check, probe, failures)
+from plugin_screen import menu_entries  # noqa: F401  (the drawn rows, split)
 
 UNITS_BIN = pathlib.Path("/tmp/tai/tai_units_bin")
 UNITS_CACHE = pathlib.Path("/tmp/tai/tai_units_cache")
@@ -79,6 +80,27 @@ def test_zsh_units() -> None:
           [u for u in ("herm.service", "sshd.service") if u in drawn],
           ["herm.service", "sshd.service"])
     check("zsh does not list files on a unit line", "tzz_a" in drawn, False)
+    s.write("\x15")
+
+    # The shared head is written before the list draws, on this vocabulary like
+    # on every other: `her` is answered by two units that agree up to `herm`,
+    # so the line takes `herm` and the list stands under it. Enter then lays
+    # the whole unit over the span the head fills — the `.service` written
+    # once, the head not doubled.
+    s.send("sudo systemctl restart her")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("the units menu writes the head both units share",
+          line, "sudo systemctl restart herm")
+    check("and still lists both units",
+          (menu_entries(drawn), size),
+          (["herm.service", "herm2.service"], 2))
+    s.write(ENTER)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("Enter takes a unit over the advanced line",
+          (line, size), ("sudo systemctl restart herm.service", 0))
     s.write("\x15")
 
     # A verb still being typed is not a unit argument: `resta` may yet grow into

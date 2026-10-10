@@ -272,7 +272,13 @@ tai-tab() {
 zle -N tai-tab
 
 # Tab opens the menu, and every Tab after that moves the selection one entry
-# along. The line is not touched: a menu is a way of looking, not of choosing.
+# along. The one thing the first press writes is the part every entry already
+# shares: `cat .zs` answered by `.zsh/` and `.zshrc` advances to `cat .zsh`
+# before the list draws, because two candidates that are the same word until
+# the `h` are a prefix the user should not have to type (see _tai_menu_prefix,
+# which refuses it where writing it would lie — an empty word, a whole-line
+# list, a head the typed word does not start with). After that the line stands:
+# a menu is a way of choosing, not of typing.
 #
 # When there is nothing to offer, the key goes back to zsh's own completion.
 # `docker` has nothing to complete *to*, because everything tai knows about it
@@ -319,6 +325,11 @@ tai-menu() {
     _tai_menu_commit
     return
   fi
+  # Several entries: the line takes what they all already say (the shared
+  # head — `.zsh` under `.zsh/` and `.zshrc`), and the list draws under it.
+  # _tai_menu_prefix refuses it where the line must not be written; the menu
+  # then behaves exactly as it did.
+  _tai_menu_prefix
   _tai_menu_paint
 }
 zle -N tai-menu

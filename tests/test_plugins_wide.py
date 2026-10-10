@@ -117,6 +117,17 @@ def test_wide_file_names_are_measured_in_columns() -> None:
             check(f"the mark moves to {names[step]}",
                   selected_entry(scr), names[step])
             _covers(scr, names[step], names[step + 1] if step + 1 < len(names) else None)
+        # The shared head, written in characters like everything else on this
+        # path: `wid` is answered by four names that agree up to `wide-`, the
+        # written forms of which diverge at the first escaped byte — the head
+        # is what they all still start with.
+        s.write("\x15")
+        s.send("cat wid")
+        s.write(TAB)
+        s.settle()
+        line, drawn, size, idx = s.menu(clear=False)
+        check("the head of double-width names is written", line, "cat wide-")
+        check("and all four names are still listed", size, len(names))
         check("no noise", s.noise(), [])
     finally:
         s.close()

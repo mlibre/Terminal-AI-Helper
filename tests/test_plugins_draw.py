@@ -156,7 +156,9 @@ def test_zsh_tab_and_list() -> None:
           (line, size), ("docker ps", 0))
 
     # The same key with no hint is the list, which is what every shell does
-    # for the word it is on.
+    # for the word it is on — readline's listing writes the shared head `tzz_`
+    # into the line, and so does the menu: the shells agree on the one thing
+    # every entry already says.
     s.send("tzz")
     check("with no hint there is nothing to take",
           s.suggestion().split(" PD=")[0], "SUG=[]")
@@ -165,7 +167,7 @@ def test_zsh_tab_and_list() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("no hint means Tab lists", menu_entries(drawn), MENU_ENTRIES)
-    check("leaving the line alone, as a menu must", line, "tzz")
+    check("leaving the line at the shared head", line, "tzz_")
     s.write("\x15")
 
     # Ctrl-Space lists *with* a hint on screen. This is the key the change
