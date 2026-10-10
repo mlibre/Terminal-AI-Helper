@@ -12,6 +12,7 @@ success, and that was a reported failure once already.
 import json
 import os
 import pathlib
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -297,6 +298,10 @@ def main() -> int:
     env = dict(env, HOME=str(pathlib.Path(env["TAI_DB"]).parent),
                TAI_DATA_DIR=str(pathlib.Path(env["TAI_DB"]).parent / "data"),
                BIN_DIR=str(pathlib.Path(env["TAI_DB"]).parent / "bin"))
+    # The world dir outlives the suite's own runs, and an uninstall check
+    # that starts among the last run's leftovers measures those, not the
+    # command. Every checkout this section builds, it takes back out.
+    shutil.rmtree(pathlib.Path(env["HOME"]) / ".tai", ignore_errors=True)
     r = run("uninstall", env=env)
     check("nothing installed is said plainly and succeeds",
           (r.returncode, r.stdout.strip()), (0, "tai was not installed"))

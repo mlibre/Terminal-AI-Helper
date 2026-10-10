@@ -207,3 +207,63 @@ finally:
     shutil.rmtree(pathlib.Path(staged).parent.parent.parent)
 assert code == 1 and "npm is not installed" in out.getvalue(), out.getvalue()
 print("OK — update: no npm is answered in one `which`, before anything runs.")
+
+# --- `tai uninstall` on the npm door -----------------------------------------
+#
+# An uninstall that left the package itself installed would be the wrapper's
+# complaint in reverse: the command gone, the files still on disk. The door is
+# named twice — by the wrapper's own content, and by where the running cli.py
+# lives — and either is enough, because each alone is true on a real machine.
+
+with tempfile.TemporaryDirectory() as root:
+    home = pathlib.Path(root) / "home"
+    tree = _stage_npm_tree(root)
+    fakebin = pathlib.Path(root) / "fakebin"
+    _fake_npm(str(fakebin), tree)
+    log = pathlib.Path(root) / "npm.log"
+    wrapper_dir = pathlib.Path(home) / "bin"
+    wrapper_dir.mkdir(parents=True)
+    # The wrapper the postinstall writes, naming the tree npm unpacked.
+    (wrapper_dir / "tai").write_text(
+        "#!/usr/bin/env bash\n"
+        f"exec python3 -S -E {tree}/tai/cli.py \"$@\"\n")
+    env = _sandbox_env(str(home), {
+        "PATH": f"{fakebin}:{os.environ['PATH']}", "NPM_LOG": str(log),
+        "BIN_DIR": str(wrapper_dir)})
+    # Run from the dev checkout — a git door by location — with the wrapper
+    # naming the npm tree: the wrapper's content is the door signal here.
+    done = subprocess.run([sys.executable, f"{REPO}/tai/cli.py", "uninstall"],
+                          env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert "rm -g terminal-ai-helper" in log.read_text(), log.read_text()
+    assert not (wrapper_dir / "tai").exists(), "the wrapper went"
+    assert "terminal-ai-helper (npm global package)" in done.stdout, done.stdout
+    print("OK — uninstall: a wrapper that names the npm tree asks npm for "
+          "the package back.")
+
+with tempfile.TemporaryDirectory() as root:
+    home = pathlib.Path(root) / "home"
+    tree = _stage_npm_tree(root)
+    fakebin = pathlib.Path(root) / "fakebin"
+    _fake_npm(str(fakebin), tree)
+    log = pathlib.Path(root) / "npm.log"
+    env = _sandbox_env(str(home), {
+        "PATH": f"{fakebin}:{os.environ['PATH']}", "NPM_LOG": str(log)})
+    # No wrapper at all — the npm package is the only thing left — and the
+    # process runs from the tree itself: _repo_dir is the door signal here,
+    # which is how a user reaches uninstall after deleting the wrapper.
+    done = subprocess.run([sys.executable, f"{tree}/tai/cli.py", "uninstall"],
+                          env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert "rm -g terminal-ai-helper" in log.read_text(), log.read_text()
+    assert "tai removed" in done.stdout and "tai was not installed" not in done.stdout
+    print("OK — uninstall from the npm tree itself removes the package too.")
+
+    # No npm on PATH any more: the rest of the uninstall stands, and the
+    # package is named with the command that removes it, not silently kept.
+    env["PATH"] = "/nonexistent"
+    done = subprocess.run([sys.executable, f"{tree}/tai/cli.py", "uninstall"],
+                          env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert "npm rm -g terminal-ai-helper" in done.stdout, done.stdout
+    print("OK — uninstall without npm says what removes the package.")

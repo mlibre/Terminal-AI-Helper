@@ -505,6 +505,7 @@ def cmd_eval_jev(a) -> int:
 
 def cmd_uninstall(a) -> int:
     import shutil
+    import subprocess
     from pathlib import Path
 
     from tai.paths import data_dir
@@ -519,7 +520,17 @@ def cmd_uninstall(a) -> int:
     # BIN_DIR is the one that gets removed.
     wrapper = Path(os.environ.get("BIN_DIR") or home / ".local" / "bin") / "tai"
     removed = []
+    npm_door = False
     if wrapper.exists() or wrapper.is_symlink():
+        # The wrapper names the checkout it execs, and that name is the door:
+        # a wrapper pointing into node_modules means the package itself is
+        # still installed, and the uninstall is not done until npm has it
+        # back. Read before unlink; a wrapper that cannot be read still goes.
+        try:
+            npm_door = ("node_modules/terminal-ai-helper"
+                        in wrapper.read_text(errors="replace"))
+        except OSError:
+            pass
         wrapper.unlink()
         removed.append(str(wrapper))
     if data.exists():
@@ -582,11 +593,30 @@ def cmd_uninstall(a) -> int:
             removed.append(str(checkout))
         else:
             left = checkout
+    # The npm door's code is npm's to remove, and the running tree says the
+    # same thing the wrapper did — this process may itself be executing from
+    # the package npm owns. Last, for the same reason the checkout is: the
+    # tree this command runs from can be the thing being removed.
+    npm_note = ""
+    if npm_door or _install_method(_repo_dir()) == "npm":
+        npm = shutil.which("npm")
+        if npm:
+            done = subprocess.run([npm, "rm", "-g", "terminal-ai-helper"],
+                                  capture_output=True, text=True)
+            if done.returncode == 0:
+                removed.append("terminal-ai-helper (npm global package)")
+            else:
+                npm_note = done.stderr.strip()
+        else:
+            npm_note = ("npm is not on PATH — the package is removed with: "
+                        "npm rm -g terminal-ai-helper")
     print("tai removed" if removed else "tai was not installed")
     for path in removed:
         print(f"  removed {path}")
     if left:
         print(f"  left {left} — not a tai checkout")
+    if npm_note:
+        print(f"  {npm_note}")
     return 0
 
 

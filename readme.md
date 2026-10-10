@@ -201,9 +201,9 @@ rc file.
 `tai update` stops rather than overwrite a copy you have edited yourself.
 `tai uninstall` removes the shell integration, the wrapper, the indexes, the
 SQLite history, the cached knowledge and the `~/.tai` checkout itself; a
-folder that is not a tai checkout is named and left alone. On an npm install,
-`npm rm -g terminal-ai-helper` removes the package itself. Restart the
-terminal afterwards.
+folder that is not a tai checkout is named and left alone. On an npm install
+it also runs `npm rm -g terminal-ai-helper` itself. Restart the terminal
+afterwards.
 
 ## Why it stays fast
 
