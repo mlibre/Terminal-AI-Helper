@@ -25,7 +25,7 @@ git <Ctrl-Space> <Enter>   git pull         ← یک مورد انتخاب شد�
 دوباره ضبطش کنید: `python3 scripts/make_demo_gif.py` (تنها وابستگی‌اش
 `pip install pyte pillow` است).
 
-[معماری](docs/architecture.md) · [توسعه](docs/development.md) · [English](readme.md)
+[معماری](docs/architecture.md) · [توسعه](docs/development.md) · [سایت مستندات](https://mlibre.github.io/Terminal-AI-Helper/) · [English](readme.md)
 
 ## نصب
 

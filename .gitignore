@@ -3,3 +3,6 @@ __pycache__/
 plugins/zsh/*.zwc
 .coverage
 .freebuff
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

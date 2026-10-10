@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mlibre.github.io/Terminal-AI-Helper/sitemap.xml

@@ -2,7 +2,7 @@
 
 Working on tai. For how it is built, read [architecture.md](architecture.md);
 for the rules that came out of reported failures, read
-[AGENTS.md](../AGENTS.md).
+[AGENTS.md](https://github.com/mlibre/Terminal-AI-Helper/blob/main/AGENTS.md).
 
 ## Layout
 
@@ -41,6 +41,10 @@ plugins/tai.bash    loader for the bash plugin: index, lookup, files, keys
 
 install.sh          wrapper, rc lines, plugin zcompile, autosuggestions pause
 scripts/build_deb.sh the .deb package CI attaches to every release
+docs/               the website: VitePress sources (config in docs/.vitepress/),
+                    built by .github/workflows/docs.yml onto GitHub Pages —
+                    npm run docs:build; the toolchain is package.json (vitepress
+                    only, dev-time, never on the product path)
 scripts/make_demo_gif.py the readme demo, re-recorded from a real zsh on a pty:
                     a scratch world, the four beats keystroke by keystroke, and
                     a GitHub-dark renderer with the keycap strip — `pip install
@@ -272,7 +276,7 @@ a `: ${_TAI_SPOOL_MAX:=8}` default asks about the wrong variable and silently
 ignores the environment.
 
 Measured shapes the keystroke path now relies on — each is a promise in
-[AGENTS.md](../AGENTS.md) whose letter a suite holds; a change here should
+[AGENTS.md](https://github.com/mlibre/Terminal-AI-Helper/blob/main/AGENTS.md) whose letter a suite holds; a change here should
 re-measure on a fixture big enough to feel:
 
 - **`_tai_lines` works in C-level parameter expansion** — one `(f)` split, one

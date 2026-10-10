@@ -1,7 +1,7 @@
 # Architecture
 
 How tai is put together, and why. For what the keys do, read
-[the readme](../readme.md); this is what happens underneath them.
+[usage.md](usage.md); this is what happens underneath them.
 
 ## The one-line shape
 
@@ -127,7 +127,7 @@ before — stay per-query: a snapshot cannot carry them, and the dashboard's
 
 Three rules are about what may be *ranked* rather than how, and they live in
 `tai/paths.py` because they are about whether a candidate still exists. Each
-is a promise in [AGENTS.md](../AGENTS.md) and a check in the suites: path
+is a promise in [AGENTS.md](https://github.com/mlibre/Terminal-AI-Helper/blob/main/AGENTS.md) and a check in the suites: path
 liveness (a command whose path is gone is not suggested; unknown never removes
 anything), `cd`
 destinations (`..`, `.`, `-` rank below every real destination, never removed),
@@ -156,7 +156,7 @@ exists it is worth a lot: `gh --help` yields no verbs to the parser and
 `gh __complete ""` yields all of them, each with a description.
 
 Anything read this way is a *convention*, and conventions rank below anything
-the history actually saw — a promise in [AGENTS.md](../AGENTS.md), asserted on
+the history actually saw — a promise in [AGENTS.md](https://github.com/mlibre/Terminal-AI-Helper/blob/main/AGENTS.md), asserted on
 real built scores in the suites.
 
 ## The optional model layer

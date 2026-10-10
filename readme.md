@@ -23,7 +23,7 @@ The demo is a recording of the real plugin on a real pty, not an animation —
 re-record it whenever the product moves: `python3 scripts/make_demo_gif.py`
 (its only dependencies are `pip install pyte pillow`).
 
-[Docs](docs/architecture.md) · [Development](docs/development.md) · [فارسی](readme-fa.md)
+[Docs](docs/architecture.md) · [Development](docs/development.md) · [Docs site](https://mlibre.github.io/Terminal-AI-Helper/) · [فارسی](readme-fa.md)
 
 ## Install
 
