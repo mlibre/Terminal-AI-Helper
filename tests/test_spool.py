@@ -145,6 +145,38 @@ def main() -> int:
     check("the record's own ts is kept",
           [r[5] for r in db_rows()[-2:]], [1700000030, 1700000005])
 
+    print("concurrent flushes: shells flushing at once lose nothing")
+    # The docstring's second fact, held executable: every flush rotates the
+    # spool into a rotation file of its own, so overlapping flushes each land
+    # the records they rotated and none is lost. A shared rotation name was a
+    # lost-record race — os.replace overwrites silently, so the flush that
+    # renamed second clobbered the file the first had rotated but not yet
+    # read, and CI caught it in the wild: two commands typed back-to-back,
+    # and the first was simply gone. Real processes, not threads: the race
+    # lives between a rename and an open across processes, which is exactly
+    # how the product's shells meet it — several terminals, each asking for a
+    # flush at once.
+    for round_no in range(4):
+        frames = [f"echo race-{round_no}-{i}" for i in range(16)]
+        for i, cmd in enumerate(frames):
+            spool_append(cmd, cwd="", exit_code=0,
+                         ts=1700000100 + round_no * 100 + i)
+        procs = [subprocess.Popen(
+            [sys.executable, "-S", "-E", "-c",
+             "import sys; sys.path.insert(0, '.'); "
+             "from tai.spool import drain; print(drain()[0])"],
+            stdout=subprocess.PIPE, env=dict(os.environ))
+            for _ in range(8)]
+        outs = [p.communicate()[0].decode().strip() for p in procs]
+        check(f"round {round_no}: every flush process exited clean",
+              [p.returncode for p in procs], [0] * len(procs))
+        check(f"round {round_no}: the ingested counts sum to the batch",
+              sum(int(o) if o.isdigit() else 0 for o in outs), len(frames))
+        stored = sorted(r[0] for r in db_rows()
+                        if r[0].startswith(f"echo race-{round_no}-"))
+        check(f"round {round_no}: every frame landed exactly once",
+              stored, sorted(frames))
+
     print("the CLI verbs")
     env = dict(os.environ)
     r = subprocess.run([sys.executable, "-S", "-E", "tai/cli.py", "flush"],

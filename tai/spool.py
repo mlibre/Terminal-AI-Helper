@@ -20,11 +20,13 @@ point, because a newline is exactly what makes `is_recordable` refuse the
 command later. Nothing is decided twice: the spool is transport, the store's
 filters stay the one gate between what was typed and what is learned.
 
-Two facts make concurrent shells safe. `os.replace` rotates the file before it
-is parsed, so a record appended mid-drain lands in the fresh spool and waits
-for the next flush instead of being torn; and a second flush that loses the
-rename race finds no file and returns zeroes. At worst two shells flush twice
-and one of those flushes is empty.
+Two facts make concurrent flushes safe. `os.replace` rotates the file before
+it is parsed, so a record appended mid-drain lands in the fresh spool and
+waits for the next flush instead of being torn; and every flush rotates into
+a file of its own (`.flushing.<pid>`), so overlapping flushes each take the
+records they rotated and never clobber another's take — the one that loses
+the rename race finds no spool left to rotate and returns zeroes. At worst
+two shells flush twice and one of those flushes is empty.
 """
 from __future__ import annotations
 
@@ -119,7 +121,14 @@ def drain() -> tuple[int, int, int, int]:
     global _BATCH
     _BATCH = []
     src = spool_path()
-    work = src + ".flushing"
+    # A rotation file of this flush's own, not a shared one: `os.replace`
+    # overwrites silently, so two flushes racing onto one path erased the
+    # first's take — whoever renamed second clobbered the file the first had
+    # rotated but not yet read, and those commands were never learned (caught
+    # in CI: two commands typed back-to-back, and the first was simply gone).
+    # A name that only this process owns turns an overlap into two takes that
+    # each land, exactly as the docstring above promises.
+    work = f"{src}.flushing.{os.getpid()}"
     try:
         os.replace(src, work)
     except OSError:

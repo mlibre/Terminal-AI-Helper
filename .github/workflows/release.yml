@@ -28,7 +28,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y zsh
 
       - name: Run all test suites
-        run: ./test.sh
+        run: tests/test.sh
 
       - name: Build the .deb package
         run: scripts/build_deb.sh
