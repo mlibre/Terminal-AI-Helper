@@ -534,9 +534,21 @@ _tai_word_re() {
 # `forest`; a three-letter witness matches half a history, and a match that
 # wide says nothing.
 _tai_word_variants_re() {
-  local w="$1" re="" v c esc
+  local w="$1" re="" v c esc ge=""
   local -i i j
   local -A seen
+  # The word itself, escaped once, opens both outputs: the regex alternation
+  # is the tier's own second test, and the glob alternation is the necessary
+  # condition the filter before the loop reads — see the pass below.
+  for (( j = 1; j <= ${#w}; j++ )); do
+    c="${w[j]}"
+    case "$c" in
+      [a-z0-9_-]) ;;
+      *) c="\\$c" ;;
+    esac
+    esc+="$c"
+  done
+  re="$esc"; ge="$esc"
   for (( i = 1; i <= ${#w}; i++ )); do
     v="${w[1,i-1]}${w[i+1,-1]}"
     [[ -n "$v" && ${#v} -ge 4 && -z "${seen[$v]}" ]] || continue
@@ -552,6 +564,38 @@ _tai_word_variants_re() {
     done
     [[ -n "$re" ]] && re+="|"
     re+="$esc"
+    ge+="|$esc"
+  done
+  _TAI_RE_OUT="$re"
+  # The same list as a glob alternation — parenthesised, because a glob's `|`
+  # means alternation only inside them — and it is what a line must hold to
+  # have any chance with the tier at all: the word, or one of its one-edit
+  # spellings, as plain text. Backslash escaping means the same thing in a
+  # glob as in a regex alternation of literals, so one enumeration serves
+  # both.
+  _TAI_GLOB_OUT="($ge)"
+}
+
+# The gap tier's necessary condition, as one glob: every letter of the word,
+# in order, with anything allowed between. A line the gap matcher accepts
+# holds every letter in order — the gaps only bound how far apart they may
+# sit — and a line holding the word verbatim holds its letters in order too,
+# so the filter is necessary for both of the tier's branches and the answers
+# are unchanged. It is what lets the tier's loop meet the handful of lines
+# that can possibly match instead of the whole history: measured on a
+# 2,611-line index, one dead word cost ~200ms of loops, and the filters
+# below are what bring the loops down to their survivors.
+_tai_word_order_glob() {
+  local w="$1" re="" c
+  local -i i
+  for (( i = 1; i <= ${#w}; i++ )); do
+    c="${w[i]}"
+    case "$c" in
+      [a-z0-9_-]) ;;
+      *) c="\\$c" ;;
+    esac
+    re+="$c"
+    [[ $i -lt ${#w} ]] && re+="*"
   done
   _TAI_RE_OUT="$re"
 }
@@ -694,12 +738,34 @@ _tai_loose() {
   # one deletion away. One regex per word, hot in zsh's compile cache because
   # the pass runs it alone.
   if (( want_b && n_exact == 0 && ${#scan_ll[@]} > 0 )); then
+    local -a rxs_g cand_l
+    rxs_g=()
     for (( k = 1; k <= ${#want}; k++ )); do
-      [[ "${rxs_b[k]}" == "?" ]] || continue
-      _tai_word_variants_re "${want[k]}"
-      rxs_b[k]="$_TAI_RE_OUT"
+      w=${want[k]}
+      if [[ "${rxs_b[k]}" == "?" ]]; then
+        _tai_word_variants_re "$w"
+        rxs_b[k]="$_TAI_RE_OUT"
+        rxs_g[k]="$_TAI_GLOB_OUT"
+      else
+        rxs_g[k]="${(b)w}"
+      fi
     done
-    for ll in "${scan_ll[@]}"; do
+    # The loop below is the tier's law — the length guard, the verbatim test,
+    # the regex of one-edit spellings — and it used to walk every learned
+    # line to apply it, twice per word, which is where a dead word paid most
+    # of its ~200ms. What the loop can accept is bounded in advance: a line
+    # must hold the word or one of its one-edit spellings as plain text, and
+    # that is one alternation glob per word, filtered C-level, over the whole
+    # set. The loop keeps its exact rules and reads its survivors; the
+    # answers are the same, because every line the filter drops holds neither
+    # the word nor any spelling of it and the loop could only have rejected
+    # those too.
+    cand_l=( "${scan_ll[@]}" )
+    for (( k = 1; k <= ${#want}; k++ )); do
+      (( ${#cand_l[@]} )) || break
+      cand_l=( "${(@M)cand_l:#*${~rxs_g[k]}*}" )
+    done
+    for ll in "${cand_l[@]}"; do
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
         w=$want[k]; rxb=$rxs_b[k]
@@ -708,15 +774,13 @@ _tai_loose() {
         [[ -n "$rxb" && "$ll" =~ $rxb ]] && continue
         ok=0; break
       done
-      if (( ok )); then
-        var_lw+=( "$ll" )
-      else
-        rest3+=( "$ll" )
-      fi
+      (( ok )) && var_lw+=( "$ll" )
     done
-  else
-    rest3=( "${scan_ll[@]}" )
   fi
+  # Everything the one-edit tier did not accept is what the gap tier reads —
+  # one array subtraction, the same set the old loop built as it rejected,
+  # and the whole set when the tier never ran or accepted nothing.
+  rest3=( "${(@)scan_ll:|var_lw}" )
   # Pass three — the bounded-gap tier. It only speaks when nothing else did:
   # a line the verbatim or one-edit tier answered is the answer, and lines of
   # letters-scattered arithmetic under it were the junk this tier existed to
@@ -727,7 +791,20 @@ _tai_loose() {
     typeset -gA _TAI_LOOSE_CLAIMED
     _TAI_LOOSE_CLAIMED=()
     for ll in "${exact_lw[@]}"; do _TAI_LOOSE_CLAIMED[$ll]=1; done
-    for ll in "${rest3[@]}"; do
+    # The same rule the one-edit tier got, with the condition this tier's own
+    # matcher implies: a line the gap matcher accepts holds every letter of
+    # every word in order, so the letters-in-order glob per word is one
+    # C-level filter that hands the loop below the lines that can possibly
+    # match. Measured, the loop over the whole history was the rest of a dead
+    # word's cost; over the survivors it is the tail of a millisecond.
+    local -a gap_l
+    gap_l=( "${rest3[@]}" )
+    for (( k = 1; k <= ${#want}; k++ )); do
+      (( ${#gap_l[@]} )) || break
+      _tai_word_order_glob "${want[k]}"
+      gap_l=( "${(@M)gap_l:#*${~_TAI_RE_OUT}*}" )
+    done
+    for ll in "${gap_l[@]}"; do
       [[ -z "${_TAI_LOOSE_CLAIMED[$ll]:-}" ]] || continue
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
