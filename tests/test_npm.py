@@ -158,11 +158,13 @@ with tempfile.TemporaryDirectory() as root:
         "PATH": f"{fakebin}:{os.environ['PATH']}", "NPM_LOG": str(log)})
 
     # The version changed and nothing is configured — the --ignore-scripts
-    # world. The update goes to npm, and the installer runs from the new tree
-    # so the user still ends up with the wrapper, the rc lines and one welcome.
+    # or blocked-scripts world. The update goes to npm, and the installer
+    # runs from the new tree so the user still ends up with the wrapper,
+    # the rc lines and one welcome.
     done = _run_update(tree, env)
     assert done.returncode == 0, done.stderr
-    assert "npm argv: install -g terminal-ai-helper@latest" in log.read_text()
+    assert ("npm argv: install -g terminal-ai-helper@latest"
+            " --allow-scripts=terminal-ai-helper") in log.read_text()
     assert "✓ updated to" in done.stdout, done.stdout
     assert done.stdout.count("the terminal that knows your next command") == 1
     assert f"{tree}/tai/cli.py" in (home / "bin" / "tai").read_text()
@@ -174,7 +176,8 @@ with tempfile.TemporaryDirectory() as root:
     log.write_text("")
     done = _run_update(tree, env)
     assert done.returncode == 0, done.stderr
-    assert "npm argv: install -g terminal-ai-helper@latest" in log.read_text()
+    assert ("npm argv: install -g terminal-ai-helper@latest"
+            " --allow-scripts=terminal-ai-helper") in log.read_text()
     assert "✓ updated to" in done.stdout, done.stdout
     assert done.stdout.count("the terminal that knows your next command") == 0
     print("OK — update from an npm tree: npm answers, "

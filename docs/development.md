@@ -41,8 +41,8 @@ plugins/tai.zsh     loader for the zsh plugin: index, lookup, files, units, menu
 plugins/tai.bash    loader for the bash plugin: index, lookup, files, units, keys
 
 bin/npm-postinstall npm's postinstall hook: a global install runs install.sh from
-                    the unpacked package, so `npm i -g` is the whole install
-                    (TAI_SKIP_POSTINSTALL=1 opts out)
+                    the unpacked package, so `npm i -g` with scripts allowed
+                    is the whole install (TAI_SKIP_POSTINSTALL=1 opts out)
 install.sh          wrapper, rc lines, plugin zcompile, autosuggestions pause
 scripts/build_deb.sh the .deb package CI attaches to every release
 docs/               the website: VitePress sources (config in docs/.vitepress/),

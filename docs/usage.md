@@ -9,9 +9,10 @@ what happens underneath, read [architecture.md](architecture.md).
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-npm is a door to the same install: `npm i -g terminal-ai-helper` unpacks the
-same files and runs the same installer itself, and `tai update` knows an npm
-install and updates it from the registry.
+npm is a door to the same install: `npm i -g terminal-ai-helper@latest
+--allow-scripts=terminal-ai-helper` unpacks the same files and runs the same
+installer itself, and `tai update` knows an npm install and updates it from
+the registry.
 
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
 again later and it updates in place. It enables both shells, imports your

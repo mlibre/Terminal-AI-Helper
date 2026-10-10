@@ -23,15 +23,20 @@ cd D<Tab>          Desktop/  Documents/  Downloads/
 
 [معماری](docs/architecture.md) · [توسعه](docs/development.md) · [سایت مستندات](https://mlibre.github.io/Terminal-AI-Helper/) · [English](readme.md)
 
-## نصب
+## نصب یا به‌روزرسانی
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-با npm هم به همان نصب می‌رسید: `npm i -g terminal-ai-helper` همان فایل‌ها را
-باز می‌کند و خود نصب‌کننده را اجرا می‌کند، و `tai update` نصبِ npm را می‌شناسد
-و از مخزن npm به‌روزش می‌کند.
+یا با npm
+
+```sh
+npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
+```
+
+پرچم از آنِ npm است: نسخه‌های تازه‌ی npm اسکریپت‌های نصب را به‌پیش‌فرض مسدود
+می‌کنند و بدون آن بسته فقط باز می‌شود — نه فرمان `tai`، نه خط‌های rc.
 
 این فرمان TAI را در `~/.tai` دانلود می‌کند و نصب‌کننده را از همان‌جا اجرا
 می‌کند؛ اجرای دوباره‌اش بعداً در‌جا به‌روز می‌کند. برای هر دو پوسته فعال،

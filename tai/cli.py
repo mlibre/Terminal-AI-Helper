@@ -210,6 +210,9 @@ def _update_npm(repo: "Path") -> int:
     postinstall hook finishes the reinstall from the new tree unless scripts
     were skipped (--ignore-scripts) or it failed, in which case the installer
     runs here instead: idempotent, and the same report as every other door.
+    The allow-scripts flag rides along because npm's newer vintages block
+    install scripts by default — the same gate the readme's install line
+    opens — and a blocked hook would leave a replaced tree nobody wired.
     """
     import shutil
     import subprocess
@@ -217,10 +220,11 @@ def _update_npm(repo: "Path") -> int:
     npm = shutil.which("npm")
     if not npm:
         print("tai: npm is not installed, so there is nothing to update from")
-        print("     reinstall with: npm i -g terminal-ai-helper@latest")
+        print("     reinstall with: npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper")
         return 1
     before = _read_version()
-    pulled = subprocess.run([npm, "install", "-g", "terminal-ai-helper@latest"])
+    pulled = subprocess.run([npm, "install", "-g", "terminal-ai-helper@latest",
+                             "--allow-scripts=terminal-ai-helper"])
     if pulled.returncode != 0:
         print("tai: npm install failed — the previous version is still installed")
         return 1

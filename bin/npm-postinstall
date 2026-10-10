@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # npm's postinstall hook: a global install of the published package finishes
-# the job itself, so `npm i -g terminal-ai-helper` is the whole install — the
-# same steps, the same welcome, the same report as the other two doors.
+# the job itself, so `npm i -g terminal-ai-helper --allow-scripts=terminal-ai-helper`
+# is the whole install — the same steps, the same welcome, the same report
+# as the other two doors.
 #
 # Two guards stand before the installer:
 #   * only a *global* install reaches it. npm hands every script the config as

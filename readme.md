@@ -30,8 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 Or using npm
 
 ```sh
-npm i -g terminal-ai-helper@latest
+npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
 ```
+
+The flag is npm's: newer npm blocks install scripts by default, and without
+it the package unpacks and nothing is wired — no `tai` command, no rc lines.
 
 ## Commands
 
