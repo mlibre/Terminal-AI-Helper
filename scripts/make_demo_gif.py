@@ -400,7 +400,7 @@ def chrome() -> "Image.Image":
         x = MARGIN + DOT_OFF + i * DOT_GAP
         d.ellipse([x - DOT_R, DOT_Y - DOT_R, x + DOT_R, DOT_Y + DOT_R],
                   fill=col)
-    title = "tai — zsh"
+    title = "TAI — zsh"
     tw = d.textlength(title, font=ui_r)
     d.text(((W - tw) // 2, MARGIN + (TITLE_H - ui_r.size - 4) // 2), title,
            font=ui_r, fill=TITLE_FG)

@@ -27,10 +27,10 @@ answered by the habit it shadows](assets/demo.gif)
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-The line fetches the checkout to `~/.tai` and runs the same installer from
-it; run it again later and it updates that checkout in place. It enables
-both shells, imports your history, and builds the first index — progress, a
-short welcome, and one command to copy:
+The line downloads TAI to `~/.tai` and runs the installer from there; run it
+again later and it updates TAI in place. It enables both shells, imports
+your history, and builds the first index — progress, a short welcome, and
+one command to copy:
 
 ```text
 → cloning tai to /home/you/.tai…
@@ -53,8 +53,8 @@ short welcome, and one command to copy:
 → exec zsh
 ```
 
-That last line matters: a running shell keeps its old plugin until it is
-sourced again — same after `tai update`.
+That last line matters: a terminal that is already open keeps the old
+version until you open a new one — same after `tai update`.
 
 ## Your first minute
 
@@ -230,19 +230,19 @@ release. The .deb puts `tai` on `PATH` and the plugins under `/usr/lib/tai`;
 its postinst prints the two `source` lines to add to your rc file.
 
 ```sh
-tai update      # git pull --ff-only from GitHub, then reinstall; alias: tai upgrade
+tai update      # newest version from GitHub, then reinstall; alias: tai upgrade
 ```
 
-No merge commit, stops with git's own message on local edits; nothing lives
-outside the checkout, so there is no second copy to sync.
+It stops rather than overwrite a copy you have edited yourself — and
+everything lives in `~/.tai`, so there is no second copy to clean up.
 
 ```sh
 tai uninstall
 ```
 
 Removes the shell integration, the `tai` wrapper, the generated indexes, the
-SQLite history and the cached CLI knowledge. Your checkout stays; restart the
-terminal afterwards.
+SQLite history and the cached CLI knowledge. The `~/.tai` folder stays;
+restart the terminal afterwards.
 
 ## Why it stays fast
 

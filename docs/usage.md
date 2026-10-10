@@ -9,10 +9,10 @@ what happens underneath, read [architecture.md](architecture.md).
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-The line fetches the checkout to `~/.tai` and runs the same installer from
-it; run it again later and it updates that checkout in place. It enables
-both shells, imports your history, and builds the first index — progress, a
-short welcome, and one command to copy:
+The line downloads TAI to `~/.tai` and runs the installer from there; run it
+again later and it updates TAI in place. It enables both shells, imports
+your history, and builds the first index — progress, a short welcome, and
+one command to copy:
 
 ```text
 → cloning tai to /home/you/.tai…
@@ -35,9 +35,9 @@ short welcome, and one command to copy:
 → exec zsh
 ```
 
-That last line matters: a running shell keeps its old plugin until it is
-sourced again — same after `tai update`. A ready-to-install `.deb` is attached
-to every GitHub release.
+That last line matters: a terminal that is already open keeps the old
+version until you open a new one — same after `tai update`. A ready-to-install
+`.deb` is attached to every GitHub release.
 
 ## Your first minute
 
