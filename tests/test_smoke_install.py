@@ -301,10 +301,27 @@ with tempfile.TemporaryDirectory() as fake_home:
     done = _install(fake_home)
     assert done.returncode == 0, done.stderr
     lines = [line for line in done.stdout.splitlines() if line.strip()]
-    # One progress line while history is imported, then the whole report. The
-    # parent of install.sh here is this test, so the reload line is the generic
-    # one — the same output a user in fish, or in a terminal multiplexer, gets.
-    assert lines[1:] == ["✓ zsh installed", "✓ bash installed", "→ exec $SHELL"], lines
+    # One progress line while history is imported, then the whole report: the
+    # two ✓ lines, the welcome — what tai is, the three things worth knowing,
+    # the keys, one thing to try — and the one command that makes the shell
+    # they are sitting in pick them up. The parent of install.sh here is this
+    # test, so the reload line is the generic one — the same output a user in
+    # fish, or in a terminal multiplexer, gets.
+    assert lines[1:] == [
+        "✓ zsh installed",
+        "✓ bash installed",
+        "   _",
+        "  | |_  __ _ ___     the terminal that knows your next command",
+        "  | ' \\/ _` (_-<",
+        "  |_||_\\__,_/__/",
+        "  1. Type a few letters — tai finishes the command in grey. → takes it.",
+        "  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.",
+        "  3. It learns from your history — offline, private, no account.",
+        "  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list",
+        "             Down peeks at what usually follows",
+        '  Try it now: type "cd " and watch the grey.',
+        "→ exec $SHELL",
+    ], lines
     assert done.stderr == "", done.stderr
     # A ✓ is a claim about an rc file, so it has to be true.
     for rc, plugin in ((".zshrc", "tai.zsh"), (".bashrc", "tai.bash")):
@@ -363,6 +380,67 @@ with tempfile.TemporaryDirectory() as fake_home:
     assert "→ exec" not in neither.stdout, neither.stdout
     assert "! bash: could not update" in neither.stderr, neither.stderr
 print("OK — install: two lines and one command, and no ✓ it cannot back up.")
+
+# The one line the readme leads with: curl's output piped into bash. stdin is
+# the installer, $0 is bash itself, and BASH_SOURCE names no file — the piped
+# door this script must open for itself: clone the checkout, then execute the
+# cloned copy so both doors run the same steps. The remote here is the repo
+# itself, so the test needs no network, and TAI_DIR lands the checkout in the
+# sandbox HOME exactly where the real one lands in ~/.tai.
+def _install_piped(home: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
+    env = _install_env(home)
+    env.update(extra_env or {})
+    with open(f"{REPO}/install.sh", "rb") as script:
+        return subprocess.run(["bash"], stdin=script, env=env,
+                              capture_output=True, text=True, timeout=180)
+
+
+# A remote of the *worktree*: `git clone` takes HEAD, and HEAD does not carry
+# what this test just piped until it is committed — the suite has to pass
+# before that, so the remote is the working tree itself, junk ignored, one
+# throwaway commit with an identity of its own.
+_piped_remote_tmp = tempfile.TemporaryDirectory()
+_piped_remote = f"{_piped_remote_tmp.name}/repo"
+subprocess.run(["git", "init", "-q", "-b", "main", _piped_remote], check=True)
+shutil.copytree(REPO, _piped_remote, dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(".git", "*.zwc", "__pycache__",
+                                              "node_modules", "dist"))
+subprocess.run(["git", "-C", _piped_remote, "add", "-A"], check=True)
+subprocess.run(["git", "-C", _piped_remote, "-c", "user.email=tai@test",
+                "-c", "user.name=tai", "commit", "-qm", "the worktree, tested"],
+               check=True)
+remote = f"file://{_piped_remote}"
+
+with tempfile.TemporaryDirectory() as piped_home:
+    tai_dir = f"{piped_home}/.tai"
+    done = _install_piped(piped_home, {"TAI_REMOTE": remote,
+                                       "TAI_DIR": tai_dir})
+    assert done.returncode == 0, done.stderr
+    assert "→ cloning tai to" in done.stdout, done.stdout
+    checkout = pathlib.Path(tai_dir)
+    assert (checkout / ".git").is_dir() and (checkout / "install.sh").exists()
+    # The cloned installer's report is the checkout installer's report — the
+    # same ✓ lines, the same welcome, because it is the same script.
+    assert "✓ zsh installed" in done.stdout and "✓ bash installed" in done.stdout, done.stdout
+    assert "the terminal that knows your next command" in done.stdout, done.stdout
+    rc = (pathlib.Path(piped_home) / ".zshrc").read_text()
+    assert f"source {checkout}/plugins/tai.zsh" in rc, rc
+    assert (pathlib.Path(piped_home) / "bin" / "tai").exists(), "the wrapper went with it"
+
+    # A second piped run updates the checkout in place — the one-liner is the
+    # update path too, which is what makes `tai update` and the pipe agree on
+    # where the code lives.
+    again = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": tai_dir})
+    assert again.returncode == 0, again.stderr
+    assert "→ updating the checkout at" in again.stdout, again.stdout
+
+    # A directory that is there but is not a checkout is named, never clobbered.
+    occupied = pathlib.Path(piped_home) / "occupied"
+    occupied.mkdir()
+    blocked = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": str(occupied)})
+    assert blocked.returncode == 1, blocked.stdout
+    assert "not a tai checkout" in blocked.stderr, blocked.stderr
+print("OK — the one-line install: clones, installs, updates, and asks before overwriting.")
 
 # Everything below speaks to a real zsh: the pause is install.sh editing a
 # zshrc, which it only does when zsh itself is present, and the errexit checks

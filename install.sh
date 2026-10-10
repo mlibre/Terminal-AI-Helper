@@ -1,7 +1,40 @@
 #!/usr/bin/env bash
 # tai installer — Linux, stdlib python only, <30 seconds.
+#
+# Two doors, one install: from a checkout (./install.sh), or the one line the
+# readme leads with —
+#   curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+# — where curl's output reaches bash on stdin and the repository has to be
+# fetched before anything below can run. The piped door clones to ~/.tai
+# (TAI_DIR moves it; TAI_REMOTE points it at a fork) and then executes the
+# cloned copy of this very script, so both doors run the same steps from a
+# real checkout and there is exactly one installer to read.
 set -euo pipefail
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+  TAI_REMOTE="${TAI_REMOTE:-https://github.com/mlibre/Terminal-AI-Helper}"
+  TAI_DIR="${TAI_DIR:-$HOME/.tai}"
+  command -v git >/dev/null 2>&1 || {
+    echo "tai: the one-line install needs git — install it, or clone the repo and run ./install.sh" >&2
+    exit 1
+  }
+  if [ -d "$TAI_DIR/.git" ]; then
+    # The one-liner is also the update path: an existing checkout is pulled
+    # forward and reinstalled, never cloned over. A pull that cannot happen
+    # (diverged, offline) fails here, loudly, rather than installing old code.
+    echo "→ updating the checkout at $TAI_DIR…"
+    git -C "$TAI_DIR" pull --ff-only --quiet
+  elif [ -e "$TAI_DIR" ]; then
+    echo "tai: $TAI_DIR exists and is not a tai checkout — remove it or set TAI_DIR" >&2
+    exit 1
+  else
+    echo "→ cloning tai to $TAI_DIR…"
+    git clone --depth 1 "$TAI_REMOTE" "$TAI_DIR"
+  fi
+  exec bash "$TAI_DIR/install.sh"
+fi
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 printf -v TAI_CLI_PATH '%q' "$REPO_DIR/tai/cli.py"
 mkdir -p "$BIN_DIR" "${XDG_DATA_HOME:-$HOME/.local/share}/tai"
@@ -184,7 +217,30 @@ _tai_pause_autosuggest "$HOME/.zshrc" &&
 # running this installer needs to know the install did not land.
 (( _TAI_ENABLED )) || exit 1
 
-echo ""
+# The welcome. The installer's report so far is bookkeeping — which rc file,
+# which plugin — and this is the part a new user actually reads: what tai is,
+# the three things worth knowing, the keys that matter, and one thing to try.
+# It stays plain text so it reads the same everywhere the installer runs,
+# piped terminal included.
+_tai_welcome() {
+  cat <<'EOF'
+   _
+  | |_  __ _ ___     the terminal that knows your next command
+  | ' \/ _` (_-<
+  |_||_\__,_/__/
+
+  1. Type a few letters — tai finishes the command in grey. → takes it.
+  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
+  3. It learns from your history — offline, private, no account.
+
+  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list
+             Down peeks at what usually follows
+
+  Try it now: type "cd " and watch the grey.
+EOF
+}
+_tai_welcome
+
 # The installer is a child process, so it cannot reconfigure the shell that
 # launched it. It can, however, say which shell has to be replaced — an
 # already-loaded plugin cannot pick up an edited file, because the old function

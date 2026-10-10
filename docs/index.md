@@ -40,9 +40,10 @@ features:
 <div class="install-quick">
 
 ```sh
-git clone https://github.com/mlibre/terminal-ai-helper
-cd terminal-ai-helper
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+# or, from a checkout:
+#   git clone https://github.com/mlibre/terminal-ai-helper
+#   cd terminal-ai-helper && ./install.sh
 ```
 
 </div>

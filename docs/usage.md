@@ -5,6 +5,16 @@ what happens underneath, read [architecture.md](architecture.md).
 
 ## Install
 
+One line — no manual clone. It fetches the checkout to `~/.tai` and runs the
+same installer from it; run it again later and it updates that checkout in
+place:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+```
+
+Prefer to see the code first? The identical installer runs from any clone:
+
 ```sh
 git clone https://github.com/mlibre/terminal-ai-helper
 cd terminal-ai-helper
@@ -12,12 +22,15 @@ cd terminal-ai-helper
 ```
 
 The installer enables both shells, imports your history, and builds the first
-index — one progress line and one command to copy:
+index — progress, a short welcome, and one command to copy:
 
 ```text
-→ learning from your history, building the index…
+→ cloning tai to /home/you/.tai…
 ✓ zsh installed
 ✓ bash installed
+   _
+  | |_  __ _ ___     the terminal that knows your next command
+  … the three things worth knowing, and the keys
 
 → exec zsh
 ```

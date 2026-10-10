@@ -29,6 +29,17 @@ git <Ctrl-Space> <Enter>   git pull         ← یک مورد انتخاب شد�
 
 ## نصب
 
+یک خط — بدون کلون دستی. این فرمان مخزن را در `~/.tai` می‌گیرد و همان
+نصب‌کننده را از آن اجرا می‌کند؛ اجرای دوباره‌اش بعداً همان مخزن را در‌جا
+به‌روز می‌کند:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
+```
+
+اگر ترجیح می‌دهید اول کد را ببینید، همان نصب‌کننده از روی هر کلونی هم همین‌طور
+کار می‌کند:
+
 ```sh
 git clone https://github.com/mlibre/terminal-ai-helper
 cd terminal-ai-helper
@@ -36,12 +47,17 @@ cd terminal-ai-helper
 ```
 
 نصب‌کننده برای هر دو پوسته افزونه را فعال، تاریخچه‌ی موجودتان را وارد و
-نمایه را می‌سازد — یک خط پیشرفت و یک فرمان برای کپی:
+نمایه را می‌سازد — پیشرفت، یک خوش‌آمد کوتاه، و یک فرمان برای کپی:
 
 ```text
-→ learning from your history, building the index…
+→ cloning tai to /home/you/.tai…
 ✓ zsh installed
 ✓ bash installed
+   _
+  | |_  __ _ ___     the terminal that knows your next command
+  | ' \/ _` (_-<
+  |_||_\__,_/__/
+  … سه نکته‌ی اصلی و کلیدها
 
 → exec zsh
 ```
