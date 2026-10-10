@@ -61,11 +61,15 @@ _tai_first_values() {
   lo=0; hi=${#_TAI_FIRST_KEYS[@]}
   while (( lo < hi )); do
     mid=$(( (lo + hi) / 2 ))
-    if [[ "${_TAI_FIRST_KEYS[mid]}" < "$word" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
+    # Lowered on both sides, against the case-insensitive key order
+    # _tai_first_keys built (LC_ALL=C sort -f): the keys that begin with the
+    # word under any case are one contiguous run, and this search finds its
+    # head. Plain ASCII order would hide the run behind the capitals.
+    if [[ "${_TAI_FIRST_KEYS[mid],,}" < "${word,,}" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
   done
   while (( lo < ${#_TAI_FIRST_KEYS[@]} )); do
     k="${_TAI_FIRST_KEYS[lo]}"
-    [[ "$k" == "$word"* ]] || break
+    [[ "${k,,}" == "${word,,}"* ]] || break
     v="${_TAI_FIRST[$k]}"
     while [[ -n "$v" ]]; do
       head="${v%%$'\n'*}"
@@ -108,16 +112,17 @@ _tai_first_lines() {
   [[ -n "$word" && "$word" != *[\*\?\[]* ]] || return 1
   local -a merged=()
   # The keys were sorted once, at load; the ones beginning with the word are
-  # the same contiguous run the half-typed lookup binary-searches for.
+  # the same contiguous run the half-typed lookup binary-searches for — found
+  # the same lowered way, so `LS` and `ls` type into the same run.
   _tai_first_keys
   lo=0; hi=${#_TAI_FIRST_KEYS[@]}
   while (( lo < hi )); do
     mid=$(( (lo + hi) / 2 ))
-    if [[ "${_TAI_FIRST_KEYS[mid]}" < "$word" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
+    if [[ "${_TAI_FIRST_KEYS[mid],,}" < "${word,,}" ]]; then lo=$(( mid + 1 )); else hi=$mid; fi
   done
   while (( lo < ${#_TAI_FIRST_KEYS[@]} )); do
     k="${_TAI_FIRST_KEYS[lo]}"
-    [[ "$k" == "$word"* ]] || break
+    [[ "${k,,}" == "${word,,}"* ]] || break
     v="${_TAI_FIRST[$k]}"
     for (( d = 0; d < _TAI_FIRST_LINES_DEPTH; d++ )); do
       line="${v%%$'\n'*}"
@@ -155,10 +160,13 @@ _TAI_VALUES_ONE=0
 # every ordinary keystroke past a complete command name, and on a real index it
 # replaces a walk over 2,600 lines with two or three tests.
 _tai_best() {
-  local values="$1" prefix="$2" best="" best_score=-1 c s
+  local values="$1" prefix="$2" best="" best_score=-1 c s cl pl="${2,,}"
+  # The extends-the-line and echo tests are case-insensitive — the lookup that
+  # filled `values` is, and the two have to agree about what extends what.
   if [[ "${_TAI_VALUES_ONE:-0}" == "1" ]]; then
     while IFS= read -r c; do
-      [[ -n "$c" && "$c" == "$prefix"* && "$c" != "$prefix" ]] || continue
+      cl="${c,,}"
+      [[ -n "$c" && "$cl" == "$pl"* && "$c" != "$prefix" ]] || continue
       # The store refuses control bytes at record time, but this shell sources
       # what it finds, and a byte that slips through is an escape sequence on
       # someone's terminal.
@@ -170,7 +178,8 @@ _tai_best() {
     return 0
   fi
   while IFS= read -r c; do
-    [[ -z "$c" || "$c" == "$prefix" || "$c" != "$prefix"* ]] && continue
+    cl="${c,,}"
+    [[ -z "$c" || "$c" == "$prefix" || "$cl" != "$pl"* ]] && continue
     # A stored command whose text holds a raw control byte is unpaintable as
     # ghost text: the byte goes to the terminal as an escape sequence. The
     # store refuses at record time now, but this shell sources what it finds.
@@ -279,7 +288,24 @@ _tai_query() {
     # a line of nothing but spaces never reaches either branch.
     if [[ "$word" == *" "* ]]; then
       values="${_TAI_WORD[$word]:-}"
-      _TAI_VALUES_ONE=1
+      if [[ -n "$values" ]]; then
+        _TAI_VALUES_ONE=1
+      else
+        # Exact miss: the keys that begin with the word, case-insensitively —
+        # `LS -l` typed reaches the `ls -l` key. A linear walk, because the
+        # binary search's case-folded order is built for _TAI_FIRST only; but
+        # it runs on the miss, where the answer was nothing anyway, and stops
+        # at the same cap the half-typed scan answers under. One head per key,
+        # the shape _tai_best ranks.
+        _TAI_VALUES_ONE=0
+        local wk n=0 wl="${word,,}"
+        for wk in "${!_TAI_WORD[@]}"; do
+          [[ "${wk,,}" == "$wl"* ]] || continue
+          values+="${_TAI_WORD[$wk]%%$'\n'*}"$'\n'
+          (( ++n >= _TAI_PREFIX_KEYS )) && break
+        done
+        values="${values%$'\n'}"
+      fi
     else
       _tai_first_values "$word"
       values="$_TAI_VALUES"

@@ -10,6 +10,15 @@ from pathlib import Path
 
 from tai.paths import enabled as paths_enabled
 
+# The longest command worth learning. A paste — a curl with its headers and
+# cookies, a heredoc — is not vocabulary: it is never retyped from memory, and
+# painted back as a hint it wraps the screen out of existence (the report that
+# set this bound showed a multi-kilobyte request line taking over the prompt).
+# The bound lives here because every writer and reader agrees on it: the spool
+# slices to it at drain time, the import path slices to it, the engine refuses
+# longer adds, and the index the shells source is built from the engine.
+MAX_CMD_LEN = 1000
+
 # A command must be safe to persist and useful to suggest before it is kept.
 _SECRET = re.compile(r"(password|secret|token|AKIA|-----BEGIN)", re.I)
 
@@ -45,7 +54,7 @@ def is_recordable(cmd: str) -> bool:
         # Aliases are shell state, not history; a real one-character tool
         # loses nothing but a rank it never deserved.
         return False
-    if len(cmd) > 2000:
+    if len(cmd) > MAX_CMD_LEN:
         return False
     # A command with a newline in it is one command here but two there: the
     # index newline-joins its candidates, so `git commit -m 'line one<NL>line
@@ -470,7 +479,7 @@ def _import_rows(con: sqlite3.Connection) -> int:
                 # once, regardless of which file or which round it appears in.
                 if cmd in plain_seen or con.execute(
                         "SELECT 1 FROM commands WHERE cmd=? LIMIT 1",
-                        (cmd[:2000],)).fetchone():
+                        (cmd[:MAX_CMD_LEN],)).fetchone():
                     continue
                 plain_seen.add(cmd)
                 ts = now
@@ -478,11 +487,11 @@ def _import_rows(con: sqlite3.Connection) -> int:
                 # Avoid duplicating rows created by versions before the
                 # history_imports cursor table existed.
                 already = con.execute(
-                    "SELECT 1 FROM commands WHERE cmd=? AND ts=? LIMIT 1", (cmd[:2000], ts)
+                    "SELECT 1 FROM commands WHERE cmd=? AND ts=? LIMIT 1", (cmd[:MAX_CMD_LEN], ts)
                 ).fetchone()
                 if already:
                     continue
-            batch.append((cmd[:2000], "", "", "", 0, ts))
+            batch.append((cmd[:MAX_CMD_LEN], "", "", "", 0, ts))
         # One transaction per file, and the cursor moves only with the rows it
         # accounts for. They used to share a `try` that swallowed the error and
         # left the offset behind, so a file that half-imported was re-read whole

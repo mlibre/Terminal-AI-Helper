@@ -178,6 +178,13 @@ _TAI_CMD=""
 # whole curl request, and a screen of those is worse than the three that fit.
 : ${_TAI_MENU_LOOSE_ROWS:=3}
 : ${_TAI_MENU_LOOSE_CELL:=50}
+# The longest hint the ghost paints, in characters. A learned line can be a
+# whole curl request, and a hint that wraps fifteen rows is a takeover of the
+# prompt, not a glance — the paint stops here with an ellipsis, and the key
+# that takes the hint still takes the whole line. The same principle as
+# _TAI_LOOSE_MAX_LINE, which caps the loose scan, and the store's own bound on
+# what it learns; this one guards the draw against what older stores still hold.
+: ${_TAI_GHOST_MAX:=200}
 # Rows of files a path argument is answered from, and how much of each place is
 # read. The same four numbers live in tai/fresh.py for the one-shot path, and one
 # variable — TAI_FILE_ROOTS, colon separated — adds roots to both, because the

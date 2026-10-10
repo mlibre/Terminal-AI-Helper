@@ -139,11 +139,22 @@ _tai_update() {
   fi
   _tai_paste_state
   _tai_query "$BUFFER" "$_TAI_LAST"
-  if [[ -n "$_TAI_BEST" && "$_TAI_BEST" == "$BUFFER"* && "$_TAI_BEST" != "$BUFFER" ]]; then
-    _TAI_SUGGESTION="${_TAI_BEST#$BUFFER}"
-    POSTDISPLAY="$_TAI_SUGGESTION"
+  # The extends test folds case — the lookup that filled _TAI_BEST does, and
+  # `ls down` reaching `ls Downloads` is the point of it — and the strip is
+  # positional: the head of the best line that matched is the buffer's own
+  # length, so what is appended is the candidate's remainder, in the
+  # candidate's own case. `ls down` completes to `ls Downloads`, not to
+  # `ls downloads`.
+  if [[ -n "$_TAI_BEST" && "${_TAI_BEST:l}" == "${BUFFER:l}"* && "${_TAI_BEST:l}" != "${BUFFER:l}" ]]; then
+    _TAI_SUGGESTION="${_TAI_BEST:${#BUFFER}}"
+    # Painted short, taken whole: the hint is a glance, and a multi-row wrapped
+    # line is a takeover of the prompt — the ellipsis says there is more, and
+    # the key that takes the hint still appends all of _TAI_SUGGESTION.
+    local shown="$_TAI_SUGGESTION"
+    (( ${#shown} > _TAI_GHOST_MAX )) && shown="${shown[1,_TAI_GHOST_MAX]}…"
+    POSTDISPLAY="$shown"
     _TAI_DREW=1
-    region_highlight+=("${#BUFFER} $((${#BUFFER} + ${#_TAI_SUGGESTION})) $_TAI_HIGHLIGHT_STYLE")
+    region_highlight+=("${#BUFFER} $((${#BUFFER} + ${#shown})) $_TAI_HIGHLIGHT_STYLE")
   elif (( ours_was )); then
     # What tai drew last redraw is gone, so the slot is ours to clear — and only
     # ours. This is the branch that has to know what the *last* redraw put there,

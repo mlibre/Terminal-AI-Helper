@@ -1,10 +1,39 @@
 {
   "name": "terminal-ai-helper",
-  "private": true,
+  "version": "1.3.1",
+  "description": "The terminal that knows your next command \u2014 bash/zsh suggestions that learn from your own history. Offline, private, no account.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mlibre/Terminal-AI-Helper.git"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "shell",
+    "zsh",
+    "bash",
+    "autocomplete",
+    "suggestions",
+    "history"
+  ],
+  "bin": {
+    "tai-install": "bin/tai-install"
+  },
+  "files": [
+    "bin",
+    "tai",
+    "plugins",
+    "install.sh",
+    "VERSION",
+    "LICENSE",
+    "readme.md"
+  ],
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "prepublishOnly": "find plugins -name '*.zwc' -delete && find . -name __pycache__ -type d -prune -exec rm -rf {} +"
   },
   "devDependencies": {
     "vitepress": "^1.6.3"

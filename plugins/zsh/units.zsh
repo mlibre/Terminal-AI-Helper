@@ -133,7 +133,11 @@ _tai_unit_matches() {
   fi
   (( ${#list[@]} )) || return 1
   _tai_globable "$word" || return 1
-  _TAI_UNIT_MS=( "${(@M)list:#${(b)word}*}" )
+  # Folded, like every lookup: `Net` reaches NetworkManager.service. (#i)
+  # needs extendedglob; localoptions puts this shell's own options back on
+  # return.
+  setopt localoptions extendedglob
+  _TAI_UNIT_MS=( "${(@M)list:#(#i)${(b)word}*}" )
   (( ${#_TAI_UNIT_MS[@]} ))
 }
 

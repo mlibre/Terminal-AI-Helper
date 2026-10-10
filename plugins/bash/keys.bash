@@ -96,7 +96,10 @@ _tai_spool_flush() {
 _tai_accept() {
   _tai_query "$READLINE_LINE" "$_TAI_LAST"
   local out="$_TAI_OUT"
-  if [[ -n "$out" && "$out" == "$READLINE_LINE"* ]]; then
+  # The extends test folds case, like the lookup that filled `out` — `ls down`
+  # takes `ls Downloads`, and the line is replaced whole, so the candidate's
+  # own case is what lands.
+  if [[ -n "$out" && "${out,,}" == "${READLINE_LINE,,}"* ]]; then
     READLINE_LINE="$out"; READLINE_POINT=${#READLINE_LINE}
   fi
 }
@@ -112,8 +115,11 @@ _tai_next() {
 _tai_accept_word() {
   _tai_query "$READLINE_LINE" "$_TAI_LAST"
   local out="$_TAI_OUT"
-  if [[ -n "$out" && "$out" == "$READLINE_LINE"* ]]; then
-    out="${out#$READLINE_LINE}"
+  # Folded, like the lookup — and the strip is positional: the head of `out`
+  # that matched is the line's own length, so the remainder is the candidate's
+  # text past it, its case intact.
+  if [[ -n "$out" && "${out,,}" == "${READLINE_LINE,,}"* ]]; then
+    out="${out:${#READLINE_LINE}}"
     if [[ "$out" =~ ^([[:space:]]*[^[:space:]]+) ]]; then
       READLINE_LINE+="${BASH_REMATCH[1]}"
       READLINE_POINT=${#READLINE_LINE}
@@ -129,7 +135,7 @@ _tai_accept_word() {
 _tai_accept_or_right() {
   _tai_query "$READLINE_LINE" "$_TAI_LAST"
   local out="$_TAI_OUT"
-  if [[ -n "$out" && "$out" == "$READLINE_LINE"* && $READLINE_POINT == ${#READLINE_LINE} ]]; then
+  if [[ -n "$out" && "${out,,}" == "${READLINE_LINE,,}"* && $READLINE_POINT == ${#READLINE_LINE} ]]; then
     READLINE_LINE="$out"; READLINE_POINT=${#READLINE_LINE}
   elif (( READLINE_POINT < ${#READLINE_LINE} )); then
     READLINE_POINT=$((READLINE_POINT + 1))
@@ -193,7 +199,9 @@ _tai_complete() {
   if (( first_word )); then
     if _tai_first_lines "$line"; then
       for c in "${_TAI_LEARNED_LINES[@]}"; do
-        [[ "$c" == "$line"* ]] && _tai_reply "$c"
+        # Folded, like the lookup that produced them: `ls down` offers
+        # `ls Downloads`.
+        [[ "${c,,}" == "${line,,}"* ]] && _tai_reply "$c"
       done
     fi
     local -i names=0
@@ -203,7 +211,7 @@ _tai_complete() {
   fi
   local stem x
   while IFS= read -r c; do
-    [[ -n "$c" && "$c" == "$line"* ]] && _tai_reply "${c##*[[:space:]]}"
+    [[ -n "$c" && "${c,,}" == "${line,,}"* ]] && _tai_reply "${c##*[[:space:]]}"
   done <<< "$values"
   if (( dir_arg )); then
     local curw=""

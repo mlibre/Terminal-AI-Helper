@@ -88,13 +88,18 @@ _tai_load_index() {
 
 # The _TAI_FIRST keys, sorted once, for the binary search a half-typed command
 # name walks instead of scanning every key. One fork per shell that uses it,
-# never per keystroke; the comparison in the search uses the shell's own
-# collation, and the sort runs in that same locale, so the two agree.
-# The flag is what makes "empty" mean empty rather than unbuilt: an index with
-# no first-word keys at all would otherwise re-fork on every half-typed letter.
+# never per keystroke. The sort is case-insensitive AND byte-ordered
+# (LC_ALL=C sort -f), and the search compares lowered keys — so the three
+# agree with each other: sort -f's fold, the search's `${k,,}`, and the
+# case-insensitive run scan that walks the range are one order. A locale
+# collation would agree with nothing here (it reorders punctuation), and plain
+# ASCII order would split the run around the capitals (`LSX` sorts before
+# `docker`, and a scan that walks until the first miss would stop at it). The
+# flag is what makes "empty" mean empty rather than unbuilt: an index with no
+# first-word keys at all would otherwise re-fork on every half-typed letter.
 _tai_first_keys() {
   [[ -n "$_TAI_FIRST_KEYS_BUILT" ]] && return 0
-  readarray -t _TAI_FIRST_KEYS < <(printf '%s\n' "${!_TAI_FIRST[@]}" | sort)
+  readarray -t _TAI_FIRST_KEYS < <(printf '%s\n' "${!_TAI_FIRST[@]}" | LC_ALL=C sort -f)
   _TAI_FIRST_KEYS_BUILT=1
 }
 

@@ -38,7 +38,7 @@ pathlib.Path(SPOOL).unlink(missing_ok=True)
 pathlib.Path(INDEX).unlink(missing_ok=True)
 
 from tai.spool import RS, US, drain, flush, spool_append, spool_path  # noqa: E402
-from tai.store import count, is_recordable  # noqa: E402
+from tai.store import MAX_CMD_LEN, count, is_recordable  # noqa: E402
 
 failures: list[str] = []
 
@@ -101,7 +101,11 @@ def main() -> int:
     repo_cwd = str(REPO)          # a real git checkout
     spool_append("taï اَلْعَرَبِيَّة -- verbose ünïcode", cwd=repo_cwd,
                  exit_code=3, ts=1700000020)
-    spool_append("ls " + "x" * 1500, cwd="/tmp", ts=1700000021)
+    # The store learns at most MAX_CMD_LEN characters: a longer frame is a
+    # paste, not vocabulary, and is skipped at the same gate everything else
+    # passes. Right at the bound is still a person's command.
+    spool_append("ls " + "x" * 995, cwd="/tmp", ts=1700000021)
+    spool_append("ls " + "x" * 4000, cwd="/tmp", ts=1700000024)
     # The separators are the write side's own framing, and both transports
     # strip them at the boundary — a command that carries them would tear the
     # frame, and the flush would read half of it as a command never typed.
@@ -109,11 +113,14 @@ def main() -> int:
     spool_append("echo torn\x1e frame", cwd="/tmp", ts=1700000023)
     ingested, skipped, _, _ = drain()
     check("everything recordable survives its own separators",
-          (ingested, skipped), (4, 0))
+          (ingested, skipped), (4, 1))
     got = db_rows()[-4:]
     check("unicode round-trips byte for byte",
           got[0][0], "taï اَلْعَرَبِيَّة -- verbose ünïcode")
-    check("the long command round-trips", len(got[1][0]), 1503)
+    check("a command at the bound round-trips whole", len(got[1][0]), 998)
+    check("the over-bound paste is not in the store",
+          any(r[0].startswith("ls ") and len(r[0]) > MAX_CMD_LEN
+              for r in db_rows()), False)
     check("the repo context is resolved from the cwd, in the flush",
           (got[0][2] != "", got[0][3] != ""), (True, True))
     check("a directory without git carries no labels",

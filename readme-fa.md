@@ -29,6 +29,8 @@ cd D<Tab>          Desktop/  Documents/  Downloads/
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
+با npm هم می‌شود: `npm i -g terminal-ai-helper`، و بعد `tai-install`.
+
 این فرمان TAI را در `~/.tai` دانلود می‌کند و نصب‌کننده را از همان‌جا اجرا
 می‌کند؛ اجرای دوباره‌اش بعداً در‌جا به‌روز می‌کند. برای هر دو پوسته فعال،
 تاریخچه را وارد و نمایه‌ی اول را می‌سازد:

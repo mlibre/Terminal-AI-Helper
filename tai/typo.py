@@ -156,28 +156,35 @@ def near_miss_lines(eng, prefix: str, limit: int = 50) -> list[str]:
     plausible and where the nearest match is still more likely to be the word
     being typed than a coincidence. The result is filtered against the rest of
     the line, so `dokcer ps` is answered by a `docker … ps` and not by any
-    `docker` command.
+    `docker` command. The word comparison is case-insensitive — `Dokcer` is
+    `docker`'s typo no less than `dokcer` — while the rest-of-line test runs on
+    lowered copies of both sides, and the slice that separates a candidate from
+    its first word stays positional: a lowered first word has the same length
+    as the original, so the remainder past it is the same remainder either way.
     """
     words = prefix.split()
     first = words[0] if words else prefix
     if len(first) < 3:
         return []
+    first_l = first.lower()
     cands = []
     max_d = 1 if len(first) <= 4 else 2
     for w in _first_words(eng):
-        if w.startswith(first) or first.startswith(w):
+        w_l = w.lower()
+        if w_l.startswith(first_l) or first_l.startswith(w_l):
             continue
-        if lev1(first, w, max_d) <= max_d:
+        if lev1(first_l, w_l, max_d) <= max_d:
             cands.append(w)
             if len(cands) >= 10:
                 break
+    rest_l = prefix[len(first):].lower()
     out: list[str] = []
     for w in cands:
+        w_l = w.lower()
         for c in eng._prefix_range(w):
             if len(c.split(None, 1)) > 1 or prefix.strip() == first:
                 # only keep commands consistent with rest of prefix
-                rest = prefix[len(first):]
-                if c[len(w):].startswith(rest):
+                if c[len(w):].lower().startswith(rest_l):
                     out.append(c)
                     if len(out) >= limit:
                         return out

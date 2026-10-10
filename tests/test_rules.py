@@ -300,4 +300,31 @@ for _p in _plugins:
         assert _marker not in _t, f"{_p.name} knows about the server: {_marker!r}"
 ok(f"no plugin source ({len(_plugins)} files) knows the dashboard exists")
 
+# ---------------------------------------------------------------------------
+# "The case a command was recorded with is not a spelling the user remembers."
+# The engine's prefix walk runs over a lowered mirror of the history, so `ls
+# down` reaches `ls Downloads` — and the completion it reports slices
+# positionally, the way the plugins strip. The same rule caps what is worth
+# learning at all: the engine refuses a command longer than the store's
+# MAX_CMD_LEN — the bound the spool, the import and the store all slice or
+# refuse at — so a paste is never vocabulary.
+# ---------------------------------------------------------------------------
+from tai.engine import Engine  # noqa: E402
+from tai.store import MAX_CMD_LEN  # noqa: E402
+
+_eng = Engine()
+_eng.add("ls Downloads")
+_eng.add("ls -la")
+_ans = _eng.suggest("ls down")
+assert _ans["choice"] == "ls Downloads", _ans
+assert _ans["completion"] == "loads", _ans
+ok("the engine answers `ls down` with `ls Downloads`, completion 'loads'")
+
+_eng_long = Engine()
+_eng_long.add("x" * (MAX_CMD_LEN + 1))
+assert len(_eng_long.cmds) == 0, "the engine learned a line over the bound"
+_eng_long.add("x" * MAX_CMD_LEN)
+assert len(_eng_long.cmds) == 1, "the engine refused a line at the bound"
+ok(f"the engine learns at most MAX_CMD_LEN characters ({MAX_CMD_LEN})")
+
 print("\nOK — the rules AGENTS.md used to carry are held executable.")

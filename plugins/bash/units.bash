@@ -109,10 +109,11 @@ _tai_unit_matches() {
   _TAI_UNIT_MS=()
   if [[ "${_TAI_UNIT_SCOPE:-0}" == "1" ]]; then
     (( ${#_TAI_UNITS_USER[@]} )) || _tai_units_load 1
-    for u in "${_TAI_UNITS_USER[@]}"; do [[ "$u" == "$word"* ]] && _TAI_UNIT_MS+=( "$u" ); done
+    # Folded, like every lookup: `Net` reaches NetworkManager.service.
+    for u in "${_TAI_UNITS_USER[@]}"; do [[ "${u,,}" == "${word,,}"* ]] && _TAI_UNIT_MS+=( "$u" ); done
   else
     (( ${#_TAI_UNITS[@]} )) || _tai_units_load 0
-    for u in "${_TAI_UNITS[@]}"; do [[ "$u" == "$word"* ]] && _TAI_UNIT_MS+=( "$u" ); done
+    for u in "${_TAI_UNITS[@]}"; do [[ "${u,,}" == "${word,,}"* ]] && _TAI_UNIT_MS+=( "$u" ); done
   fi
   (( ${#_TAI_UNIT_MS[@]} > 0 ))
 }

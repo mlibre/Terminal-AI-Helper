@@ -43,6 +43,8 @@ features:
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
+npm installs the same files: `npm i -g terminal-ai-helper`, then `tai-install`.
+
 </div>
 
 Start with [the keys](/usage), or read [how it is built](/architecture). Your

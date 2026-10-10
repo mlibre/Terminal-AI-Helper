@@ -33,7 +33,10 @@ from pathlib import Path
 # Bump when the cached shape changes (new fields on CmdStats, new maps, a new
 # serialization). 2: CmdStats gained `nf`. 3: pickle gave way to marshal, and
 # a pickle cache of any version is simply a miss to the marshal reader.
-VERSION = 3
+# 4: the engine gained the lowered mirror the case-insensitive prefix walk
+# runs over (engine.sorted_lower); a version-3 cache would hand back an engine
+# without it, and the first prefix query would AttributeError.
+VERSION = 4
 
 _MAGIC = "tai-engine-m"
 
@@ -99,6 +102,9 @@ def get(db_path: Path, build) -> object:
 #   seq / token_bigram / token_trigram → as they are.
 #   sorted_cmds → as it is; the snapshot is taken after `_ensure_sorted`,
 #            so the flag comes back False and nothing re-sorts.
+#   sorted_lower → as it is, for the same reason: it is built in
+#            _ensure_sorted beside sorted_cmds, and a loaded engine that had
+#            to rebuild it would pay the sort twice.
 
 # CmdStats' slots, in the order the row above packs them.
 _FIELDS = ("freq", "last_ts", "cwd", "repo", "branch", "hour",
@@ -116,7 +122,7 @@ def _snapshot(eng) -> dict:
                 st.success, st.fail, st.nf))
     return {"cmds": (names, fields), "seq": eng.seq,
             "big": eng.token_bigram, "tri": eng.token_trigram,
-            "sorted": eng.sorted_cmds}
+            "sorted": eng.sorted_cmds, "lower": eng.sorted_lower}
 
 
 def _load(blob: bytes):
@@ -138,6 +144,7 @@ def _load(blob: bytes):
     eng.token_bigram = d["big"]
     eng.token_trigram = d["tri"]
     eng.sorted_cmds = d["sorted"]
+    eng.sorted_lower = d["lower"]
     eng._prev_cmd = None
     eng._first_word_cache = None
     eng._cmds_dirty = False

@@ -121,6 +121,12 @@ class Engine:
         self.token_bigram: dict[str, dict[str, int]] = {}
         self.token_trigram: dict[tuple[str, str], dict[str, int]] = {}
         self.sorted_cmds: list[str] = []
+        # The lowercase mirror the case-insensitive prefix walk runs over:
+        # (lowered, original) pairs, sorted by the lowered form, so the pairs
+        # whose lowered text begins with a lowered prefix are one contiguous
+        # bisect range. Built beside sorted_cmds in _ensure_sorted and never
+        # read before it.
+        self.sorted_lower: list[tuple[str, str]] = []
         self._prev_cmd: str | None = None  # for building seq incrementally
         self._first_word_cache: list[str] | None = None  # see tai/typo.py
         self._cmds_dirty = False         # sorted_cmds holds appends, not order
@@ -138,6 +144,7 @@ class Engine:
         """
         if self._cmds_dirty:
             self.sorted_cmds.sort()
+            self.sorted_lower = sorted((c.lower(), c) for c in self.sorted_cmds)
             self._cmds_dirty = False
 
     # -- learning ---------------------------------------------------------
@@ -146,7 +153,12 @@ class Engine:
             ts: int | None = None,
             _prev: str | None = "__USE_LAST__") -> None:
         cmd = cmd.strip()
-        if not cmd or len(cmd) > 2000:
+        if not cmd:
+            return
+        # The same bound is_recordable applies — imported here, where a row this
+        # long is rare, rather than at module load, which every fast process pays.
+        from tai.store import MAX_CMD_LEN
+        if len(cmd) > MAX_CMD_LEN:
             return
         ts = ts if ts is not None else int(time.time())
         st = self.cmds.get(cmd)
@@ -214,24 +226,32 @@ class Engine:
 
     # -- prefix lookup ----------------------------------------------------
     def _prefix_range(self, prefix: str) -> list[str]:
-        """The commands starting with `prefix`, in lexical order.
+        """The commands whose *lowercased* text begins with `prefix`, best case
+        aside — `ls down` reaches `ls Downloads` here, which is the point: the
+        case a command was recorded with is the filesystem's business, not a
+        spelling the user must remember.
 
-        The sort is what makes this a walk rather than a scan: every string
-        beginning with `prefix` is >= `prefix` and lies before any string that
-        does not, so the first entry that stops matching ends the range. `cap`
-        bounds the walk for a prefix as broad as a single letter, where the
-        range is the whole history and ranking every entry is not worth it.
+        The walk is over the lowered mirror, so the sort is still what makes it
+        a walk rather than a scan: every lowered string beginning with the
+        lowered prefix is >= it and lies before any that does not, so the first
+        entry that stops matching ends the range. `cap` bounds the walk for a
+        prefix as broad as a single letter, where the range is the whole history
+        and ranking every entry is not worth it. Order inside the answer is
+        lowered-lexical; every caller ranks after this, none reads order from it.
         """
         if not prefix:
             return []
+        lp = prefix.lower()
+        if not lp:
+            return []
         self._ensure_sorted()
-        cmds = self.sorted_cmds
+        pairs = self.sorted_lower
         out: list[str] = []
-        i = bisect.bisect_left(cmds, prefix)
-        n = len(cmds)
+        i = bisect.bisect_left(pairs, (lp,))
+        n = len(pairs)
         while i < n and len(out) < 2000:
-            c = cmds[i]
-            if not c.startswith(prefix):
+            lc, c = pairs[i]
+            if not lc.startswith(lp):
                 break
             out.append(c)
             i += 1
@@ -353,6 +373,7 @@ class Engine:
         # taken once, here, rather than per candidate: the old loop summed
         # the same row again for every candidate the prefix had, which on a
         # broad prefix was the same walk paid 600 times for one row.
+        prefix_l = prefix.lower()
         ptoks = prefix.split()
         tri_ctx = tuple(ptoks[-2:]) if len(ptoks) >= 2 else None
         bi_ctx = ptoks[-1] if ptoks else None
@@ -389,7 +410,7 @@ class Engine:
             # token n-gram bonus: P(next token | context). The row and its
             # total come from above; `or 1` is the loop's old `max(sum, 1)`.
             tok_s = 0.0
-            if prefix and name.startswith(prefix):
+            if prefix and name.lower().startswith(prefix_l):
                 rest = name[len(prefix):].lstrip()
                 if rest:
                     nxt = rest.split()[0]
@@ -481,7 +502,7 @@ class Engine:
         # list to whatever survived — so the softmax, the probabilities and the
         # confidence all described commands that were not on offer.
         kept = [(s, n) for s, n in scored
-                if n.startswith(prefix) and n != prefix or n in typo_set
+                if n.lower().startswith(prefix_l) and n != prefix or n in typo_set
                 ][: limit * 3][:200]
         top_scores = [s for s, _ in kept]
         top_names = [n for _, n in kept]
@@ -506,7 +527,11 @@ class Engine:
         return {
             "type": "choice",
             "choice": best,
-            "completion": best[len(prefix):] if best.startswith(prefix) else "",
+            # The candidate was picked under the case-insensitive prefix, so
+            # the slice test folds too — and slices positionally, the same way
+            # the plugin strips: the head that matched is the prefix's own
+            # length, in the candidate's case.
+            "completion": best[len(prefix):] if best.lower().startswith(prefix.lower()) else "",
             "probabilities": {c["cmd"]: c["prob"] for c in choices},
             "choices": choices,
             "confidence": round(conf, 3),
@@ -617,10 +642,11 @@ class Engine:
         # including the partial-token shape a mid-word prefix produces.
         tok_s = 0.0
         tok_detail = "no next word behind the prefix"
+        prefix_l = prefix.lower()
         ptoks = prefix.split()
         tri_ctx = tuple(ptoks[-2:]) if len(ptoks) >= 2 else None
         bi_ctx = ptoks[-1] if ptoks else None
-        if prefix and cmd.startswith(prefix):
+        if prefix and cmd.lower().startswith(prefix_l):
             rest = cmd[len(prefix):].lstrip()
             if rest:
                 nxt = rest.split()[0]
@@ -652,7 +678,7 @@ class Engine:
             factors.append({"label": "directory and repository together", "weight": 1.0,
                             "value": EXACT_CTX_BONUS, "contrib": EXACT_CTX_BONUS,
                             "detail": "run here, in this repository"})
-        near_miss = not cmd.startswith(prefix)
+        near_miss = not cmd.lower().startswith(prefix_l)
         if near_miss:
             score -= TYPO_PENALTY
             factors.append({"label": "near-miss", "weight": -1.0, "value": TYPO_PENALTY,
@@ -684,7 +710,7 @@ def _rewrap(result: dict, head: str, prefix: str) -> dict:
     full = f"{head} {choice}"
     out = dict(result)
     out["choice"] = full
-    out["completion"] = full[len(prefix):] if full.startswith(prefix) else ""
+    out["completion"] = full[len(prefix):] if full.lower().startswith(prefix.lower()) else ""
     out["probabilities"] = {f"{head} {c}": p for c, p in result.get("probabilities", {}).items()}
     out["choices"] = [dict(c, cmd=f"{head} {c['cmd']}") for c in result.get("choices", [])]
     out["wrapped"] = head
@@ -706,7 +732,8 @@ def _fallback(prefix: str, limit: int) -> dict:
     """
     from tai.seed import SEED_COMMANDS
     defaults = list(SEED_COMMANDS)
-    cands = [d for d in defaults if d.startswith(prefix) and d != prefix] if prefix \
+    prefix_l = prefix.lower() if prefix else ""
+    cands = [d for d in defaults if d.lower().startswith(prefix_l) and d != prefix] if prefix \
         else defaults[:3]
     if not cands and prefix and not any(ch.isspace() for ch in prefix):
         import shutil
@@ -717,7 +744,7 @@ def _fallback(prefix: str, limit: int) -> dict:
     return {
         "type": "choice",
         "choice": cands[0] if cands else "",
-        "completion": cands[0][len(prefix):] if cands and cands[0].startswith(prefix) else "",
+        "completion": cands[0][len(prefix):] if cands and cands[0].lower().startswith(prefix_l) else "",
         "probabilities": {c: round(p, 4) for c, p in zip(cands, probs)},
         "choices": [{"cmd": c, "prob": round(p, 4), "score": 0.0} for c, p in zip(cands, probs)],
         "confidence": 0.25 if cands else 0.0,

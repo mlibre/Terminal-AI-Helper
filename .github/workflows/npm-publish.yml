@@ -1,0 +1,34 @@
+# The npm package rides the same tag the release workflow cuts: every green
+# push to main gets its v<VERSION> tag, and this publishes the same tree to
+# the registry. Publishing a version that is already out is a no-op, so the
+# build-number tags (v1.3.0-2 from an unchanged VERSION) stay green without
+# pretending they shipped something.
+name: npm
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      - name: Publish (a no-op when this version is already out)
+        run: |
+          set -e
+          version="$(tr -d '[:space:]' < VERSION)"
+          if npm view "terminal-ai-helper@$version" version >/dev/null 2>&1; then
+            echo "terminal-ai-helper@$version is already on the registry — nothing to do"
+            exit 0
+          fi
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

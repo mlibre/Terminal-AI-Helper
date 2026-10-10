@@ -138,8 +138,9 @@ _tai_fresh_files() {
     mapfile -t nm <<< "${_TAI_SNAP_NAMES[$dirkey]}"
     mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
     local -i i
+    local wordtail="${word##*/}"
     for (( i = 0; i < ${#nm[@]}; i++ )); do
-      [[ "${nm[i]}" == "${word##*/}"* ]] || continue
+      [[ "${nm[i],,}" == "${wordtail,,}"* ]] || continue
       _tai_keep_fresh "${headform}${nm[i]}" "${rt[i]}"
       (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
     done
@@ -147,11 +148,13 @@ _tai_fresh_files() {
     # The snapshot keeps the newest few, and the name typed may be older than
     # all of them. One direct listing of just this component answers honestly;
     # the memoised query means it runs once per word, not once per redraw.
+    # nocaseglob lives inside the substitution's own subshell, so this shell's
+    # globbing is untouched: `down` reaches `Downloads` from the disk too.
     while IFS= read -r -d '' c; do
       [[ -f "$c" ]] || continue
       _tai_keep_fresh "${headform}${c##*/}" "$c"
       (( ++n >= _TAI_FILE_PER_ROOT )) && break
-    done < <(ls -t -1 --zero -N -- "$dirkey/${word##*/}"* 2>/dev/null)
+    done < <(shopt -s nocaseglob; ls -t -1 --zero -N -- "$dirkey/${word##*/}"* 2>/dev/null)
     return 0
   fi
   if [[ "$glob" == /* || "$glob" == */* ]]; then
@@ -163,7 +166,7 @@ _tai_fresh_files() {
     mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
     local tailcomp="${word##*/}" i
     for (( i = 0; i < ${#nm[@]}; i++ )); do
-      [[ "${nm[i]}" == "$tailcomp"* ]] || continue
+      [[ "${nm[i],,}" == "${tailcomp,,}"* ]] || continue
       _tai_keep_fresh "${headform}${nm[i]}" "${rt[i]}"
       (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
     done
@@ -172,7 +175,7 @@ _tai_fresh_files() {
       [[ -f "$c" ]] || continue
       _tai_keep_fresh "${headform}${c##*/}" "$c"
       (( ++n >= _TAI_FILE_PER_ROOT )) && break
-    done < <(ls -t -1 --zero -N -- "$dirkey/$tailcomp"* 2>/dev/null)
+    done < <(shopt -s nocaseglob; ls -t -1 --zero -N -- "$dirkey/$tailcomp"* 2>/dev/null)
     return 0
   fi
   dirs=( "." ); prefixes=( "" )
@@ -224,8 +227,10 @@ _tai_keep_root() {
   local -a nm rt
   mapfile -t nm <<< "${_TAI_SNAP_NAMES[$dirkey]}"
   mapfile -t rt <<< "${_TAI_SNAP_REAL[$dirkey]}"
+  # Folded, like every lookup: the case a name was written with on the disk is
+  # not a spelling the user has to remember.
   for (( i = 0; i < ${#nm[@]}; i++ )); do
-    [[ "${nm[i]}" == "$word"* ]] || continue
+    [[ "${nm[i],,}" == "${word,,}"* ]] || continue
     _tai_keep_fresh "$as${nm[i]}" "${rt[i]}"
     (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
   done
@@ -240,7 +245,7 @@ _tai_keep_root() {
       _tai_keep_fresh "$as${c#"$dir"/}" "$c"
     fi
     (( ++n >= _TAI_FILE_PER_ROOT )) && break
-  done < <(ls -t -1 --zero -N -- ${pattern}* 2>/dev/null)
+  done < <(shopt -s nocaseglob; ls -t -1 --zero -N -- ${pattern}* 2>/dev/null)
 }
 
 # The files a path argument could be, and whether what tai learned for this line
@@ -278,9 +283,10 @@ _tai_file_answer() {
   # glob does not always: `chmod +x freeb` matches `~/Downloads/freebuff…` in
   # *Downloads*, but that name does not start with the word, so accepting it
   # would replace three typed letters with a path from somewhere else.
+  # The extends tests fold case, like every lookup: `down` keeps `Downloads`.
   kept=()
   for last in "${_TAI_FRESH[@]}"; do
-    [[ "$last" == "$word"* ]] && kept+=("$last")
+    [[ "${last,,}" == "${word,,}"* ]] && kept+=("$last")
   done
   _TAI_FRESH=( "${kept[@]}" )
   # A learned argument that is still a file here outranks the newest one: it was
@@ -290,7 +296,7 @@ _tai_file_answer() {
   # raw text and travels with a 1.
   _tai_best "${_TAI_WORD[$key]:-}" "$line"
   last="${_TAI_BEST_LINE##* }"
-  if [[ -n "$last" && "$last" == "$word"* && -e "${last/#\~/$HOME}" ]]; then
+  if [[ -n "$last" && "${last,,}" == "${word,,}"* && -e "${last/#\~/$HOME}" ]]; then
     _TAI_FILES+=( "$last" ); _TAI_FILES_Q+=( 0 )
   fi
   _TAI_FILES+=( "${_TAI_FRESH[@]}" )

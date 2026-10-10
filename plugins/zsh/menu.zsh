@@ -319,7 +319,8 @@ _tai_menu_open() {
   if _tai_units_menu; then
     if (( ${#_TAI_UNITS_MENU} )); then
       for c in "${_TAI_UNITS_MENU[@]}"; do
-        [[ -n "$c" && "$c" != "$word" && "$c" == "$word"* ]] || continue
+        # Folded, like every other source: `Net` reaches NetworkManager.
+        [[ -n "$c" && "$c" != "$word" && "${c:l}" == "${word:l}"* ]] || continue
         _tai_clean "$c" || continue
         [[ -z "${dup[${c%/}]}" ]] || continue
         dup[${c%/}]=1
@@ -494,7 +495,10 @@ _tai_menu_open() {
   _TAI_MENU=(); _TAI_MENU_Q=()
   for (( i = 1; i <= ${#out}; i++ )); do
     c="$out[i]"
-    [[ -n "$c" && "$c" != "$word" && "$c" == "$word"* ]] || continue
+    # Folded, like every other source: the case a candidate was recorded with
+    # is not a spelling the user has to remember, and the menu replaces the
+    # word anyway, so a candidate that differs only in case is a real answer.
+    [[ -n "$c" && "$c" != "$word" && "${c:l}" == "${word:l}"* ]] || continue
     _tai_clean "$c" || continue
     [[ -z "${dup[${c%/}]}" ]] || continue
     if (( dir_arg )) && [[ "$c" != "-" ]]; then

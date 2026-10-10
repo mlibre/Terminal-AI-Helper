@@ -9,6 +9,8 @@ what happens underneath, read [architecture.md](architecture.md).
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
+npm installs the same files: `npm i -g terminal-ai-helper`, then `tai-install`.
+
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
 again later and it updates in place. It enables both shells, imports your
 history, and builds the first index:

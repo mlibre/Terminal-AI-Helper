@@ -146,7 +146,7 @@ def drain() -> tuple[int, int, int, int]:
     if not data:
         return (0, 0, 0, 0)
 
-    from tai.store import connect, is_recordable
+    from tai.store import MAX_CMD_LEN, connect, is_recordable
     rows: list[tuple] = []
     cwds: dict[str, tuple[str, str]] = {}
     skipped = 0
@@ -171,7 +171,7 @@ def drain() -> tuple[int, int, int, int]:
         if not is_recordable(cmd):
             skipped += 1
             continue
-        rows.append((cmd[:2000], cwd, code, ts))
+        rows.append((cmd[:MAX_CMD_LEN], cwd, code, ts))
         if cwd and cwd not in cwds:
             cwds[cwd] = ("", "")
 

@@ -141,8 +141,15 @@ _tai_first_values() {
   # A key whose head carries a raw control byte cannot be painted, so its next
   # line is its best usable one; the peel repeats, bounded, rather than skipping
   # the key and its real answer with it.
+  # The scan is case-insensitive: `god` reaches `GOD` and `God` beside `god`,
+  # because the case a command was recorded with is not a spelling the user has
+  # to remember. Two mechanisms, both scoped here: `(#i)` in the pattern needs
+  # extendedglob, and localoptions puts it back the way this shell had it on
+  # return; `${(b)word}` keeps a `^` or `~` in the word a literal and not
+  # extendedglob syntax.
+  setopt localoptions extendedglob
   values=""
-  for k in "${(@k)_TAI_FIRST[(I)${word}*]}"; do
+  for k in "${(@k)_TAI_FIRST[(I)(#i)${(b)word}*]}"; do
     head="${_TAI_FIRST[$k]}"
     while [[ -n "$head" ]] && ! _tai_clean "${head%%$'\n'*}"; do
       # A single-line value peels to nothing — the guard below, not the
@@ -181,6 +188,10 @@ typeset -gi _TAI_VALUES_ONE=0
 _tai_lines() {
   local prefix="$1" word rest head key values match
   local -a lines
+  # The prefix filters below are case-insensitive (`(#i)`), and `(#i)` needs
+  # extendedglob — localoptions puts this shell's own options back on return,
+  # and ${(b)} escaping keeps a `^` or `~` in the typed line a literal here.
+  setopt localoptions extendedglob
   _TAI_LINES=()
   _TAI_LINES_LEAD=""
   if [[ "$prefix" == *' '* ]]; then
@@ -195,7 +206,24 @@ _tai_lines() {
     # a shell has ever run, which on a real history was the largest thing in the
     # index and the reason sourcing it took a fifth of a second.
     if [[ "$word" == *" "* ]]; then
-      [[ -n "$word" ]] && values="${_TAI_WORD[$word]:-}" && _TAI_VALUES_ONE=1
+      values=""
+      [[ -n "$word" ]] && values="${_TAI_WORD[$word]:-}"
+      if [[ -n "$values" ]]; then
+        _TAI_VALUES_ONE=1
+      else
+        # Exact miss: the keys that begin with the word, case-insensitively —
+        # `LS -l` typed reaches the `ls -l` key. One head per key, the shape
+        # _tai_best ranks; the (M) filter below keeps the lines that extend
+        # the whole typed line, and the superset the sibling keys hold is
+        # exactly what an ordinary extension wants.
+        _TAI_VALUES_ONE=0
+        local k
+        for k in "${(@k)_TAI_WORD[(I)(#i)${(b)word}*]}"; do
+          local h="${_TAI_WORD[$k]}"
+          [[ -n "$h" ]] && values+="${h%%$'\n'*}"$'\n'
+        done
+        values="${values%$'\n'}"
+      fi
     else
       _tai_first_values "$word"
       values="$_TAI_VALUES"
@@ -206,7 +234,7 @@ _tai_lines() {
   fi
   if [[ -n "$values" ]]; then
     lines=( "${(@f)values}" )
-    lines=( "${(@M)lines:#${(b)prefix}*}" )
+    lines=( "${(@M)lines:#(#i)${(b)prefix}*}" )
     (( ${#lines} > _TAI_PREFIX_KEYS )) && lines=( "${lines[@]:0:_TAI_PREFIX_KEYS}" )
     for c in "${lines[@]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
     (( ${#_TAI_LINES} )) && return
@@ -241,7 +269,7 @@ _tai_lines() {
   match="$prefix"
   [[ -n "$_TAI_LINES_LEAD" ]] && match="${prefix#"$head" }"
   lines=( "${(@f)values}" )
-  lines=( "${(@M)lines:#${(b)match}*}" )
+  lines=( "${(@M)lines:#(#i)${(b)match}*}" )
   (( ${#lines} > _TAI_PREFIX_KEYS )) && lines=( "${lines[@]:0:_TAI_PREFIX_KEYS}" )
   for c in "${lines[@]}"; do _tai_clean "$c" && _TAI_LINES+=( "$c" ); done
 }
@@ -260,18 +288,23 @@ _tai_lines() {
 # _TAI_PREFIX_KEYS of them.
 _tai_best() {
   local prefix="$1" c line best="" best_score=-1 s
+  # The extends-the-line and echo tests are case-insensitive — the lookup that
+  # filled _TAI_LINES is, and the two have to agree about what extends what.
+  # `(#i)` needs extendedglob; localoptions hands this shell its own options
+  # back on return.
+  setopt localoptions extendedglob
   _TAI_BEST=""
   if (( _TAI_VALUES_ONE )); then
     for c in "${_TAI_LINES[@]}"; do
       line="$_TAI_LINES_LEAD$c"
-      [[ -z "$c" || "$line" == "$prefix" ]] && continue
+      [[ -z "$c" || "$line" == (#i)"$prefix" ]] && continue
       best="$line"
       break
     done
   else
     for c in "${_TAI_LINES[@]}"; do
       line="$_TAI_LINES_LEAD$c"
-      [[ -z "$c" || "$line" == "$prefix" || "$line" != "$prefix"* ]] && continue
+      [[ -z "$c" || "$line" == (#i)"$prefix" || "$line" != (#i)"$prefix"* ]] && continue
       s="${_TAI_SCORE[$c]:-0}"
       if (( s > best_score )); then best="$c"; best_score="$s"; fi
     done

@@ -40,9 +40,10 @@ _tai_file_answer() {
   # *Downloads*, but that name does not start with the word, so accepting it
   # would replace three typed letters with a path from somewhere else. The menu
   # filters on this too, further down; this is the half that decides the hint.
+  # The extends tests fold case, like every lookup: `down` keeps `Downloads`.
   kept=()
   for last in "${_TAI_FRESH[@]}"; do
-    [[ "$last" == "$word"* ]] && kept+=( "$last" )
+    [[ "${last:l}" == "${word:l}"* ]] && kept+=( "$last" )
   done
   _TAI_FRESH=( "${kept[@]}" )
   # A learned argument that is still a file here outranks the newest one: the
@@ -51,7 +52,7 @@ _tai_file_answer() {
   if [[ -n "$_TAI_BEST" ]]; then
     last="${_TAI_BEST##* }"
     real="${last/#\~/$HOME}"
-    if [[ "$last" == "$word"* && -e "$real" ]]; then
+    if [[ "${last:l}" == "${word:l}"* && -e "$real" ]]; then
       _TAI_FILES=( "$last" ); _TAI_FILES_Q=( 0 )
       _TAI_FRESH=( "${(@)_TAI_FRESH#$last}" )
     fi
@@ -210,6 +211,10 @@ _tai_snap_get() {
 }
 
 _tai_fresh_files() {
+  # extendedglob for the (#i) the direct-glob fallbacks carry — the case-
+  # insensitive completion, `down` reaching `Downloads` from the disk itself;
+  # localoptions hands this shell its own options back on return.
+  setopt localoptions extendedglob
   local word="$1" dir as c real glob headform tailcomp dirkey
   local -i i n=0
   _TAI_FRESH=(); _TAI_FRESH_MTIME=()
@@ -250,7 +255,7 @@ _tai_fresh_files() {
     _tai_snap_get "$dirkey"
     for (( i = 1; i <= ${#_TAI_SNAP_RET_A}; i++ )); do
       c="${_TAI_SNAP_RET_A[i]}"
-      [[ "$c" == "$tailcomp"* ]] || continue
+      [[ "${c:l}" == "${tailcomp:l}"* ]] || continue
       _tai_keep_fresh "${headform}${c}" "${_TAI_SNAP_RETM_A[i]}"
       (( ++n >= _TAI_FILE_PER_ROOT )) && break
     done
@@ -259,7 +264,9 @@ _tai_fresh_files() {
       # than all of them. One direct glob of just this component answers
       # honestly; the memoised query means it runs once per word, not once
       # per redraw.
-      for c in "$dirkey/${~tailcomp}"*(omN); do
+      # (#i) from the word onward: the directory is named exactly, the name
+      # being completed is the part the case was never memorised for.
+      for c in "$dirkey/"(#i)${~tailcomp}*(omN); do
         [[ -f "$c" ]] || continue
         _tai_keep_fresh "${headform}${c##*/}" "$c"
         (( ++n >= _TAI_FILE_PER_ROOT )) && break
@@ -281,13 +288,15 @@ _tai_fresh_files() {
 # Read through the directory's snapshot — see _tai_snap_get — with one direct
 # glob as the fallback for a name the newest few cannot answer for.
 _tai_keep_root() {
+  # extendedglob for the (#i) below — same reason as _tai_fresh_files.
+  setopt localoptions extendedglob
   local dir="$1" as="$2" word="$3" c dirkey
   local -i n=0 i
   [[ "$dir" == "." ]] && dirkey="$PWD" || dirkey="${dir%/}"
   _tai_snap_get "$dirkey"
   for (( i = 1; i <= ${#_TAI_SNAP_RET_A}; i++ )); do
     c="${_TAI_SNAP_RET_A[i]}"
-    [[ "$c" == "$word"* ]] || continue
+    [[ "${c:l}" == "${word:l}"* ]] || continue
     if [[ "$dir" == "." ]]; then
       _tai_keep_fresh "$as$c" "$c"
     else
@@ -296,8 +305,9 @@ _tai_keep_root() {
     (( ++n >= _TAI_FILE_PER_ROOT )) && return 0
   done
   (( n )) && return 0
-  local pattern="$word"
-  [[ "$dir" != "." ]] && pattern="$dir/$word"
+  # (#i) from the word onward, the directory named exactly.
+  local pattern="(#i)$word"
+  [[ "$dir" != "." ]] && pattern="$dir/(#i)$word"
   for c in ${~pattern}*(omN); do
     [[ -f "$c" ]] || continue
     if [[ "$dir" == "." ]]; then
