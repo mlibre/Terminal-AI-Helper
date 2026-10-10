@@ -99,8 +99,7 @@ export default defineConfig({
     lastUpdated: { text: 'Last updated' },
     footer: {
       message:
-        'Released under the MIT licence. <a href="https://www.unrwa.org">In support of Palestine 🇵🇸</a> — donate if you can.',
-      copyright: 'Built with VitePress, deployed on GitHub Pages'
+        '<a href="https://www.unrwa.org">In support of Palestine 🇵🇸</a> — donate if you can.'
     }
   }
 })
