@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# npm's postinstall hook: a global install of the published package finishes
+# the job itself, so `npm i -g terminal-ai-helper` is the whole install — the
+# same steps, the same welcome, the same report as the other two doors.
+#
+# Two guards stand before the installer:
+#   * only a *global* install reaches it. npm hands every script the config as
+#     npm_config_* environment, so npm_config_global tells a `-g` install from
+#     a dev `npm i` in a checkout of this repo — which must never edit anyone's
+#     rc files. The node_modules check is the second answer, for a package
+#     manager that speaks the same layout but not the same variable.
+#   * TAI_SKIP_POSTINSTALL=1 skips it, for scripts and containers that want
+#     the files on disk only.
+set -u
+here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+global=""
+case "${npm_config_global:-}" in
+  true | 1 | yes) global=1 ;;
+esac
+if [ -z "$global" ]; then
+  case "$here" in */node_modules/*) global=1 ;; esac
+fi
+[ -n "$global" ] || exit 0
+[ "${TAI_SKIP_POSTINSTALL:-0}" = "1" ] && exit 0
+
+if TAI_INSTALL_METHOD=npm bash "$here/install.sh"; then
+  exit 0
+fi
+status=$?
+# The package itself is on disk; an installer that could not finish (no
+# writable rc file, an odd HOME) must not fail the npm install over it — that
+# would roll the package back and leave nothing at all. The retry is the same
+# installer, named by its path in the package npm just unpacked.
+echo "tai: automatic setup did not finish (exit $status) — finish with: bash \"$here/install.sh\"" >&2
+exit 0

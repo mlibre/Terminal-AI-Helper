@@ -11,7 +11,8 @@ tai/engine.py       ranker; the W_* weights live at the top and `tai tune` rewri
                     `explain` names the factors behind one candidate's score, pinned to
                     suggest's totals by the web suite
 tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`;
-                    `shadow_map` ranks a rare near-duplicate line under its stronger twin
+                    `shadow_map` ranks a rare near-duplicate line under its stronger
+                    twin, case folded into the comparison
 tai/store.py        SQLite log (WAL), schema, oldest-first loader, history import
 tai/paths.py        path liveness, `cd` destinations, "does this line end in a file"
 tai/fresh.py        the files a path argument could be — the one-shot half
@@ -36,9 +37,12 @@ tai/evaluate.py     labeled candidate evaluation (+ evaluate_jev.py, hosted)
 tai/__init__.py     nothing: a package root that re-exported its modules once cost
                     a circular import, so every caller names the module it wants
 
-plugins/tai.zsh     loader for the zsh plugin: index, lookup, files, menu, widgets
-plugins/tai.bash    loader for the bash plugin: index, lookup, files, keys
+plugins/tai.zsh     loader for the zsh plugin: index, lookup, files, units, menu, widgets
+plugins/tai.bash    loader for the bash plugin: index, lookup, files, units, keys
 
+bin/npm-postinstall npm's postinstall hook: a global install runs install.sh from
+                    the unpacked package, so `npm i -g` is the whole install
+                    (TAI_SKIP_POSTINSTALL=1 opts out)
 install.sh          wrapper, rc lines, plugin zcompile, autosuggestions pause
 scripts/build_deb.sh the .deb package CI attaches to every release
 docs/               the website: VitePress sources (config in docs/.vitepress/),
@@ -56,17 +60,21 @@ tests/test_smoke_cli.py     learn-on-use, discovery, wrappers, refresh, the inde
 tests/test_cli.py           every verb's conversation: what it prints, what it refuses
 tests/test_spool.py         the spool: framed records, drain, flush, learning bounds
 tests/test_smoke_install.py sequence table, history files, safety, lock, install
+tests/test_npm.py           the npm door: postinstall guard, update from a node_modules tree
 tests/test_deb.py           the package: builds, installs its tree, runs
 tests/test_jev.py           the decision contract
 tests/test_typo.py          the banded distance against a reference, gates, shadows
 tests/test_engcache.py      the engine cache: round-trip identity, every fall-back
 tests/test_web.py           the dashboard: routes, binding, engine agreement
+tests/test_rules.py         the suggestion rules, one by one, both rankers
 tests/plugin_env.py         paths, key names and the index fixture the pty tests share
 tests/plugin_pty.py         a real shell on a pty, plus check/probe/Ghosts
 tests/plugin_screen.py      a terminal-screen model, so "which cell is selected" is askable
 tests/test_plugins.py       lookups: completions, wrappers, per-shell index
-tests/test_plugins_menu.py  the Tab menu: entries, selection, the stem
+tests/test_plugins_case.py  case-insensitive answers: the ghost, the menu, the disk, the unit list
+tests/test_plugins_menu.py  the Tab menu: entries, selection, the stem, the shared head
 tests/test_plugins_draw.py  what is drawn: ghost text, hints, colours, load order
+tests/test_plugins_isearch.py the ^R search: tai answers nothing inside it, blind hooks included
 tests/test_plugins_files.py a line ending in a file, its caps and roots agreement
 tests/test_plugins_wide.py  double-width file names, drawn and highlighted right
 tests/test_plugins_index.py a rebuild an open shell picks up, and recording
@@ -75,9 +83,9 @@ tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
                             the system's, then this — the pty suite runs anywhere
 ```
 
-Seventeen entry points, each a script of assertions that prints what it found,
-and each runnable on its own; `./tests/test.sh` runs them all. Three share
-`smoke_env.py` and seven share the `plugin_*` modules, so a scratch database, a
+Twenty-one entry points, each a script of assertions that prints what it found,
+and each runnable on its own; `./tests/test.sh` runs them all. Seven share
+`smoke_env.py` and nine share the `plugin_*` modules, so a scratch database, a
 fixture or a key name is written once. Two consequences: **a test function no
 `main()` calls is not a test** — adding a test means adding the call — and
 **the shared modules are the only copy**: a test that defines its own fixture,

@@ -6,9 +6,9 @@
 #     ./tests/test.sh --fast       skip the pty suite, which is nearly all the time
 #
 # Every suite is a script of assertions that prints what it found, and each has a
-# `main()` nothing calls except this. The three smoke scripts and the six pty
-# entry points share their setup through tests/smoke_env.py and tests/plugin_*.py,
-# so a fixture or a key name is written once.
+# `main()` nothing calls except this. The smoke scripts and the pty entry points
+# share their setup through tests/smoke_env.py and tests/plugin_*.py, so a
+# fixture or a key name is written once.
 #
 # Nearly all of the runtime is the pty suite driving real bash and zsh. It used
 # to be much worse, and for the same reason twice: `time.sleep` where a wait was
@@ -64,6 +64,7 @@ step "smoke cli"     python3 tests/test_smoke_cli.py
 step "spool"         python3 tests/test_spool.py
 step "cli"           python3 tests/test_cli.py
 step "smoke install" python3 tests/test_smoke_install.py
+step "npm"           python3 tests/test_npm.py
 step "deb"           python3 tests/test_deb.py
 step "jev"           python3 tests/test_jev.py
 step "typo"          python3 tests/test_typo.py

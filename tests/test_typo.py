@@ -121,17 +121,19 @@ def test_shadow_map_gates_are_invisible() -> None:
     """
     def gateless(eng, lines):
         names = [c for c in lines if c in eng.cmds]
-        sets = {c: set(c) for c in names}
+        low = {c: c.lower() for c in names}
+        sets = {c: set(low[c]) for c in names}
         groups: dict[str, dict[int, list[str]]] = {}
         for c in names:
-            groups.setdefault(c.split(" ", 1)[0], {}) \
+            groups.setdefault(low[c].split(" ", 1)[0], {}) \
                   .setdefault(len(c), []).append(c)
+        tkey = {c: (0, c) if low[c] == c else (1, c) for c in names}
         out: dict[str, str] = {}
         for cmd in names:
             st = eng.cmds[cmd]
             if st.freq > TYPO_FREQ_MAX:
                 continue
-            buckets = groups.get(cmd.split(" ", 1)[0])
+            buckets = groups.get(low[cmd].split(" ", 1)[0])
             if not buckets:
                 continue
             s_set = sets[cmd]
@@ -146,12 +148,12 @@ def test_shadow_map_gates_are_invisible() -> None:
                         continue
                     ost = eng.cmds[other]
                     oev = (ost.success, ost.freq, ost.last_ts)
-                    if oev < ev or (oev == ev and other > cmd):
+                    if oev < ev or (oev == ev and tkey[other] > tkey[cmd]):
                         continue
-                    if lev1(cmd, other, 2) > 2:
+                    if lev1(low[cmd], low[other], 2) > 2:
                         continue
                     if best is None or oev > best[0] or \
-                            (oev == best[0] and other < best[1]):
+                            (oev == best[0] and tkey[other] < tkey[best[1]]):
                         best = (oev, other)
             if best is not None:
                 out[cmd] = best[1]
@@ -188,7 +190,8 @@ def test_shadow_map_rules() -> None:
     # A one-off typo of a stronger spelling is mapped to it.
     add("tai uninstall", 1, 1, 1_000)
     add("tai unsintall", 1, 1, 1_000)
-    # …the tie broken toward the lexically smaller line.
+    # …the tie broken toward the likelier spelling: both lowercase here, so
+    # byte order stands.
     check("full tie maps to the smaller spelling",
           shadow_map(eng, list(eng.cmds))["tai unsintall"], "tai uninstall")
     # A habit is not a shadow: three runs is past TYPO_FREQ_MAX.
@@ -208,6 +211,43 @@ def test_shadow_map_rules() -> None:
     eng3.add("gat status", ts=1_000, exit_code=0, _prev="")
     check("a different first word is nobody's typo",
           shadow_map(eng3, list(eng3.cmds)), {})
+
+
+def test_shadow_map_case() -> None:
+    """Case is spelling, not identity: the capital twin is the typo.
+
+    The lookups fold case everywhere else in the product, so a rare line
+    recorded with its Shift held must not stand beside its lowercase habit
+    as a row of its own — the pair loop folds case the same way, and a full
+    evidence tie falls to the all-lowercase spelling.
+    """
+    def add(eng, cmd, success, freq, last_ts):
+        for _ in range(success):
+            eng.add(cmd, ts=last_ts, exit_code=0, _prev="")
+        for _ in range(freq - success):
+            eng.add(cmd, ts=last_ts, exit_code=1, _prev="")
+
+    # A one-off capital twin of a habit maps to it — the first words only
+    # share a group folded ('Docker' vs 'docker'), which is the point.
+    eng = Engine()
+    add(eng, "docker ps", 4, 4, 1_000)
+    add(eng, "Docker ps", 1, 1, 2_000)
+    check("a capital twin shadows the habit",
+          shadow_map(eng, list(eng.cmds)), {"Docker ps": "docker ps"})
+    # Four case substitutions clear the raw two-edit cap; folded, the pair
+    # is distance zero — and the full tie falls to the lowercase spelling.
+    eng2 = Engine()
+    add(eng2, "LS -la /x", 1, 1, 1_000)
+    add(eng2, "ls -la /x", 1, 1, 1_000)
+    check("a case diff past the raw cap still shadows, lowercase stands",
+          shadow_map(eng2, list(eng2.cmds)), {"LS -la /x": "ls -la /x"})
+    # Evidence beats casing: the stronger spelling is the target whatever
+    # case it was recorded with.
+    eng3 = Engine()
+    add(eng3, "docker ps", 1, 1, 1_000)
+    add(eng3, "Docker pss", 2, 2, 1_000)
+    check("the stronger spelling is the target, whatever its case",
+          shadow_map(eng3, list(eng3.cmds)), {"docker ps": "Docker pss"})
 
 
 def test_near_miss_lines() -> None:
@@ -263,6 +303,7 @@ def main() -> int:
     test_lev1_against_reference()
     test_shadow_map_gates_are_invisible()
     test_shadow_map_rules()
+    test_shadow_map_case()
     test_near_miss_lines()
     test_first_word_cache_retirement()
     print()

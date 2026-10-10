@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # tai installer — Linux, stdlib python only, <30 seconds.
 #
-# Two doors, one install: from a checkout (./install.sh), or the one line the
+# Three doors, one install: from a checkout (./install.sh), the one line the
 # readme leads with —
 #   curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 # — where curl's output reaches bash on stdin and the repository has to be
-# fetched before anything below can run. The piped door clones to ~/.tai
+# fetched before anything below can run, and npm's postinstall hook, which
+# runs this script from the package npm just unpacked (bin/npm-postinstall
+# guards it). The piped door clones to ~/.tai
 # (TAI_DIR moves it; TAI_REMOTE points it at a fork) and then executes the
-# cloned copy of this very script, so both doors run the same steps from a
+# cloned copy of this very script, so every door runs the same steps from a
 # real checkout and there is exactly one installer to read.
 set -euo pipefail
 
@@ -130,7 +132,7 @@ if add:
     kept.append("# asynchronously, so tai's own hints never reach the screen. Both work.\n")
     kept.append("# Removed by `tai uninstall`, and by TAI_KEEP_AUTOSUGGEST=1.\n")
     kept.append("add-zsh-hook -d precmd _zsh_autosuggest_start 2>/dev/null\n")
-tmp = path.with_name(path.name + ".tai-install")
+tmp = path.with_name(path.name + ".tai-new")
 tmp.write_text("".join(kept), encoding="utf-8", errors="surrogateescape")
 os.replace(tmp, path)
 PY
@@ -181,7 +183,7 @@ if not has_source:
 # Replaced atomically, the same rule the index builder follows. This file is the
 # user's shell: an interrupt between truncate and write would otherwise leave a
 # half-written .zshrc and a shell that cannot start.
-tmp = path.with_name(path.name + ".tai-install")
+tmp = path.with_name(path.name + ".tai-new")
 tmp.write_text("".join(cleaned), encoding="utf-8", errors="surrogateescape")
 os.replace(tmp, path)
 PY

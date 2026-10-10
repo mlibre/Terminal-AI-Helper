@@ -27,7 +27,9 @@ answered by the habit it shadows](assets/demo.gif)
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-npm installs the same files: `npm i -g terminal-ai-helper`, then `tai-install`.
+npm is a door to the same install: `npm i -g terminal-ai-helper` unpacks the
+same files and runs the same installer itself, and `tai update` knows an npm
+install and updates it from the registry.
 
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
 again later and it updates in place. It enables both shells, imports your
@@ -71,7 +73,8 @@ machine. New commands show up within seconds; no restart, ever.
 | `Ctrl-F`                | take the hint                                                                                                  |
 | `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`)                                   |
 | `Tab`                   | write what every candidate shares, then cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
-| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection                                              |
+| `Ctrl-Space` / `Ctrl-T` | open the list, hint or no hint; press again to move the selection (zsh)                                        |
+| `Down`                  | peek at what usually follows — opens the list when the typed line shows no hint; history otherwise (zsh)        |
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line                                               |
 | `Alt-G`                 | the command that followed the last one (bash)                                                                  |
 
@@ -79,9 +82,9 @@ A paste is not a query — pasted text never opens a list, and one typed
 character brings it back. `Enter` fills a selection in and stops; running it
 is always a second, deliberate `Enter`.
 
-**bash** ranks identically and takes the same keys, but readline cannot draw
-a list below the line: `Tab` completes directly — after `tai` by default,
-after every command with `TAI_COMPLETE_ALL=1`.
+**bash** ranks identically and takes the hint keys, but readline cannot draw
+a list below the line and has no menu key: `Tab` completes directly — after
+`tai` by default, after every command with `TAI_COMPLETE_ALL=1`.
 
 ## What it suggests, and what it will not
 
@@ -104,6 +107,9 @@ memory, an array hit in microseconds.
 - **A path is answered by the filesystem** — what is actually there, newest
   first. A `cd` is answered by directories that exist here, judged from where
   you stand, not offered two directories away.
+- **`systemctl` is answered by the machine's own unit list.**
+  `systemctl restart her` cycles `nginx.service` and friends — read once,
+  held in the shell.
 - **A typo is answered by what it is a typo of.** When nothing extends the
   line, the learned lines that hold every word you typed appear; the one-off
   typo ranks below the habit it shadows, in the index itself.
@@ -142,7 +148,7 @@ tai doctor      # what is indexed, and what is held back
 tai bench       # build time, latency, memory, each shell's index read time
 tai web         # a read-only localhost dashboard (alias: tai dashboard)
 tai eval        # candidate coverage against your own history
-tai update      # newest version from GitHub, then reinstall (alias: tai upgrade)
+tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
 tai version     # print the release this install is running
 tai purge       # drop unusable rows, then rebuild
 tai forget git sta   # drop every stored row for a command, exactly as typed
@@ -191,7 +197,7 @@ release; it puts `tai` on `PATH` and prints the two `source` lines for your
 rc file.
 
 ```sh
-tai update      # newest version from GitHub, then reinstall; alias: tai upgrade
+tai update      # newest version — GitHub for a checkout, npm for an npm install; alias: tai upgrade
 ```
 
 It stops rather than overwrite a copy you have edited yourself.
@@ -201,8 +207,9 @@ tai uninstall
 ```
 
 Removes the shell integration, the wrapper, the indexes, the SQLite history
-and the cached knowledge. The `~/.tai` folder stays; restart the terminal
-afterwards.
+and the cached knowledge. The `~/.tai` folder stays — on an npm install,
+`npm rm -g terminal-ai-helper` removes the package itself. Restart the
+terminal afterwards.
 
 ## Why it stays fast
 

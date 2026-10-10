@@ -10,7 +10,8 @@ updating, and diagnostics.
     tai record "<cmd>" [--cwd X --git Y --branch B --exit 0]
     tai flush              ingest the records the plugins spooled, then maintain
     tai refresh [--quiet]
-    tai update | upgrade   pull the latest version from GitHub and reinstall
+    tai update | upgrade   pull the latest version and reinstall — from GitHub
+                           for a checkout install, from npm for an npm one
     tai version            print the release this install is running
     tai discover [tool ...]
     tai purge [--stale] [--rebuild/--no-rebuild]
@@ -149,14 +150,107 @@ def cmd_refresh(a) -> int:
     return 0
 
 
-def cmd_update(a) -> int:
-    """Pull the latest version of the checkout and reinstall it.
+def _install_method(repo: "Path") -> str:
+    """'npm', 'git', or 'none' — decided by where the running code lives.
 
-    The user should never have to remember which folder the project lives in to
-    get a new version, so this is driven from where tai already is rather than
-    from a path they have to type.
+    The wrapper execs one cli.py, and that file's location is the copy an
+    update has to replace, so the method is a fact about the path, not about
+    the user's memory of how they installed: npm keeps every global package
+    under a node_modules directory, a checkout keeps its .git, and anything
+    else (the .deb, a hand-copied tree) is 'none' — nothing here can pull it
+    forward, and the answer says so instead of guessing.
+    """
+    if "node_modules" in repo.parts:
+        return "npm"
+    if (repo / ".git").exists():
+        return "git"
+    return "none"
+
+
+def _npm_configured() -> bool:
+    """True when npm's postinstall hook already ran the installer from the tree.
+
+    The hook runs install.sh inside the npm install itself, and rerunning it
+    from here would print the welcome twice and rebuild an index that is
+    current. The check is the installer's own two products — the wrapper
+    naming this tree and one rc line per shell sourcing it — asked of the text
+    npm's layout guarantees is unquoted through the middle: a prefix path with
+    a space in it comes out of printf %q escaped, but everything from
+    node_modules down survives intact.
+    """
+    from pathlib import Path
+
+    tail = "node_modules/terminal-ai-helper"
+    wrapper = (Path(os.environ.get("BIN_DIR") or Path.home() / ".local" / "bin")
+               / "tai")
+    try:
+        text = wrapper.read_text(encoding="utf-8", errors="surrogateescape")
+    except OSError:
+        return False
+    if f"{tail}/tai/cli.py" not in text:
+        return False
+    home = Path.home()
+    for rc, plugin in ((".zshrc", "tai.zsh"), (".bashrc", "tai.bash")):
+        try:
+            lines = (home / rc).read_text(
+                encoding="utf-8", errors="surrogateescape").splitlines()
+        except OSError:
+            return False
+        if not any("source" in line and f"{tail}/plugins/{plugin}" in line
+                   for line in lines):
+            return False
+    return True
+
+
+def _update_npm(repo: "Path") -> int:
+    """The npm door of `tai update`: let the registry replace the package.
+
+    npm's own output streams through — the install can take several seconds
+    and its progress is the only thing the user sees while it runs — and the
+    postinstall hook finishes the reinstall from the new tree unless scripts
+    were skipped (--ignore-scripts) or it failed, in which case the installer
+    runs here instead: idempotent, and the same report as every other door.
+    """
+    import shutil
+    import subprocess
+
+    npm = shutil.which("npm")
+    if not npm:
+        print("tai: npm is not installed, so there is nothing to update from")
+        print("     reinstall with: npm i -g terminal-ai-helper@latest")
+        return 1
+    before = _read_version()
+    pulled = subprocess.run([npm, "install", "-g", "terminal-ai-helper@latest"])
+    if pulled.returncode != 0:
+        print("tai: npm install failed — the previous version is still installed")
+        return 1
+    after = _read_version()
+    # Flushed before anything else prints: npm's own output above is the
+    # progress, and this line is the verdict.
+    print("✓ already up to date" if after == before else f"✓ updated to {after}",
+          flush=True)
+    if after == before or _npm_configured():
+        return 0
+    installer = repo / "install.sh"
+    if not installer.exists():
+        print(f"tai: {installer} is missing, so the new code was not installed")
+        return 1
+    # A subprocess, not a re-entrant call: the install just replaced the files
+    # this process was loaded from, so anything it calls now is the old code.
+    return subprocess.run(["bash", str(installer)]).returncode
+
+
+def cmd_update(a) -> int:
+    """Pull the latest version and reinstall it, from wherever tai came from.
+
+    The user should never have to remember which folder the project lives in —
+    or which package manager put it there — so this is driven from where tai
+    already is rather than from a path they have to type.
     """
     repo = _repo_dir()
+    if _install_method(repo) == "npm":
+        return _update_npm(repo)
+
     import shutil
     import subprocess
 

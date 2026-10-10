@@ -43,14 +43,16 @@ features:
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-npm installs the same files: `npm i -g terminal-ai-helper`, then `tai-install`.
+npm is a door to the same install: `npm i -g terminal-ai-helper` unpacks the
+same files and runs the same installer itself, and `tai update` knows an npm
+install and updates it from the registry.
 
 </div>
 
 Start with [the keys](/usage), or read [how it is built](/architecture). Your
 history never leaves the machine — secrets and stray keys are filtered out
-before anything is stored — and uninstall is one command that removes
-everything.
+before anything is stored — and `tai uninstall` removes the integration, the
+data and the wrapper in one command.
 
 <style>
 .demo { margin: 2.5rem 0 1rem; }

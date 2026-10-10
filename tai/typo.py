@@ -212,10 +212,18 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
       * the two share their first word and are within two edits whole-line,
         which is the shape a mistyped word takes (`unsintall`/`uninstall` is
         two adjacent swaps, invisible to a one-edit rule);
+      * the comparison folds case — every lookup in the product folds case,
+        and the pair loop must agree, or `LS -la` stands beside `ls -la` as
+        its own row (the first words land in different groups) and a case
+        diff longer than two letters clears the edit cap. A capital twin is
+        a typo of the lowercase habit no less than a misspelling is; the
+        map's keys keep the store's own spelling either way;
       * the target is the *stronger* spelling: more successes, then more
         runs, then more recent — and when the evidence ties outright, the
-        lexically smallest of the near-duplicates stands, which is the one
-        honest way to break a tie the store carries no other evidence for;
+        spelling that is all-lowercase stands (commands are lowercase; the
+        capitalised twin is the accident), byte order otherwise, which is
+        the one honest way to break a tie the store carries no other
+        evidence for;
       * the population both sides come from is `lines`: the index passes the
         lines the user actually ran (a corpus convention is not a typo and
         not a habit one shadows), the engine passes the candidates it is
@@ -229,6 +237,9 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
     """
     names = list(eng.cmds) if lines is None else \
         [c for c in lines if c in eng.cmds]
+    # The comparison runs on lowered copies — see the case bullet above —
+    # while every key this map returns is the store's own spelling.
+    low = {c: c.lower() for c in names}
     # Per-line letter sets and counts: the two cheap gates before the edit
     # distance. Two lines within two edits can differ by at most two distinct
     # letters per side (the set gate) and by at most two in character surplus
@@ -238,20 +249,23 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
     # is a pair the distance would reject too. The counts also answer the
     # deficit for free — surplus minus the length difference is deficit, by
     # conservation of characters — so one walk per pair gates both sides.
-    sets = {c: set(c) for c in names}
+    sets = {c: set(low[c]) for c in names}
     counts = {c: {} for c in names}
     for c, bag in counts.items():
-        for ch in c:
+        for ch in low[c]:
             bag[ch] = bag.get(ch, 0) + 1
     groups: dict[str, dict[int, list[str]]] = {}
     for c in names:
-        groups.setdefault(c.split(" ", 1)[0], {}).setdefault(len(c), []).append(c)
+        groups.setdefault(low[c].split(" ", 1)[0], {}).setdefault(len(c), []).append(c)
+    # The full-tie spelling to stand: all-lowercase first (commands are
+    # lowercase; the capitalised twin is the accident), byte order otherwise.
+    tkey = {c: (0, c) if low[c] == c else (1, c) for c in names}
     out: dict[str, str] = {}
     for cmd in names:
         st = eng.cmds[cmd]
         if st.freq > TYPO_FREQ_MAX:
             continue
-        buckets = groups.get(cmd.split(" ", 1)[0])
+        buckets = groups.get(low[cmd].split(" ", 1)[0])
         if not buckets:
             continue
         s_set = sets[cmd]
@@ -281,14 +295,14 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
                 ost = eng.cmds[other]
                 oev = (ost.success, ost.freq, ost.last_ts)
                 # The target must be the stronger spelling — or, on a full
-                # tie, the smaller one. Anything weaker is somebody else's
-                # shadow, not this line's habit.
-                if oev < ev or (oev == ev and other > cmd):
+                # tie, the likelier spelling (the tie bullet above). Anything
+                # weaker is somebody else's shadow, not this line's habit.
+                if oev < ev or (oev == ev and tkey[other] > tkey[cmd]):
                     continue
-                if lev1(cmd, other, 2) > 2:
+                if lev1(low[cmd], low[other], 2) > 2:
                     continue
                 if best is None or oev > best[0] or \
-                        (oev == best[0] and other < best[1]):
+                        (oev == best[0] and tkey[other] < tkey[best[1]]):
                     best = (oev, other)
         if best is not None:
             out[cmd] = best[1]

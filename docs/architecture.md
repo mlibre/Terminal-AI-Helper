@@ -109,7 +109,9 @@ and is not published by the index at all, its rows kept in SQLite. The same
 module owns the shadow rule
 (`shadow_map`): a rare line that nearly duplicates a stronger one is ranked
 just below it, in the engine and the index alike, however the rows'
-frequencies, timestamps and exit codes tie. The full weight list lives at the
+frequencies, timestamps and exit codes tie, and whether the two spellings
+disagree about case — a full tie falls to the all-lowercase spelling. The
+full weight list lives at the
 top of
 `tai/engine.py`, and the built engine is marshaled beside the store for the
 one-shot paths, keyed on the store file itself — a new row invalidates it
