@@ -41,15 +41,10 @@ features:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
-# or, from a checkout:
-#   git clone https://github.com/mlibre/terminal-ai-helper
-#   cd terminal-ai-helper && ./install.sh
 ```
 
 </div>
 
-The demo above is a recording of the real plugin on a real pty — re-recorded
-by `scripts/make_demo_gif.py` whenever the product moves, never drawn by hand.
 Start with [the keys](/usage), or read [how it is built](/architecture): a
 builtin append per command, a SQLite store, a build-time ranker, and two
 shell-sourceable indexes the prompt answers from in microseconds.

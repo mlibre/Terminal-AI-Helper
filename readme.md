@@ -6,56 +6,50 @@
 Native zsh and bash — no server, no daemon, no Python on your keystrokes.
 Everything runs on your machine, offline, stdlib only.
 
-Type `docker` and a grey hint appears: `compose up -d`. `→` takes it. Press
+Type `systemctl` and a grey hint appears: `restart nginx`. `→` takes it. Press
 `Tab` and your own history answers what usually comes next. It is
 autocomplete that knows *you*:
 
 ```text
-docker <→>            docker compose up -d    ← the hint, taken
+systemctl <→>         restart nginx           ← the hint, taken
 git <Tab>             pull      status        ← your habits, ranked
-cd media/mlibre/B/<Tab>          Clip/  Movies/  Projects/
+cd D<Tab>             Desktop/  Documents/  Downloads/
 ```
 
 ![tai in action — the hint, the ranked list, the filesystem, a typo
 answered by the habit it shadows](assets/demo.gif)
 
-The demo is a recording of the real plugin on a real pty, not an animation —
-re-record it whenever the product moves: `python3 scripts/make_demo_gif.py`
-(its only dependencies are `pip install pyte pillow`).
-
 [Docs](docs/architecture.md) · [Development](docs/development.md) · [Docs site](https://mlibre.github.io/Terminal-AI-Helper/) · [فارسی](readme-fa.md)
 
 ## Install
-
-One line — no manual clone. It fetches the checkout to `~/.tai` and runs the
-same installer from it; run it again later and it updates that checkout in
-place:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-Prefer to see the code first? The identical installer runs from any clone:
-
-```sh
-git clone https://github.com/mlibre/terminal-ai-helper
-cd terminal-ai-helper
-./install.sh
-```
-
-The installer enables both shells, imports your history, and builds the first
-index — progress, a short welcome, and one command to copy:
+The line fetches the checkout to `~/.tai` and runs the same installer from
+it; run it again later and it updates that checkout in place. It enables
+both shells, imports your history, and builds the first index — progress, a
+short welcome, and one command to copy:
 
 ```text
 → cloning tai to /home/you/.tai…
+→ learning from your history, building the index…
 ✓ zsh installed
 ✓ bash installed
    _
   | |_  __ _ ___     the terminal that knows your next command
   | ' \/ _` (_-<
   |_||_\__,_/__/
-  … the three things worth knowing, and the keys
 
+  1. Type a few letters — tai finishes the command in grey. → takes it.
+  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
+  3. It learns from your history — offline, private, no account.
+
+  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list
+             Down peeks at what usually follows
+
+  Try it now: type "cd " and watch the grey.
 → exec zsh
 ```
 
@@ -231,11 +225,9 @@ without the plugin, must be told where the history is.
 
 ## Releases, update and uninstall
 
-Every push that passes the tests is released on GitHub as `v<VERSION>` (from
-the `VERSION` file at the repo root — `v1.0.0`, not a date with a hash), with
-a ready-to-install `tai_<version>_all.deb` attached. The .deb puts `tai` on
-`PATH` and the plugins under `/usr/lib/tai`; its postinst prints the two
-`source` lines to add to your rc file.
+A ready-to-install `tai_<version>_all.deb` is attached to every GitHub
+release. The .deb puts `tai` on `PATH` and the plugins under `/usr/lib/tai`;
+its postinst prints the two `source` lines to add to your rc file.
 
 ```sh
 tai update      # git pull --ff-only from GitHub, then reinstall; alias: tai upgrade

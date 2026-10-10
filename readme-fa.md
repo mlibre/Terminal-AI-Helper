@@ -7,58 +7,51 @@
 پایتون، سوکت یا سرویس پس‌زمینه در مسیر کلیدها. آفلاین، فقط کتابخانه‌ی
 استاندارد.
 
-`docker` را تایپ کنید ← راهنمای خاکستری `compose up -d`؛ `→` یا `Ctrl-F`
+`systemctl` را تایپ کنید ← راهنمای خاکستری `restart nginx`؛ `→` یا `Ctrl-F`
 آن را می‌گیرد، `Alt-F` یک کلمه را. خط خالی، فرمان بعدیِ فرمان قبلی‌تان را
 پیش‌بینی می‌کند. `Tab` فایل‌ها، پوشه‌ها و گزینه‌ها را می‌چرخاند؛ `Ctrl-Space`
 فهرستی را باز می‌کند که پیش‌تر ببینیدش:
 
 ```text
-git <→>            git pull --rebase        ← راهنما، گرفته شد
+systemctl <→>      systemctl restart nginx  ← راهنما، گرفته شد
 git <Tab>          pull      status          ← فهرست، زیر خط
-git <Tab> <Enter>          git pull         ← یک مورد انتخاب شد، خط آماده است
+cd D<Tab>          Desktop/  Documents/  Downloads/
 ```
 
 ![tai در حال کار — راهنما، فهرست رده‌بندی‌شده، پاسخِ سیستم فایل و تایپوی
 که با عادتش پاسخ می‌گیرد](assets/demo.gif)
 
-این دمو ضبطِ واقعیِ افزونه روی یک pty است، نه انیمیشن — هر وقت محصول جلو رفت
-دوباره ضبطش کنید: `python3 scripts/make_demo_gif.py` (تنها وابستگی‌اش
-`pip install pyte pillow` است).
-
 [معماری](docs/architecture.md) · [توسعه](docs/development.md) · [سایت مستندات](https://mlibre.github.io/Terminal-AI-Helper/) · [English](readme.md)
 
 ## نصب
-
-یک خط — بدون کلون دستی. این فرمان مخزن را در `~/.tai` می‌گیرد و همان
-نصب‌کننده را از آن اجرا می‌کند؛ اجرای دوباره‌اش بعداً همان مخزن را در‌جا
-به‌روز می‌کند:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-اگر ترجیح می‌دهید اول کد را ببینید، همان نصب‌کننده از روی هر کلونی هم همین‌طور
-کار می‌کند:
-
-```sh
-git clone https://github.com/mlibre/terminal-ai-helper
-cd terminal-ai-helper
-./install.sh
-```
-
-نصب‌کننده برای هر دو پوسته افزونه را فعال، تاریخچه‌ی موجودتان را وارد و
-نمایه را می‌سازد — پیشرفت، یک خوش‌آمد کوتاه، و یک فرمان برای کپی:
+این فرمان مخزن را در `~/.tai` می‌گیرد و همان نصب‌کننده را از آن اجرا می‌کند؛
+اجرای دوباره‌اش بعداً همان مخزن را در‌جا به‌روز می‌کند. نصب‌کننده برای هر دو
+پوسته افزونه را فعال، تاریخچه‌ی موجودتان را وارد و نمایه را می‌سازد —
+پیشرفت، یک خوش‌آمد کوتاه، و یک فرمان برای کپی:
 
 ```text
 → cloning tai to /home/you/.tai…
+→ learning from your history, building the index…
 ✓ zsh installed
 ✓ bash installed
    _
   | |_  __ _ ___     the terminal that knows your next command
   | ' \/ _` (_-<
   |_||_\__,_/__/
-  … سه نکته‌ی اصلی و کلیدها
 
+  1. Type a few letters — tai finishes the command in grey. → takes it.
+  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
+  3. It learns from your history — offline, private, no account.
+
+  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list
+             Down peeks at what usually follows
+
+  Try it now: type "cd " and watch the grey.
 → exec zsh
 ```
 
@@ -282,11 +275,9 @@ bash را.
 
 ## انتشار، به‌روزرسانی و حذف نصب
 
-هر فرمانی که آزمون‌ها را سبز کند در GitHub به‌صورت `v<VERSION>` منتشر می‌شود
-(از فایل `VERSION` در ریشه — `v1.0.0`، نه تاریخ با هش)، با فایل آماده‌ی نصب
-`tai_<version>_all.deb` کنار انتشار. بسته‌ی .deb فرمان `tai` را روی `PATH`
-و افزونه‌ها را زیر `/usr/lib/tai` می‌گذارد؛ postinst دو خط `source` را که
-باید به rc اضافه کنید چاپ می‌کند.
+فایل آماده‌ی نصب `tai_<version>_all.deb` کنار هر انتشار GitHub هست. بسته‌ی
+.deb فرمان `tai` را روی `PATH` و افزونه‌ها را زیر `/usr/lib/tai` می‌گذارد؛
+postinst دو خط `source` را که باید به rc اضافه کنید چاپ می‌کند.
 
 ```sh
 tai update      # ‎git pull --ff-only از GitHub، سپس نصب دوباره؛ نام دیگر: tai upgrade

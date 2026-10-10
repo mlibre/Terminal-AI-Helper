@@ -5,33 +5,33 @@ what happens underneath, read [architecture.md](architecture.md).
 
 ## Install
 
-One line — no manual clone. It fetches the checkout to `~/.tai` and runs the
-same installer from it; run it again later and it updates that checkout in
-place:
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
 ```
 
-Prefer to see the code first? The identical installer runs from any clone:
-
-```sh
-git clone https://github.com/mlibre/terminal-ai-helper
-cd terminal-ai-helper
-./install.sh
-```
-
-The installer enables both shells, imports your history, and builds the first
-index — progress, a short welcome, and one command to copy:
+The line fetches the checkout to `~/.tai` and runs the same installer from
+it; run it again later and it updates that checkout in place. It enables
+both shells, imports your history, and builds the first index — progress, a
+short welcome, and one command to copy:
 
 ```text
 → cloning tai to /home/you/.tai…
+→ learning from your history, building the index…
 ✓ zsh installed
 ✓ bash installed
    _
   | |_  __ _ ___     the terminal that knows your next command
-  … the three things worth knowing, and the keys
+  | ' \/ _` (_-<
+  |_||_\__,_/__/
 
+  1. Type a few letters — tai finishes the command in grey. → takes it.
+  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
+  3. It learns from your history — offline, private, no account.
+
+  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list
+             Down peeks at what usually follows
+
+  Try it now: type "cd " and watch the grey.
 → exec zsh
 ```
 

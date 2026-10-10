@@ -19,6 +19,7 @@ SEED_COMMANDS = [
     "git status", "git diff", "git log --oneline", "git switch branch",
     "git checkout branch", "git branch --show-current", "git add .",
     "git commit -m message", "git push", "git pull --rebase",
+    "systemctl restart nginx", "systemctl status nginx", "systemctl enable nginx",
     "docker ps", "docker images", "docker compose up -d",
     "docker compose down", "docker compose logs -f", "docker build .",
     "kubectl get pods", "kubectl get pods -A", "kubectl describe pod NAME",
