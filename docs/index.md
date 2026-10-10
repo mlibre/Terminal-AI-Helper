@@ -53,7 +53,7 @@ the registry.
 Start with [the keys](/usage), or read [how it is built](/architecture). Your
 history never leaves the machine — secrets and stray keys are filtered out
 before anything is stored — and `tai uninstall` removes the integration, the
-data and the wrapper in one command.
+data, the wrapper and the `~/.tai` checkout in one command.
 
 <style>
 .demo { margin: 2.5rem 0 1rem; }

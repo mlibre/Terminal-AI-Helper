@@ -434,6 +434,19 @@ with tempfile.TemporaryDirectory() as piped_home:
     blocked = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": str(occupied)})
     assert blocked.returncode == 1, blocked.stdout
     assert "not a tai checkout" in blocked.stderr, blocked.stderr
+
+    # Uninstall takes the checkout with it: the clone is the code itself, and
+    # leaving it behind would leave the program installed in every way but the
+    # wrapper. Same redirect discipline as every other door — a subprocess in
+    # the sandbox HOME, never this process — and no TAI_DIR, so the default
+    # ~/.tai path under HOME is the one being exercised.
+    gone = subprocess.run(["python3", f"{REPO}/tai/cli.py", "uninstall"],
+                          env=_install_env(piped_home), capture_output=True,
+                          text=True, timeout=60)
+    assert gone.returncode == 0, gone.stderr
+    assert "tai removed" in gone.stdout, gone.stdout
+    assert not checkout.exists(), "the checkout the pipe cloned went with it"
+    assert not (pathlib.Path(piped_home) / "bin" / "tai").exists(), gone.stdout
 print("OK — the one-line install: clones, installs, updates, and asks before overwriting.")
 
 # Everything below speaks to a real zsh: the pause is install.sh editing a

@@ -565,9 +565,28 @@ def cmd_uninstall(a) -> int:
             tmp.write_text(new, encoding="utf-8", errors="surrogateescape")
             os.replace(tmp, rc)
             removed.append(str(rc))
+    # The piped door clones the code itself to TAI_DIR (default ~/.tai), and
+    # leaving it behind would leave the program installed in every way but the
+    # wrapper — the same rule the rc blocks above are held to. What makes the
+    # directory tai's is its layout: cli.py and the installer inside it. A
+    # directory without that shape is not ours to delete, so it is named and
+    # kept. Last on purpose: this command usually runs from inside the checkout
+    # (the wrapper execs this very file), so removing it has to be the last
+    # thing the run does.
+    checkout = Path(os.environ.get("TAI_DIR") or home / ".tai")
+    left = None
+    if checkout.exists():
+        if ((checkout / "tai" / "cli.py").exists()
+                and (checkout / "install.sh").exists()):
+            shutil.rmtree(checkout)
+            removed.append(str(checkout))
+        else:
+            left = checkout
     print("tai removed" if removed else "tai was not installed")
     for path in removed:
         print(f"  removed {path}")
+    if left:
+        print(f"  left {left} — not a tai checkout")
     return 0
 
 

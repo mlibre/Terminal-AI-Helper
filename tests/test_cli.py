@@ -301,6 +301,28 @@ def main() -> int:
     check("nothing installed is said plainly and succeeds",
           (r.returncode, r.stdout.strip()), (0, "tai was not installed"))
 
+    print("tai uninstall: the checkout goes with it, junk does not")
+    junk = pathlib.Path(env["HOME"]) / ".tai"
+    junk.mkdir(exist_ok=True)
+    (junk / "notes.txt").write_text("mine")
+    r = run("uninstall", env=env)
+    check("a folder that is not a checkout is named and kept",
+          (r.returncode, junk.exists(), "not a tai checkout" in r.stdout),
+          (0, True, True))
+
+    env = world("uninstall_checkout")
+    home = pathlib.Path(env["TAI_DB"]).parent
+    env = dict(env, HOME=str(home), TAI_DATA_DIR=str(home / "data"),
+               BIN_DIR=str(home / "bin"))
+    clone = home / ".tai"
+    (clone / "tai").mkdir(parents=True)
+    (clone / "tai" / "cli.py").write_text("# the shape the layout test asks for")
+    (clone / "install.sh").write_text("#")
+    r = run("uninstall", env=env)
+    check("a real checkout comes back out with the rest",
+          (r.returncode, clone.exists(), "tai removed" in r.stdout),
+          (0, False, True))
+
     print("the argument wall")
     env = world("args")
     r = run(env=env)
