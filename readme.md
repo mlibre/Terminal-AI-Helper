@@ -19,6 +19,10 @@ cd media/mlibre/B/<Ctrl-Space>   Clip/  Movies/  Projects/
 ![tai in action — the hint, the ranked list, the filesystem, a typo
 answered by the habit it shadows](assets/demo.gif)
 
+The demo is a recording of the real plugin on a real pty, not an animation —
+re-record it whenever the product moves: `python3 scripts/make_demo_gif.py`
+(its only dependencies are `pip install pyte pillow`).
+
 [Docs](docs/architecture.md) · [Development](docs/development.md) · [فارسی](readme-fa.md)
 
 ## Install

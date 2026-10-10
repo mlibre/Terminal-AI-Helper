@@ -21,6 +21,10 @@ git <Ctrl-Space> <Enter>   git pull         ← یک مورد انتخاب شد�
 ![tai در حال کار — راهنما، فهرست رده‌بندی‌شده، پاسخِ سیستم فایل و تایپوی
 که با عادتش پاسخ می‌گیرد](assets/demo.gif)
 
+این دمو ضبطِ واقعیِ افزونه روی یک pty است، نه انیمیشن — هر وقت محصول جلو رفت
+دوباره ضبطش کنید: `python3 scripts/make_demo_gif.py` (تنها وابستگی‌اش
+`pip install pyte pillow` است).
+
 [معماری](docs/architecture.md) · [توسعه](docs/development.md) · [English](readme.md)
 
 ## نصب

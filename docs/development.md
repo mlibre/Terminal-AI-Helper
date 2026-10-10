@@ -41,6 +41,10 @@ plugins/tai.bash    loader for the bash plugin: index, lookup, files, keys
 
 install.sh          wrapper, rc lines, plugin zcompile, autosuggestions pause
 scripts/build_deb.sh the .deb package CI attaches to every release
+scripts/make_demo_gif.py the readme demo, re-recorded from a real zsh on a pty:
+                    a scratch world, the four beats keystroke by keystroke, and
+                    a GitHub-dark renderer with the keycap strip — `pip install
+                    pyte pillow` and it runs anywhere the test suite runs
 VERSION             the release version; the release workflow tags v<VERSION>
 tests/smoke_env.py          the scratch database, index and imports they share
 tests/test_smoke.py         engine, store, path policy, ranking, fresh files
