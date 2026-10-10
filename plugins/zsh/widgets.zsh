@@ -70,6 +70,49 @@ if (( $+widgets[bracketed-paste] )) && \
 fi
 
 _tai_update() {
+  # Inside incremental search (^R) the line is the search's, not the editor's.
+  # Every step — a character into the pattern, ^R again stepping one match
+  # older — redraws, and this hook fires for those redraws: measured on the
+  # bundled zsh, every step of a search ran it with the matched line in the
+  # buffer, and each step paid for a full query — the index scan, the file
+  # liveness stats, the PATH probes, the loose glimpse — for a line nobody is
+  # editing. Three presses of ^R, three full queries: the shell the report
+  # came from hung under the search. The glimpse could even open over the
+  # bck-i-search prompt, because _TAI_TYPED was still set from the typing
+  # that preceded the search and a matched history line is a fine-looking
+  # prefix to it.
+  #
+  # The state the guard reads is the flag the isearch hooks bracket, and the
+  # obvious tokens are NOT it: on the zsh this was measured on, ZLE_STATE
+  # says "globalhistory insert" inside the search — no "isearch" word
+  # anywhere — and LASTWIDGET and KEYMAP stay stale or "main" through the
+  # steps. What zsh offers instead are the isearch hooks themselves:
+  # isearch-update fires when the search starts and at every step,
+  # isearch-exit when it ends, and the flag they raise and lower is exactly
+  # what this hook needs. ZLE_STATE stays as the second answer, for a zsh
+  # that reports the token or an add-zle-hook-widget too old for the isearch
+  # hooks: either answer is enough to stand down, and a zsh that offers
+  # neither is no worse than this plugin was before the report.
+  #
+  # Standing down is not doing nothing, once: what this hook drew before the
+  # search began is taken down, by the same ours-only rule the ordinary path
+  # below applies — a hint drawn for the pre-search line has no business
+  # hanging off the search's own. The search line is zsh's, and zsh renders
+  # it alone. The moment the search is over — an arrow key leaves it standing
+  # on the line it found, Enter runs that line — isearch-exit clears the
+  # flag, and the next redraw is an ordinary one: editing the line the search
+  # landed on is editing, and one typed or deleted character brings the ghost
+  # and the glimpse back, exactly as on any line that was never searched for.
+  if (( _TAI_ISEARCH )) || [[ "${ZLE_STATE:-}" == *isearch* ]]; then
+    _TAI_SUGGESTION=""
+    (( _TAI_MENU_IDX )) && _tai_menu_close
+    if (( _TAI_DREW )); then
+      POSTDISPLAY=""
+      region_highlight=()
+      _TAI_DREW=0
+    fi
+    return
+  fi
   local -i ours_was=$_TAI_DREW
   # What the last widget was decides whether this buffer is typed. The hook
   # runs after every widget, and the names here are the ones that mean an
@@ -480,9 +523,22 @@ _tai_line_init() {
   # its snapshots for a second after taking them, and a line that starts now
   # should not be answered by what was on disk while the last one was edited.
   _TAI_SNAP_AT=()
+  # And no search is still running on it either. A search that ended by
+  # running its line — Enter straight out of ^R — may never pass through the
+  # exit hook, and a flag carried into the next line would stand tai down for
+  # every keystroke of it. The hook pair is the truth; this is the belt.
+  _TAI_ISEARCH=0
   region_highlight=()
   _tai_menu_close
 }
+
+# The isearch flag the redraw hook stands down under, and the pair that
+# brackets it. Real functions of their own, because add-zle-hook-widget takes
+# a function name and not a code string — the same reason _tai_line_init is
+# one.
+typeset -gi _TAI_ISEARCH=0
+_tai_isearch_update() { _TAI_ISEARCH=1 }
+_tai_isearch_exit() { _TAI_ISEARCH=0 }
 
 # Both hook helpers ship with zsh but are only autoloadable, so a minimal
 # config (or `zsh -f`) leaves them unloaded. Without this the line-pre-redraw
@@ -503,6 +559,13 @@ if (( $+functions[add-zle-hook-widget] )); then
   add-zle-hook-widget line-pre-redraw _tai_update || print -u2 \
     "tai: zsh could not install its redraw hook — suggestions will not appear"
   add-zle-hook-widget line-init _tai_line_init
+  # The isearch pair is registered silently, and that is deliberate where the
+  # redraw hook above is loud: its absence hides nothing tai promised, it
+  # leaves the search exactly as heavy as it was before the report — the
+  # behaviour the user already had. One startup line per old shell, forever,
+  # would be noise paid for a guard that degrades gracefully on its own.
+  add-zle-hook-widget isearch-update _tai_isearch_update 2>/dev/null
+  add-zle-hook-widget isearch-exit _tai_isearch_exit 2>/dev/null
 else
   print -u2 "tai: zsh is missing add-zle-hook-widget — suggestions will not appear"
 fi
