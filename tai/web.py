@@ -358,7 +358,7 @@ _PAGE = r"""<!doctype html>
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
        font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
-       padding:30px 22px 70px}
+       padding:24px 22px 56px}
   .wrap{max-width:1120px;margin-inline:auto}
   header{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .brand{display:flex;align-items:center;gap:13px}
@@ -379,9 +379,9 @@ _PAGE = r"""<!doctype html>
        border:1px solid var(--warn);color:var(--warn);font-size:12.5px;
        background:var(--card)}
   h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;
-     color:var(--dim);margin:26px 0 9px;font-weight:600}
+     color:var(--dim);margin:20px 0 8px;font-weight:600}
   .card{background:var(--card);border:1px solid var(--line);
-        border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+        border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
   .cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);
         gap:18px;align-items:start}
   .cols2{display:grid;grid-template-columns:1fr 1.25fr;gap:18px;align-items:start}
@@ -452,8 +452,8 @@ _PAGE = r"""<!doctype html>
   .row .bar{height:7px;background:var(--bar);border-radius:4px;opacity:.8;
             transition:opacity .12s}
   .row:hover .bar{opacity:1}
-  .foot{color:var(--dim);font-size:11.5px;margin-top:36px;line-height:1.7;
-        border-top:1px solid var(--line);padding-top:16px}
+  .foot{color:var(--dim);font-size:11.5px;margin-top:26px;line-height:1.7;
+        border-top:1px solid var(--line);padding-top:12px}
   code{color:var(--acc);font-size:.95em}
   @media (max-width:940px){.cols,.cols2{grid-template-columns:1fr}
     .grid{grid-template-columns:1fr 1fr}}
@@ -466,7 +466,7 @@ _PAGE = r"""<!doctype html>
 <header>
   <div class="brand"><span class="logo">&gt;_</span>
     <div><h1><b>tai</b> dashboard</h1>
-    <div class="sub">what the helper learned from your shell — read-only, 127.0.0.1</div></div>
+    <div class="sub">what the helper learned from your shell</div></div>
   </div>
   <button id="theme" aria-label="toggle color theme">light</button>
 </header>
@@ -500,13 +500,10 @@ _PAGE = r"""<!doctype html>
 </section>
 </div>
 
-<div class="foot">the server binds 127.0.0.1 only and answers GETs alone;
-nothing on this page can write to the store. Feed it the way you feed the
-prompt: just keep using the shell — the shell index rebuilds itself within
-seconds of new commands — or <code>tai refresh</code> in a terminal.
-Click a suggestion or a most-run row to copy it; click a cwd below to ask
-about that directory; <code>why</code> opens its arithmetic. <code>/</code>
-jumps back to the try box.</div>
+<div class="foot">read-only — the server answers <code>127.0.0.1</code> GETs
+alone and writes nothing. It keeps itself fresh (<span id="rf">auto-refresh</span>)
+or <code>tai refresh</code> forces it. Click a suggestion to copy it, a cwd
+to ask about that directory; <code>/</code> returns to the box.</div>
 </div>
 <div id="toast"></div>
 
@@ -593,8 +590,8 @@ function why(btn, cmd) {
       const foot = document.createElement("div"); foot.className = "k";
       foot.style.marginTop = "7px";
       foot.textContent = x.asked_cwd ?
-        "the % is this score beside every other candidate's (softmax over the panel)" :
-        "no directory in the question — the cwd box above would ask one";
+        "the % is this line's share of the answer" :
+        "no directory asked — the cwd box would ask one";
       td.appendChild(foot);
     }
     row.appendChild(td); tr.after(row);
@@ -638,37 +635,41 @@ function state() {
     $("net").style.display = "none";
     if (!cwdTouched && !cwdFilled && s.recent.length && s.recent[0].cwd)
       askCwd(s.recent[0].cwd, "from your latest record — edit to ask elsewhere");
+    // The grid answers the four questions a newcomer has — how much is
+    // learned, are the indexes alive, how fresh — and nothing else; the
+    // engine's inner counters stay in `tai doctor`, where they are looked
+    // for on purpose rather than met by accident.
     const L = s.learned || {};
     $("state").innerHTML =
       card("rows", s.db.rows.toLocaleString() + ` <small>(${s.db.distinct} distinct)</small>`) +
       card("learned commands", L.commands != null ? L.commands.toLocaleString() : "—") +
-      card("sequence entries", L.sequence_entries != null ? L.sequence_entries.toLocaleString() : "—") +
-      card("token bigrams", L.token_bigrams != null ? L.token_bigrams.toLocaleString() : "—") +
-      card("hidden as stale", L.stale_hidden != null ? L.stale_hidden : "—") +
       card("zsh index", s.indexes.zsh.exists ? "built <small>" + ago(s.indexes.zsh.age_s) + " ago</small>" : "none") +
       card("bash index", s.indexes.bash.exists ? "built <small>" + ago(s.indexes.bash.age_s) + " ago</small>" : "none") +
-      card("auto-refresh", s.auto_refresh ?
-        `≤ ${s.auto_refresh.debounce_s}s <small>behind new commands · full rebuild every ${s.auto_refresh.every}th</small>` : "—") +
-      card("store", s.db.broken ? `<span class="err">broken</span>` : `<span class="ok">healthy</span>`) +
       (s.db.broken ? card("store error", `<span class="err">${E(s.db.broken)}</span>`) : "");
+    if (s.auto_refresh)
+      $("rf").textContent = `auto-refresh, ≤ ${s.auto_refresh.debounce_s}s behind ` +
+                            `new commands, full rebuild every ${s.auto_refresh.every}th`;
     const mx = s.top.length ? s.top[0].n : 1;
-    $("top").innerHTML = s.top.length ? s.top.map(r =>
+    const topRows = s.top.slice(0, 6);
+    $("top").innerHTML = topRows.length ? topRows.map(r =>
       `<div class="row" title="click to copy"><span class="c">${E(r.cmd)}</span>` +
       `<span><span class="k n">${r.n}</span><span class="bar" style="display:block;width:${Math.max(3, 100 * r.n / mx)}%"></span></span></div>`).join("") :
       `<div class="k">nothing recorded yet — run commands in the shell</div>`;
     $("top").querySelectorAll(".row").forEach((el, i) =>
-      el.addEventListener("click", () => copy(s.top[i].cmd)));
+      el.addEventListener("click", () => copy(topRows[i].cmd)));
     const now = (Date.now() / 1000) | 0;
     // The cwd rides in a side array like the commands do — innerHTML escaping
     // does not touch quotes, and a quoted path in an attribute would break out.
-    const cwds = s.recent.map(r => r.cwd);
-    $("recent").innerHTML = s.recent.length ?
-      "<thead><tr><th>when</th><th>command</th><th>cwd</th><th>exit</th></tr></thead><tbody>" +
-      s.recent.map((r, i) =>
+    // The exit code stays in the API answer; the table keeps the two facts a
+    // glance wants — what ran, where — and leaves the post-mortem to the shell.
+    const recent = s.recent.slice(0, 6);
+    const cwds = recent.map(r => r.cwd);
+    $("recent").innerHTML = recent.length ?
+      "<thead><tr><th>when</th><th>command</th><th>cwd</th></tr></thead><tbody>" +
+      recent.map((r, i) =>
         `<tr><td class="dim" title="${new Date(r.ts * 1000).toLocaleString()}">${ago(Math.max(0, now - r.ts))}</td>` +
         `<td class="cmd">${E(r.cmd)}</td>` +
-        `<td class="cwd dim" data-i="${i}" title="ask this directory">${E(r.cwd)}</td>` +
-        `<td>${r.exit ? `<span class="badge warn">${r.exit}</span>` : `<span class="badge ok">0</span>`}</td></tr>`).join("") +
+        `<td class="cwd dim" data-i="${i}" title="ask this directory">${E(r.cwd)}</td></tr>`).join("") +
       "</tbody>" :
       `<tbody><tr><td class="k">no rows</td></tr></tbody>`;
     $("recent").querySelectorAll("td.cwd[data-i]").forEach(td =>
@@ -690,22 +691,23 @@ function suggest() {
       // Commands ride in a side array, not a data- attribute: innerHTML
       // escaping does not touch quotes, and a quoted command in an attribute
       // would break out of it. The row carries an index, nothing else.
-      const ch = res.choices || [];
+      const ch = (res.choices || []).slice(0, 5);
       const cmds = ch.map(c => c.cmd);
       const best = res.choice || "";
       const ghost = best && best.startsWith(q) ?
         `<span class="ghost">${E(best.slice(q.length))}</span>` : "";
       const top = ch.length ? ch[0].prob || 1 : 1;
+      // Rank, bar, share, why — the raw score is the engine's own arithmetic
+      // and stays one `why` away instead of shouting from every row.
       const rows = ch.map((c, i) =>
         `<tr data-i="${i}" title="click to copy"${i === 0 ? ` class="best"` : ""}>` +
         `<td class="cmd"><span class="rk">${i + 1}</span>${E(c.cmd)}</td>` +
         `<td style="width:90px"><span class="pbar" style="display:block;width:${Math.max(2, 100 * (c.prob || 0) / (top || 1))}%"></span></td>` +
         `<td class="num">${((c.prob || 0) * 100).toFixed(1)}%</td>` +
-        `<td class="num">${c.score}</td>` +
         `<td style="width:1px"><button class="why" data-w="${i}" aria-label="why this score">why</button></td></tr>`).join("");
       $("ans").innerHTML =
         `<div class="top">${E(q)}${ghost}</div>` +
-        `<div class="meta">engine ${(res.latency_ms || 0).toFixed ? (res.latency_ms || 0).toFixed(2) : res.latency_ms}ms · ${res.source || "ranking"} · click a row to copy</div>` +
+        `<div class="meta">click a row to copy</div>` +
         (rows ? `<table>${rows}</table>` : `<div class="k">no answer</div>`);
       $("ans").querySelectorAll("tr[data-i]").forEach(tr =>
         tr.addEventListener("click", () => copy(cmds[+tr.dataset.i])));

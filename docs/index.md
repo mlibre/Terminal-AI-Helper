@@ -45,13 +45,10 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 
 </div>
 
-Start with [the keys](/usage), or read [how it is built](/architecture): a
-builtin append per command, a SQLite store, a build-time ranker, and two
-shell-sourceable indexes the prompt answers from in microseconds.
-
-Secrets, multi-line pastes and stray keys are filtered out before anything is
-stored, and what you run never leaves the machine. Uninstall is one command
-and removes everything.
+Start with [the keys](/usage), or read [how it is built](/architecture). Your
+history never leaves the machine — secrets and stray keys are filtered out
+before anything is stored — and uninstall is one command that removes
+everything.
 
 <style>
 .demo { margin: 2.5rem 0 1rem; }

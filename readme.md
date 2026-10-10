@@ -3,8 +3,8 @@
 ![tai](assets/tai.png)
 
 **TAI learns the commands you actually run and suggests them as you type.**
-Native zsh and bash — no server, no daemon, no Python on your keystrokes.
-Everything runs on your machine, offline, stdlib only.
+Native zsh and bash — no server, no daemon, no Python on your keystrokes;
+everything runs on your machine, offline, stdlib only.
 
 Type `systemctl` and a grey hint appears: `restart nginx`. `→` takes it. Press
 `Tab` and your own history answers what usually comes next. It is
@@ -28,26 +28,18 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 ```
 
 The line downloads TAI to `~/.tai` and runs the installer from there; run it
-again later and it updates TAI in place. It enables both shells, imports
-your history, and builds the first index — progress, a short welcome, and
-one command to copy:
+again later and it updates in place. It enables both shells, imports your
+history, and builds the first index:
 
 ```text
 → cloning tai to /home/you/.tai…
 → learning from your history, building the index…
 ✓ zsh installed
 ✓ bash installed
-   _
-  | |_  __ _ ___     the terminal that knows your next command
-  | ' \/ _` (_-<
-  |_||_\__,_/__/
 
   1. Type a few letters — tai finishes the command in grey. → takes it.
   2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
   3. It learns from your history — offline, private, no account.
-
-  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list
-             Down peeks at what usually follows
 
   Try it now: type "cd " and watch the grey.
 → exec zsh
@@ -58,19 +50,16 @@ version until you open a new one — same after `tai update`.
 
 ## Your first minute
 
-1. **Type a command you run often.** After a few letters a grey hint shows
-   the rest. `→` or `Ctrl-F` takes it whole, `Alt-F` takes one word.
-2. **Press `Tab`.** Files and folders cycle; on a first word, the lines your
-   history ranks highest come first — pick one, `Enter` fills it in, a
-   second `Enter` runs it.
-3. **Run `tai web`.** A localhost dashboard of everything tai learned, with a
-   try box that answers exactly what the prompt would — and every answer
-   carries a `why` that opens its own arithmetic.
+1. **Type a command you run often.** A grey hint shows the rest; `→` or
+   `Ctrl-F` takes it whole, `Alt-F` one word.
+2. **Press `Tab`.** On a first word your history ranks the lines it knows;
+   `Enter` fills one in, a second `Enter` runs it.
+3. **Run `tai web`.** A localhost dashboard of everything it learned, with a
+   try box that answers exactly what the prompt would.
 
-Every command you run teaches it. Secrets, multi-line pastes and stray keys
-are filtered out before anything is stored, and what you run never leaves the
-machine. New commands show up in the running shell within seconds — no
-restart, ever.
+Every command you run teaches it — secrets, multi-line pastes and stray keys
+are filtered out before anything is stored, and nothing ever leaves the
+machine. New commands show up within seconds; no restart, ever.
 
 ## The keys
 
@@ -84,28 +73,24 @@ restart, ever.
 | `Enter`                 | take the selected entry and stop; a second `Enter` runs the line                                               |
 | `Alt-G`                 | the command that followed the last one (bash)                                                                  |
 
-Two things worth knowing. A paste is not a query — pasted text never opens a
-list on its own, and one typed character brings it back. And taking a
-directory from a list is not a request to go there: `Enter` fills it in and
-stops, so the line always says exactly what it will do before it runs.
+A paste is not a query — pasted text never opens a list, and one typed
+character brings it back. `Enter` fills a selection in and stops; running it
+is always a second, deliberate `Enter`.
 
-**bash** ranks identically, accepts the same keys, and readline cannot draw a
-list below the line: `→` and `Ctrl-F` accept the hint, `Ctrl-Right` takes one
-word of it, and `Tab` completes directly — by default only after `tai`, or
+**bash** ranks identically and takes the same keys, but readline cannot draw
+a list below the line: `Tab` completes directly — after `tai` by default,
 after every command with `TAI_COMPLETE_ALL=1`.
 
 ## What it suggests, and what it will not
 
-These are not edge cases; they are the product — and they come out of one
-small loop. **Watch:** each command is appended to a local spool file by the
-shell itself and lands in a local SQLite database seconds later;
-secret-looking tokens, multi-line pastes and one-key accidents never become
-vocabulary. **Learn:** the first time you run an unknown tool, TAI reads its
-real `--help` in the background, so `tool <Tab>` knows its subcommands and
-flags from then on. **Rank:** `tai refresh` turns the database into two
-index files ranked your way — how often, how recently, in this directory,
-after what. **Answer:** the shell looks the answer up in its own memory, an
-array hit in microseconds; nothing sits between you and the key.
+One loop makes all of it go. The shell appends each command to a local spool
+file and it lands in a local SQLite database seconds later — secrets,
+multi-line pastes and one-key accidents never become vocabulary. The first
+time you run an unknown tool, its real `--help` is read in the background, so
+`tool <Tab>` knows its subcommands and flags from then on. `tai refresh`
+turns the database into two index files ranked your way — how often, how
+recently, in this directory, after what — and the shell answers from its own
+memory, an array hit in microseconds.
 
 - **It has to extend your line.** `ls -l` suggests `ls -la`, never itself; a
   whole command suggests nothing.
@@ -115,19 +100,17 @@ array hit in microseconds; nothing sits between you and the key.
 - **A wrapper is not a wall.** `sudo`, `doas`, `nohup`, `time`, `nice` and
   friends complete as if the wrapper were not there.
 - **A path is answered by the filesystem** — what is actually there, newest
-  first; the history never resurfaces the file you downloaded a minute ago.
-- **`cd` is answered by directories that exist here.** A destination learned
-  elsewhere is judged from where you stand, not offered two directories away.
+  first. A `cd` is answered by directories that exist here, judged from where
+  you stand, not offered two directories away.
 - **A typo is answered by what it is a typo of.** When nothing extends the
   line, the learned lines that hold every word you typed appear; the one-off
   typo ranks below the habit it shadows, in the index itself.
-- **A name the shell never found is not a suggestion.** Exit 127 is the shell
-  refusing a word, not a command failing — and a tool you have installed
-  outranks a word you do not: `opencode` beats `opencoe` because it exists,
-  here, on your PATH.
-- **A tool you have never run still gets an answer:** `tool --help`, the only
-  honest thing to say about a command the history has never seen. Run it once
-  and the real `--help` is learned in the background.
+- **A word the shell refused is not a suggestion** — exit 127 is the shell
+  refusing a word, not a command failing — and an installed tool outranks a
+  word that resolves to nothing: `opencode` beats `opencoe` because it
+  exists, here, on your PATH.
+- **A tool you have never run still gets an answer:** `tool --help`. Run it
+  once and the real `--help` is learned in the background.
 
 - **If another plugin also draws hints, both work.** `→`, `Ctrl-F` and
   `Alt-F` take whatever is on screen, and tai never overwrites a hint it did
@@ -141,13 +124,12 @@ array hit in microseconds; nothing sits between you and the key.
 tai web              # or: tai dashboard  →  http://127.0.0.1:8247/
 ```
 
-![the tai web dashboard — the try box answering `git `, the ranked panel,
-and the `why` factors behind a score](assets/web.png)
+![the tai web dashboard — the try box answering `git `, the state of the
+store, and the ranked panels](assets/web.png)
 
-The one server in the product: you start it, it binds `127.0.0.1`, it answers
-GETs only, and it can write nothing. A light/dark toggle sits in the corner
-and the choice is remembered; clicking a suggestion copies it. `--port N`
-moves it; `--no-browser` skips the auto-open.
+One server, read-only: it binds `127.0.0.1`, answers GETs only, and writes
+nothing. Clicking a suggestion copies it; `--port N` moves it; `--no-browser`
+skips the auto-open.
 
 ## Commands
 
@@ -165,10 +147,9 @@ tai forget git sta   # drop every stored row for a command, exactly as typed
 tai uninstall   # remove everything tai added
 ```
 
-`flush` is the one the plugins call for you — it ingests their batched
-records — and every other command drains whatever is pending first, so no
-answer is ever a few records behind what you just did. No restart is needed:
-the plugin re-reads the index at the next prompt.
+The plugins call `flush` themselves, and every command drains what is pending
+first — no answer lags a few records behind what you just did, and no restart
+is needed: the index is re-read at the next prompt.
 
 ## Configuration
 
@@ -197,46 +178,37 @@ All have working defaults; they are for when yours is wrong.
 | `TAI_COMPLETE_TIMEOUT`  | `2.0`                           | budget for a tool's `__complete` answer                 |
 | `TAI_DISCOVER_WORKERS`  | `8`                             | parallel `--help` probes                                |
 
-`$XDG_DOWNLOAD_DIR`, `~/Downloads`, `~/Download` and `~/Desktop` are always
-file roots; `TAI_INDEX` names the zsh index, `bash-index.bash` the bash one.
-`TAI_HISTORY_FILES` is the fix when `tai refresh` learns nothing: the plugins
-export your shell's `HISTFILE`, so a cron `tai refresh`, or one from a shell
-without the plugin, must be told where the history is.
+`~/Downloads` and `~/Desktop` are always file roots. `TAI_HISTORY_FILES` is
+the fix when a cron `tai refresh` learns nothing: it must be told where the
+history is.
 
 ## Releases, update and uninstall
 
 A ready-to-install `tai_<version>_all.deb` is attached to every GitHub
-release. The .deb puts `tai` on `PATH` and the plugins under `/usr/lib/tai`;
-its postinst prints the two `source` lines to add to your rc file.
+release; it puts `tai` on `PATH` and prints the two `source` lines for your
+rc file.
 
 ```sh
 tai update      # newest version from GitHub, then reinstall; alias: tai upgrade
 ```
 
-It stops rather than overwrite a copy you have edited yourself — and
-everything lives in `~/.tai`, so there is no second copy to clean up.
+It stops rather than overwrite a copy you have edited yourself.
 
 ```sh
 tai uninstall
 ```
 
-Removes the shell integration, the `tai` wrapper, the generated indexes, the
-SQLite history and the cached CLI knowledge. The `~/.tai` folder stays;
-restart the terminal afterwards.
+Removes the shell integration, the wrapper, the indexes, the SQLite history
+and the cached knowledge. The `~/.tai` folder stays; restart the terminal
+afterwards.
 
 ## Why it stays fast
 
-Run `tai bench` and `tai doctor` yourself — printed numbers go stale the
-moment your history changes. The shape of it:
-
-- the keystroke path is shell builtins only — a hint is an array lookup in
-  the shell's own memory, ~0.2ms on a real history;
-- recording is a builtin append too (~0.01ms), and one `tai flush` per batch
-  of commands, where it used to be a Python process after every single line;
-- ranking happens once, at build time, and the answer is a file the shell
-  reads at startup;
-- the one-shot paths (`tai suggest`, the dashboard) answer from a disk cache
-  of the built engine, invalidated the moment a new row lands.
+The keystroke path is shell builtins only — a hint is an array lookup
+(~0.2ms on a real history), recording is a builtin append and one `tai flush`
+per batch, ranking happens once at build time, and the answer is a file the
+shell reads at startup. Run `tai bench` and `tai doctor` yourself — printed
+numbers go stale the moment your history changes.
 
 See [docs/architecture.md](docs/architecture.md) for the whole story, and
 [AGENTS.md](AGENTS.md) for the rules — each one a reported failure, the most
