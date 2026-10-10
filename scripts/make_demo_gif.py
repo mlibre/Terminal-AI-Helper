@@ -37,7 +37,7 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tests"))
 
-from plugin_pty import Session, CTRL_SPACE, RIGHT, DOWN, ENTER  # noqa: E402
+from plugin_pty import Session, RIGHT, DOWN, ENTER, TAB  # noqa: E402
 from plugin_env import write_index  # noqa: E402
 
 # -- the world ---------------------------------------------------------------
@@ -202,11 +202,11 @@ def record(debug: bool = False) -> tuple:
         # -- beat 2: a bare first word opens the ranked list -----------------
         type("git", 110)
         push(350)
-        key(CTRL_SPACE, 900, "Ctrl \u2423")   # the habits, ranked
+        key(TAB, 900, "Tab")             # the habits, ranked: Tab's menu
         qa["menu1"] = len(frames) - 1
         checkpoint("beat2 menu")
-        key(DOWN, 400, "\u2193")
-        key(DOWN, 400, "\u2193")
+        key(TAB, 400, "Tab")             # every Tab moves the selection
+        key(TAB, 400, "Tab")
         key(ENTER, 600, "\u23ce")        # take the selected line
         assert "git checkout -b feature/login" in seen_text()
         run_enter("checkout", "Switched to a new branch")
@@ -219,11 +219,11 @@ def record(debug: bool = False) -> tuple:
         key(RIGHT, 400, "\u2192")        # take: cd media/mlibre/B
         type("/", 140)
         push(300)
-        key(CTRL_SPACE, 900, "Ctrl \u2423")   # Clip/  Movies/  Projects/
+        key(TAB, 900, "Tab")             # Clip/  Movies/  Projects/
         qa["fs_menu"] = len(frames) - 1
         checkpoint("beat3 menu")
-        key(DOWN, 380, "\u2193")
-        key(DOWN, 380, "\u2193")
+        key(TAB, 380, "Tab")             # every Tab moves the selection
+        key(TAB, 380, "Tab")
         key(ENTER, 600, "\u23ce")        # fill Projects/
         checkpoint("beat3 taken")
         run_enter("cd", "media/mlibre/B/Projects", 1500)

@@ -14,8 +14,8 @@
 
 ```text
 git <→>            git pull --rebase        ← راهنما، گرفته شد
-git <Ctrl-Space>   pull      status          ← فهرست، زیر خط
-git <Ctrl-Space> <Enter>   git pull         ← یک مورد انتخاب شد، خط آماده است
+git <Tab>          pull      status          ← فهرست، زیر خط
+git <Tab> <Enter>          git pull         ← یک مورد انتخاب شد، خط آماده است
 ```
 
 ![tai در حال کار — راهنما، فهرست رده‌بندی‌شده، پاسخِ سیستم فایل و تایپوی
@@ -88,7 +88,7 @@ cd terminal-ai-helper
 ترمینال شما را دارد، و بخش مشترک موردها یک بار، بالای آن‌ها، کشیده می‌شود:
 
 ```text
-cd media/mlibre/B/<Ctrl-Space>   Clip/   Movies/   Projects/   Teb/
+cd media/mlibre/B/<Tab>          Clip/   Movies/   Projects/   Teb/
 ```
 
 هر مورد فقط آنچه را **می‌افزاید** نشان می‌دهد؛ `Enter` کل مسیر را می‌نویسد.

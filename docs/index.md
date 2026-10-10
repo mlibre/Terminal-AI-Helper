@@ -22,7 +22,7 @@ features:
   - title: Ghost hints as you type
     details: Type a few letters and the rest of the command you usually run appears in grey. One key takes it whole, another takes one word.
   - title: Your habits, ranked
-    details: Press Ctrl-Space and your own history answers — the lines you actually run, ranked by how often, how recently, in this directory, after what.
+    details: Press Tab and your own history answers — the lines you actually run, ranked by how often, how recently, in this directory, after what.
   - title: Typos answered by the habit they shadow
     details: A word that matches nothing brings up the learned lines it is a typo of — the one-off ranks below the habit, in the index itself.
   - title: The filesystem answers paths

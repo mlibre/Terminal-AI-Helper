@@ -12,8 +12,8 @@ autocomplete that knows *you*:
 
 ```text
 docker <→>            docker compose up -d    ← the hint, taken
-git <Ctrl-Space>      pull      status        ← your habits, ranked
-cd media/mlibre/B/<Ctrl-Space>   Clip/  Movies/  Projects/
+git <Tab>             pull      status        ← your habits, ranked
+cd media/mlibre/B/<Tab>          Clip/  Movies/  Projects/
 ```
 
 ![tai in action — the hint, the ranked list, the filesystem, a typo
