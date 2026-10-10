@@ -21,7 +21,7 @@ answered by the habit it shadows](assets/demo.gif)
 
 [Docs](docs/architecture.md) · [Development](docs/development.md) · [Docs site](https://mlibre.github.io/Terminal-AI-Helper/) · [فارسی](readme-fa.md)
 
-## Install Or Update
+## Install or Update
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh | bash
