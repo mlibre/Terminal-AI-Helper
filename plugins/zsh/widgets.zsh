@@ -562,6 +562,23 @@ _tai_line_init() {
   _TAI_ISEARCH=0
   region_highlight=()
   _tai_menu_close
+  # The prophecy. _TAI_SEQ answers "what did I run after this", and the fresh
+  # prompt is where that answer is taken — so the reset above is followed by
+  # the question, through the same _tai_update the redraw hook runs: it looks
+  # the empty buffer up against _TAI_LAST, judges the head's relative paths
+  # where the prompt stands, and paints the gray line the arrow accepts. The
+  # report: the sequence table held `sudo …` after the denied `systemctl …`
+  # and the prompt said nothing, because line-init only ever cleared, and no
+  # widget-triggered redraw fires before the first keystroke — by which time
+  # the buffer is no longer empty and the ordinary prefix lookup has replaced
+  # the question. Nothing here can answer before the first command has run:
+  # _TAI_LAST is set by precmd, so a shell that just opened queries an empty
+  # last command and paints nothing — the prophecy is learned, never a
+  # default. The query is cached, so the first real redraw of this line
+  # restores the answer instead of recomputing it, and every guard the redraw
+  # path applies (isearch stand-down, ours-only clearing, the paste rule) is
+  # this path's guard too, because it is the same call.
+  _tai_update
 }
 
 # The isearch flag the redraw hook stands down under, and the pair that

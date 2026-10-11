@@ -28,7 +28,11 @@ to every GitHub release.
 2. **Press `Tab`.** Files and folders cycle; on a first word, the lines your
    history ranks highest come first — pick one, `Enter` fills it in, a
    second `Enter` runs it.
-3. **Run `tai web`.** A localhost dashboard of everything tai learned, with a
+3. **Run a command and look at the next prompt.** The empty line already
+   shows, in grey, what your own history followed that command with —
+   `sudo …` after the denied `systemctl …`, `rm -r …` after the refused
+   `rm`. `→` takes it; typing replaces it.
+4. **Run `tai web`.** A localhost dashboard of everything tai learned, with a
    try box that answers exactly what the prompt would.
 
 Every command you run teaches it — new commands show up within seconds; no
@@ -38,7 +42,7 @@ restart, ever.
 
 | key                     | what it does                                                      |
 | ----------------------- | ----------------------------------------------------------------- |
-| `→`                     | take the hint at the end of the line, else move right             |
+| `→`                     | take the hint at the end of the line, else move right — on a fresh prompt the hint is what followed the command you just ran |
 | `Ctrl-F`                | take the hint                                                     |
 | `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`) |
 | `Tab`                   | write what every candidate shares, then cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
@@ -76,6 +80,11 @@ whatever is on screen, and tai never overwrites a hint it did not draw.
   a name the shell never found (exit 127) is not a suggestion at all.
 - **A tool you have never run still gets an answer:** `tool --help`. Run it
   once and the real `--help` is learned in the background.
+- **A fresh prompt carries what came next.** After a command, the empty line
+  shows in grey what your own history followed it with — ranked by how often
+  it followed, judged where the prompt stands like every suggestion. It is
+  learned or it is nothing: nothing built in, nothing before your first
+  command, and a follower whose path does not resolve here is not offered.
 
 ## A dashboard of what it learned
 

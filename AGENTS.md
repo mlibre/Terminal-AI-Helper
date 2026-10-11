@@ -111,6 +111,10 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
 - One key, one question; one completion is not a list.
 - A suggestion has to be reachable by the key, in the mode the terminal is in
   — a key nobody can find is a feature nobody has.
+- The gray line on a fresh prompt is a prophecy, and it is learned or it is
+  nothing: what follows a command is what the history saw follow it — ranked
+  by how often it followed, judged where the prompt stands, taken with the
+  arrow — and a shell that has run nothing says nothing. Nothing built in.
 
 ## Craft the suites cannot assert
 

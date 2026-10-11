@@ -14,6 +14,9 @@ autocomplete that knows *you*:
 systemctl <→>         restart nginx           ← the hint, taken
 git <Tab>             pull      status        ← your habits, ranked
 cd D<Tab>             Desktop/  Documents/  Downloads/
+
+systemctl stop cups.path
+❯ sudo systemctl stop cups.path   ← what you did last time, already waiting
 ```
 
 ![tai in action — the hint, the ranked list, the filesystem, a typo
@@ -77,7 +80,11 @@ tai uninstall   # remove everything tai added
    `Ctrl-F` takes it whole, `Alt-F` one word.
 2. **Press `Tab`.** On a first word your history ranks the lines it knows;
    `Enter` fills one in, a second `Enter` runs it.
-3. **Run `tai web`.** A localhost dashboard of everything it learned, with a
+3. **Run a command and look at the next prompt.** When a command fails the way
+   it failed before, the empty line already shows, in grey, what you did about
+   it last time — `sudo …` after the denied `systemctl …`, `rm -r …` after the
+   refused `rm`. `→` takes it; typing replaces it.
+4. **Run `tai web`.** A localhost dashboard of everything it learned, with a
    try box that answers exactly what the prompt would.
 
 Every command you run teaches it — secrets, multi-line pastes and stray keys
@@ -88,7 +95,7 @@ machine. New commands show up within seconds; no restart, ever.
 
 | key                     | what it does                                                                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `→`                     | take the hint at the end of the line, else move right                                                                                                  |
+| `→`                     | take the hint at the end of the line, else move right — on a fresh prompt the hint is what followed the command you just ran                           |
 | `Ctrl-F`                | take the hint                                                                                                                                          |
 | `Alt-F` / `Ctrl-Right`  | take **one word** of the hint, leaving the rest to type (bash: `Ctrl-Right`)                                                                           |
 | `Tab`                   | write what every candidate shares, then cycle files, folders and options; on a bare first word the learned lines come first, ranked like the dashboard |
@@ -137,6 +144,11 @@ memory, an array hit in microseconds.
   exists, here, on your PATH.
 - **A tool you have never run still gets an answer:** `tool --help`. Run it
   once and the real `--help` is learned in the background.
+- **A fresh prompt carries what came next.** After a command, the empty line
+  shows in grey what your own history followed it with — ranked by how often
+  it followed, judged where the prompt stands like every suggestion. It is
+  learned or it is nothing: nothing built in, nothing before your first
+  command, and a follower whose path does not resolve here is not offered.
 
 - **If another plugin also draws hints, both work.** `→`, `Ctrl-F` and
   `Alt-F` take whatever is on screen, and tai never overwrites a hint it did

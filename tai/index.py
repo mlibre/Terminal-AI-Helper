@@ -413,15 +413,19 @@ def build(max_commands: int = 20000) -> int:
 
     seq: dict[str, list[str]] = defaultdict(list)
     for prev, counter in eng.seq.items():
-        # Sorted here, best first, because a shell now reads the order as the
-        # ranking and not only as a tiebreak: the zsh menu shows a key's values in
-        # the order they are stored, while _tai_best still re-ranks by
-        # _TAI_SCORE to pick one. It used to add `count * 2.5` to a milli-score,
-        # which is 0.08% of the value it was added to: the list looked
-        # sequence-ranked and was really just base-score ranked with extra steps.
-        values = [cmd for cmd, _ in sorted(
-            ((cmd, scores.get(cmd, 0)) for cmd in counter),
-            key=lambda x: (-x[1], x[0]))[:SEQ_CANDIDATE_CAP]]
+        # Ordered by how often the pair happened, then by how good the line is,
+        # best first — because the head of this list is the line a fresh prompt
+        # offers, and "what did I run after this" is answered by what followed
+        # *most*, not by the best-scoring line that ever did. The engine's own
+        # sequence factor is the pair's normalized count for the same reason;
+        # ordering the list by base score alone (an earlier shape, with the
+        # count discarded here) made the prophecy disagree with the engine on
+        # exactly the key the prophecy exists for: after `git add -A`, the
+        # history's `git commit -m …` lost the head to a bare `ls` that had
+        # merely followed once and scored well on its own.
+        values = [cmd for cmd, _, _ in sorted(
+            ((cmd, counter[cmd], scores.get(cmd, 0)) for cmd in counter),
+            key=lambda x: (-x[1], -x[2], x[0]))[:SEQ_CANDIDATE_CAP]]
         # A key whose every follower was stale has no answer left, and writing
         # it as an empty string puts `_TAI_SEQ[key] = ''` in the file. The zsh
         # plugin splits that into one empty line and the bash one reads it as an

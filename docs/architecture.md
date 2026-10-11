@@ -40,15 +40,16 @@ to restart.
 
 ## The index
 
-Five maps, written as text. `tai/index.py` owns the format.
+Six maps, written as text. `tai/index.py` owns the format.
 
 | map                  | key                              | value                                        |
 | -------------------- | -------------------------------- | -------------------------------------------- |
 | `_TAI_SCORE`         | a whole command                  | integer milli-score                           |
 | `_TAI_FIRST`         | the first word of a command      | newline-separated commands, best first         |
 | `_TAI_WORD`          | the first *N* words of a command | newline-separated commands, best first         |
-| `_TAI_SEQ`           | a whole command                  | what was run after it, best first             |
+| `_TAI_SEQ`           | a whole command                  | what was run after it, most-frequent first, then best |
 | `_TAI_FILE`          | a line without its last word     | `1`, when that next word is a file            |
+| `_TAI_LIVE`          | a word that is a relative path   | `1`, when the shell must judge it where it stands |
 
 Three things about it are load-bearing, and all three are about size, because
 the index is read once at every shell startup.
@@ -73,6 +74,16 @@ kept only the smaller file, not a faster one — a change here should re-measure
 `_TAI_SEQ` key, and the seed corpus and `--help` vocabulary are capped
 separately at the generator. A downloads folder has a season of videos and a
 `Tab` that stats all of them is a `Tab` you notice.
+
+**The sequence list answers for the fresh prompt.** After a command runs, the
+zsh line-init asks `_TAI_SEQ` for the command just run and paints the head of
+the list as the gray suggestion the arrow takes; bash fills it through the
+same arrow. The head is therefore the follower that followed *most*, not the
+best-scoring line that ever did — "what did I run after this" is a count
+question, the same one the engine's sequence factor asks — and the chosen
+line is judged where the prompt stands, like every suggestion. The list is
+the history's own answer and nothing else: seeds and generated vocabulary
+never enter it, so a shell that has run nothing says nothing.
 
 The ranking signal, as an integer, is what makes the shell compare natively.
 `tai/engine.py` writes it; `tai tune` searches the weights and writes them back

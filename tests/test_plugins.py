@@ -420,6 +420,124 @@ def test_a_foreign_index_is_not_executed() -> None:
 
 
 
+# The prophecy: the gray line on a fresh prompt is what the history saw follow
+# the command that just ran. Its fixture is its own for the same reason the
+# live-words fixture is: the shared one deliberately carries no _TAI_SEQ
+# entries, which is what keeps every other empty-prompt assertion exact. The
+# follower of the liveness pair is a relative path, so the line is judged where
+# the prompt stands — the v2.2.0 rule, asked of the prophecy too.
+PROPHECY_DIR = pathlib.Path("/tmp/tai/tai_prophecy_cwd")
+PROPHECY_WITH = PROPHECY_DIR / "with"
+PROPHECY_WITHOUT = PROPHECY_DIR / "without"
+PROPHECY_INDEX = pathlib.Path("/tmp/tai/tai_test_prophecy_index")
+PROPHECY_ZSH = PROPHECY_INDEX / "zsh-index.zsh"
+PROPHECY_BASH = PROPHECY_INDEX / "bash-index.bash"
+
+
+def _write_prophecy_index() -> None:
+    """Two learned pairs: one plain, one whose follower is a relative path."""
+    PROPHECY_WITH.mkdir(parents=True, exist_ok=True)
+    (PROPHECY_WITH / "Data" / "INI").mkdir(parents=True, exist_ok=True)
+    PROPHECY_WITHOUT.mkdir(parents=True, exist_ok=True)
+    PROPHECY_INDEX.mkdir(parents=True, exist_ok=True)
+    zsh = ["# tai zsh index; test fixture, not generated",
+           "typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE",
+           "_TAI_SEQ+=('echo prophecy-before' 'echo prophecy-after')",
+           "_TAI_SEQ+=('echo gone' 'ls Data/INI')",
+           "_TAI_LIVE+=('Data/INI' 1)"]
+    PROPHECY_ZSH.write_text("\n".join(zsh) + "\n", encoding="utf-8")
+    bash = ["# tai bash index; test fixture, not generated",
+            "declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE",
+            "_TAI_SEQ['echo prophecy-before']='echo prophecy-after'",
+            "_TAI_SEQ['echo gone']='ls Data/INI'",
+            "_TAI_LIVE['Data/INI']=1"]
+    PROPHECY_BASH.write_text("\n".join(bash) + "\n", encoding="utf-8")
+
+
+def test_prophecy_zsh() -> None:
+    """The learned next command is on the prompt it is taken on.
+
+    The report: `systemctl stop cups.path` denied, and the `sudo …` that always
+    followed it in the history was nowhere on the empty prompt — the sequence
+    table answered the question, but only a widget-triggered redraw ever asked
+    it, and a fresh prompt is not one. Now line-init asks. Three parts: it is
+    there after a command ran; it is not there before anything ran; and the
+    v2.2.0 rule holds — a follower with a dead relative path is offered only
+    where the path resolves.
+    """
+    if not SHELLS["zsh"]:
+        return
+    _write_prophecy_index()
+    print("zsh the fresh prompt carries the history's next command")
+    s = Session("zsh", env_extra={"TAI_INDEX": str(PROPHECY_ZSH)})
+    # A shell that has run nothing says nothing: the prophecy is learned, and
+    # "by default" is exactly what it must never be.
+    check("a shell that just opened says nothing",
+          s.suggestion().split(" RH=")[0], "SUG=[] PD=[]")
+    s.send("echo prophecy-before" + ENTER)
+    s.settle()
+    # Painted gray, on the empty prompt, before any keystroke: the whole
+    # remainder is the suggestion, the styled region covers it from 0.
+    check("the fresh prompt carries the learned next command",
+          s.suggestion(), "SUG=[echo prophecy-after] PD=[echo prophecy-after]"
+                          " RH=[0 19 fg=8,bold]")
+    # No list rides on it — no menu rows over the prophecy, and the
+    # post-display is one line, not a screen of did-you-mean.
+    _, drawn, size, _ = s.menu(clear=False)
+    check("no menu stands over the prophecy", size, 0)
+    check("the prophecy is a single line, not a list", "\n" in drawn, False)
+    # And the key that takes a hint takes it.
+    s.write(RIGHT)
+    s.settle()
+    check("the arrow takes the prophecy", s.line(), "echo prophecy-after")
+    # The line after that is fresh again, and typing replaces the prophecy
+    # with the ordinary lookup — it is a suggestion, not a mode.
+    s.send("zz")
+    s.settle()
+    check("typing replaces the prophecy",
+          s.suggestion().split(" RH=")[0], "SUG=[] PD=[]")
+    # The v2.2.0 rule, asked of the prophecy: the follower is judged where the
+    # prompt stands, and a dead relative path is not an answer here.
+    s.run(f"cd {PROPHECY_WITHOUT}")
+    s.send("echo gone" + ENTER)
+    s.settle()
+    check("a prophecy with a dead relative path is not offered",
+          s.suggestion().split(" RH=")[0], "SUG=[] PD=[]")
+    s.run(f"cd {PROPHECY_WITH}")
+    s.send("echo gone" + ENTER)
+    s.settle()
+    check("the same prophecy where the path exists",
+          s.suggestion().split(" RH=")[0],
+          "SUG=[ls Data/INI] PD=[ls Data/INI]")
+    check("no noise from the prophecy", s.noise(), [])
+    s.close()
+
+
+def test_prophecy_bash() -> None:
+    """The same answer in the shell that has no ghost: the arrow fills it."""
+    if not SHELLS["bash"]:
+        return
+    _write_prophecy_index()
+    print("bash the fresh prompt's arrow takes the history's next command")
+    s = Session("bash", env_extra={"TAI_INDEX": str(PROPHECY_ZSH)})
+    # Nothing has run: the arrow has nothing to fill.
+    s.write(RIGHT)
+    s.settle()
+    check("a shell that just opened fills nothing", s.line(), "")
+    s.send("echo prophecy-before" + ENTER)
+    s.settle()
+    # bash paints no ghost, by its own design; the prophecy reaches the line
+    # through the arrow that accepts a hint, exactly as before — and the
+    # liveness judgement rides along, because the head of the list is judged
+    # the same way the ghost's would be.
+    s.write(RIGHT)
+    s.settle()
+    check("the arrow fills the learned next command",
+          s.line(), "echo prophecy-after")
+    check("no noise from the prophecy", s.noise(), [])
+    s.close()
+
+
 def main() -> int:
     setup()
     # Before anything reads the fixture: every other test here is only measuring
@@ -431,6 +549,8 @@ def main() -> int:
     test_prefix_lookups()
     test_half_typed_command()
     test_wrappers()
+    test_prophecy_zsh()
+    test_prophecy_bash()
     test_each_shell_reads_its_own_index()
     test_a_foreign_index_is_not_executed()
     check_fixture_intact("the run")

@@ -74,6 +74,54 @@ finally:
         pathlib.Path(_p).unlink(missing_ok=True)
 print("OK — a stale command is not a suggestion anywhere, the sequence table included.")
 
+# The order of a _TAI_SEQ value list is the prophecy's order, because the head
+# of the list is the line the fresh prompt offers. "What did I run after this"
+# is answered by what followed *most*, not by the best-scoring line that ever
+# did: the engine's own sequence factor is the pair's normalized count, and a
+# list ordered by base score made the prophecy disagree with the engine on
+# exactly the key the prophecy exists for. The follower that follows often but
+# scores low must lead; the high scorer must stay on the list, behind it.
+_seq_db2 = f"/tmp/tai/tai_seq_order_{os.getpid()}.db"
+_seq_index2 = f"/tmp/tai/tai_seq_order_{os.getpid()}_zsh.zsh"
+os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _seq_db2, _seq_index2
+try:
+    for _p in (_seq_db2, _seq_db2 + "-wal", _seq_db2 + "-shm", _seq_index2):
+        pathlib.Path(_p).unlink(missing_ok=True)
+    _SEQ_KEY = "git fetch --all"
+    # Followed three times, and long enough that its base score pays the full
+    # length penalty beside its rival.
+    _OFTEN = "git pull --rebase origin main"
+    # Followed once — then run on its own thirty times, so its frequency, and
+    # therefore its base score, towers over the line that actually followed.
+    _RARE = "echo tally"
+    for _ in range(3):
+        tai_store.append_and_count(_SEQ_KEY, cwd=REPO)
+        tai_store.append_and_count(_OFTEN, cwd=REPO)
+    tai_store.append_and_count(_SEQ_KEY, cwd=REPO)
+    tai_store.append_and_count(_RARE, cwd=REPO)
+    for _ in range(30):
+        tai_store.append_and_count(_RARE, cwd=REPO)
+    from tai.index import build as _build_order
+    _build_order()
+    _order_written = pathlib.Path(_seq_index2).read_text()
+    # The value holds real newlines (one per follower) inside the single
+    # quotes, so the entry spans physical lines and a line-wise read would
+    # only ever see the first follower. Read to the closing quote instead —
+    # the value carries no quote of its own to close it early.
+    _head = "_TAI_SEQ+=('" + _SEQ_KEY + "' '"
+    assert _head in _order_written, f"no sequence entry for the key at all: {_SEQ_KEY}"
+    _vstart = _order_written.index(_head) + len(_head)
+    _order_values = _order_written[_vstart:_order_written.index("')", _vstart)]
+    assert _order_values.splitlines()[0] == _OFTEN, \
+        f"the prophecy head is the best score, not the most frequent follower: {_order_values!r}"
+    assert _RARE in _order_values.splitlines(), \
+        f"ordering by frequency dropped the less frequent follower: {_order_values!r}"
+finally:
+    os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _saved_db, _saved_index
+    for _p in (_seq_db2, _seq_db2 + "-wal", _seq_db2 + "-shm", _seq_index2):
+        pathlib.Path(_p).unlink(missing_ok=True)
+print("OK — the sequence list is ordered by how often the pair happened.")
+
 # Which files an import reads, and the trap that emptied it. zsh and bash both set
 # HISTFILE as a shell parameter and neither exports it, so a tai subprocess cannot
 # see it: the plugin has to say so, and until it does, a machine keeping its
