@@ -1,6 +1,6 @@
 {
   "name": "terminal-ai-helper",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "The terminal that knows your next command Bash/Zsh suggestions that learn from your own history Offline and private with no account required",
   "license": "MIT",
   "repository": {

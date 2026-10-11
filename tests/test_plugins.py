@@ -538,6 +538,75 @@ def test_prophecy_bash() -> None:
     s.close()
 
 
+def test_enter_runs_what_was_typed() -> None:
+    """Enter takes the gray line down with the line it rode in on.
+
+    The report: the fresh prompt carries the learned next command in gray,
+    Enter pressed without taking it runs an empty line, and the gray text
+    stays painted on the row the shell just left — three Enters stacked
+    three rows that read as if the command had run each time. The accept
+    echo re-renders the line as it will run, and tai's own redraw hook
+    answered that render with a fresh query, painting the prophecy right
+    back. Accept is the one redraw that paints nothing: the echo shows
+    what was typed, and what tai drew goes down with the line.
+    """
+    if not SHELLS["zsh"]:
+        return
+    _write_prophecy_index()
+    print("zsh Enter runs what was typed and takes the gray line down")
+
+    def prophecy_rows(s: Session) -> list[int]:
+        return [r for r, line in enumerate(screen_of(s).lines())
+                if "prophecy-after" in line]
+
+    s = Session("zsh", env_extra={"TAI_INDEX": str(PROPHECY_ZSH)})
+    s.send("echo prophecy-before" + ENTER)
+    s.settle()
+    for i in (1, 2, 3):
+        s.write(ENTER)
+        s.settle()
+        # The empty line the shell ran says nothing; the only row naming the
+        # prophecy is the live prompt's own. A residue row is a row that
+        # reads as a command the user never ran.
+        check(f"Enter #{i} leaves no gray trace on the row it left",
+              prophecy_rows(s)[:-1] if prophecy_rows(s) else [], [])
+    # And the prophecy on the fresh prompt still works: the arrow takes it.
+    s.write(RIGHT)
+    s.settle()
+    check("the arrow still takes the prophecy after Enters",
+          s.line(), "echo prophecy-after")
+    s.close()
+
+    # The ordinary ghost answers to the same rule: `echo prop` hinted, Enter
+    # runs the typed line, and the part nobody typed is nowhere on screen. A
+    # fresh session, so the row the arrow's acceptance legitimately painted
+    # above is not here to answer for it.
+    s = Session("zsh", env_extra={"TAI_INDEX": str(PROPHECY_ZSH)})
+    s.send("echo prop")
+    s.settle()
+    s.write(ENTER)
+    s.settle()
+    check("the hinted remainder is not on the executed row",
+          [l for l in screen_of(s).lines() if "prophecy-after" in l], [])
+    check("the typed line is what ran",
+          [l for l in screen_of(s).lines() if l.strip() == "prop"], ["prop"])
+    s.close()
+
+    # TAI_NO_MENU=1 leaves Enter as stock accept-line — the same echo, and
+    # the same paint-back through the redraw hook. The wrapper answers it.
+    s = Session("zsh", env_extra={"TAI_INDEX": str(PROPHECY_ZSH),
+                                  "TAI_NO_MENU": "1"})
+    s.send("echo prophecy-before" + ENTER)
+    s.settle()
+    for i in (1, 2):
+        s.write(ENTER)
+        s.settle()
+        check(f"no-menu Enter #{i} leaves no gray trace",
+              prophecy_rows(s)[:-1] if prophecy_rows(s) else [], [])
+    check("no noise from the accept path", s.noise(), [])
+    s.close()
+
+
 def main() -> int:
     setup()
     # Before anything reads the fixture: every other test here is only measuring
@@ -551,6 +620,7 @@ def main() -> int:
     test_wrappers()
     test_prophecy_zsh()
     test_prophecy_bash()
+    test_enter_runs_what_was_typed()
     test_each_shell_reads_its_own_index()
     test_a_foreign_index_is_not_executed()
     check_fixture_intact("the run")

@@ -114,6 +114,26 @@ _tai_update() {
     fi
     return
   fi
+  # The accept echo is the one redraw that paints nothing. When the line is
+  # accepted, zsh re-renders it as it will run, and that render fires this
+  # hook — which answered it like any keystroke: it ran the query for the
+  # line one last time and painted the hint back onto the row the shell was
+  # leaving. The report: Enters on an empty prompt stacked gray `cd …` lines
+  # that read as commands the user ran, and a scrollback reader believed
+  # them. So the accept path raises _TAI_ACCEPT, and this hook takes tai's
+  # own paint down and stands aside: the echo shows what was typed, and what
+  # tai drew goes down with the line it rode in on. line-init lowers the
+  # flag with everything else it resets — the next line paints as usual.
+  if (( _TAI_ACCEPT )); then
+    _TAI_SUGGESTION=""
+    (( _TAI_MENU_IDX )) && _tai_menu_close
+    if (( _TAI_DREW )); then
+      POSTDISPLAY=""
+      region_highlight=()
+      _TAI_DREW=0
+    fi
+    return
+  fi
   local -i ours_was=$_TAI_DREW
   # What the last widget was decides whether this buffer is typed. The hook
   # runs after every widget, and the names here are the ones that mean an
@@ -348,9 +368,31 @@ tai-enter() {
   # A glimpsed menu still swallows the selection; Enter at a disarmed menu is
   # the line's Enter.
   if (( _TAI_MENU_IDX )); then _tai_menu_close; POSTDISPLAY=""; region_highlight=(); fi
+  # What runs is what was typed, and the echo of it must say so. zsh's final
+  # render of the accepted line fires the redraw hook, which would answer it
+  # with a fresh query and paint the hint back onto the row being left; the
+  # flag stands the hook down for that one render. See _tai_update.
+  _TAI_ACCEPT=1
   zle accept-line
 }
 zle -N tai-enter
+
+# Enter is not the only door to a running line: TAI_NO_MENU=1 leaves ^M on
+# stock accept-line, and so can a user binding of their own. The wrapper
+# raises the same flag tai-enter raises, so the accept echo paints nothing
+# in those shells either. It is registered only while the name is still the
+# builtin — an accept-line another plugin wrapped is theirs, their clear
+# already answers their own hint, and tai-enter raises the flag itself
+# before it calls accept-line by name, so the hook stands down either way.
+typeset -gi _TAI_ACCEPT=0
+tai-accept-line() {
+  _TAI_ACCEPT=1
+  zle .accept-line
+}
+zle -N tai-accept-line
+case "${widgets[accept-line]:-}" in
+  builtin*) zle -N accept-line tai-accept-line ;;
+esac
 
 # Right arrow accepts the suggestion at the end of the line, and moves the
 # cursor one character anywhere else. Bound straight to tai-accept it took
@@ -560,6 +602,10 @@ _tai_line_init() {
   # exit hook, and a flag carried into the next line would stand tai down for
   # every keystroke of it. The hook pair is the truth; this is the belt.
   _TAI_ISEARCH=0
+  # Nor is a line still being accepted: the accept flag stands the redraw
+  # hook down for the echo of the line that is leaving, and a new line is
+  # painted on again from its first redraw.
+  _TAI_ACCEPT=0
   region_highlight=()
   _tai_menu_close
   # The prophecy. _TAI_SEQ answers "what did I run after this", and the fresh

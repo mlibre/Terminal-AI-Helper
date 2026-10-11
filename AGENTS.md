@@ -115,6 +115,9 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
   nothing: what follows a command is what the history saw follow it — ranked
   by how often it followed, judged where the prompt stands, taken with the
   arrow — and a shell that has run nothing says nothing. Nothing built in.
+- Enter runs what was typed, and the gray line goes down with the line it
+  rode in on: the accept echo is the one redraw that paints nothing, so an
+  executed prompt row never shows a suggestion nobody took.
 
 ## Craft the suites cannot assert
 
