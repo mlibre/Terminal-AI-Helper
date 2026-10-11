@@ -24,7 +24,7 @@ _TAI_INDEX_STAMP="${_TAI_INDEX_FILE}.stamp"
 # prints "value too great for base" on every keystroke instead of looking
 # anything up. A shell started before the first `tai refresh` still has to
 # be quiet and still gets the installed-command fallback.
-declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE
+declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE
 
 # Is this file the index, or something that only looks like it?
 #
@@ -69,7 +69,7 @@ _tai_load_index() {
   # installed for the life of the shell — the same rule as plugins/tai.zsh, and
   # for the same reason: the file has to be the whole truth rather than a growing
   # superset of every index this shell has ever read.
-  _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=()
+  _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=() _TAI_LIVE=()
   # The sorted-keys array is built on first use, not here: its one fork (a
   # `sort` over every first-word key) belonged to the shell's startup, which
   # is exactly the cost a plugin should not add — and most keystrokes never

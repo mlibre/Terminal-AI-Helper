@@ -271,6 +271,10 @@ _tai_menu_first_lines() {
   sorted=( "${(O)merged[@]}" )
   local m
   for m in "${(@)sorted[1,_TAI_MENU_FIRST_CAP]}"; do
+    # A whole line is committed whole, so every marked word in it is judged —
+    # the same question the ghost asks about the line it hints, answered the
+    # same way, so Tab and the grey text cannot disagree about what works here.
+    _tai_line_here "${m[10,-1]}" 0 || continue
     _TAI_MENU_LEARNED+=( "${m[10,-1]}" )
   done
   (( ${#_TAI_MENU_LEARNED[@]} ))
@@ -365,7 +369,15 @@ _tai_menu_open() {
   for c in "${_TAI_LINES[@]}"; do
     (( ${#c} > skip )) || continue
     rest="$_TAI_LINES_LEAD${c}"
-    out+=( "${${rest[skip + 1, -1]}%% *}" ); outq+=( 0 )
+    c="${${rest[skip + 1, -1]}%% *}"
+    # The word the menu completes is judged where the menu stands: a learned
+    # word that is unambiguously a relative path (the index marked it in
+    # _TAI_LIVE) was true where it was recorded and may exist nowhere else,
+    # and Enter on it reads "no such file or directory". Flags and bare words
+    # are never marked; the file and glob sources below are the disk itself.
+    [[ -n "$c" ]] || continue
+    _tai_here "$c" || continue
+    out+=( "$c" ); outq+=( 0 )
   done
 
   # 1b. The first word has no `before` for the lookup above, and without this

@@ -14,7 +14,7 @@ import time
 
 from tai.engine import WRAPPERS, Engine
 from tai.fresh import files
-from tai.paths import db_path, takes_file
+from tai.paths import alive_in, db_path, takes_file
 
 _E: Engine | None = None
 _STALE: frozenset = frozenset()
@@ -95,6 +95,25 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     res = _E.suggest(prefix=prefix or "", cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [], limit=limit, temp=temp,
                      exclude=_STALE, on_path=_on_path)
+    # The stale set above never hides a relative path that was true where it
+    # was recorded — which is most of them, and that is right for a snapshot
+    # shown in every directory. This answer is shown in one directory, so its
+    # lines are judged there too: a line whose relative path does not resolve
+    # where the answer will be taken is not an answer, and Enter on it is the
+    # error the user reads. The same rule the index writes into _TAI_LIVE for
+    # the shells, from the same module, so the rooms cannot disagree about
+    # what works where the user stands.
+    _where = cwd or os.getcwd()
+    _all = res.get("choices", [])
+    _live = [c for c in _all if alive_in(c["cmd"], _where)]
+    if len(_live) != len(_all):
+        res["choices"] = _live
+        res["probabilities"] = {c["cmd"]: c["prob"] for c in _live}
+        _best = _live[0]["cmd"] if _live else ""
+        res["choice"] = _best
+        res["completion"] = (_best[len(prefix or ""):]
+                             if _best.lower().startswith((prefix or "").lower())
+                             else "")
     res = _file_answer(prefix or "", res)
     # The engine measures its own ranking; a caller that only cares about the
     # whole answer wants the process time, and a sub-millisecond rank has no

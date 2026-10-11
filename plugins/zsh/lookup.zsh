@@ -64,6 +64,61 @@ _TAI_CTRL=$'[\x01-\x1f\x7f]'
 # shared by hundreds of commands, where the answer is a guess either way.
 typeset -gi _TAI_PREFIX_KEYS=64
 
+# The words the index marks in _TAI_LIVE are the learned words that are
+# unambiguously *relative* filesystem paths — the one kind of word whose truth
+# is a fact about the directory it is offered in. A flag is true everywhere and
+# `~/.ollama` is true wherever this machine stands; `Data/INI` was true where it
+# was recorded and may exist nowhere else, and offered from another directory it
+# is the error the user reads the moment they take it. The shape test that
+# decided what gets marked lives in tai/paths.py and is deliberately not
+# re-implemented here — the shell only asks the one question left to it: does
+# the word resolve where the user stands. One builtin stat, paid only on a word
+# the index marked, on the paths that offer it.
+_tai_here() {
+  (( ${+_TAI_LIVE[$1]} )) || return 0
+  [[ -e "$1" ]]
+}
+
+# The marked words *after* the $2 words already typed all resolve here. This is
+# the question about a whole line — the ghost writes the rest of the line it
+# hints, a glimpse pick replaces the line, a first-word menu commits it — so the
+# claim under test is not the next word but every word tai would add. The typed
+# words are the user's own and get no opinion; a line that splits to fewer
+# tokens than that adds nothing and passes. An empty _TAI_LIVE — an index that
+# predates the map, or a history with no relative path in it — passes without a
+# split at all.
+_tai_line_here() {
+  local line="$1" w
+  integer n="$2"
+  (( ${#_TAI_LIVE} )) || return 0
+  local -a t
+  t=( ${=line} )
+  # zsh's own slice, not the bash-style `${t[@]:n}`: the colon there is a
+  # subscript flag the parser reads as a modifier and errors on.
+  for w in "${(@)t[n + 1, -1]}"; do
+    _tai_here "$w" || return 1
+  done
+  return 0
+}
+
+# How many words of `$1` are complete: a trailing space finishes the word before
+# it, so `ls ` has one and `ls Da` still has only the command. The count the
+# line question needs, so the words tai adds are exactly the words judged.
+# Answered in _TAI_TYPED_WORDS and not in the return status, because a pasted
+# line can carry more words than a status can hold and a wrapped count is a
+# wrong count. The name is not the widgets' `_TAI_TYPED` — that one is the
+# typing flag the arrow-down gate reads, and a lookup clobbering it on every
+# keystroke was breaking the glimpse it opens.
+_tai_typed_words() {
+  local -a t
+  t=( ${=1} )
+  integer n=${#t}
+  [[ "$1" == *' ' ]] || (( n -= 1 ))
+  (( n < 0 )) && n=0
+  _TAI_TYPED_WORDS=$n
+}
+typeset -gi _TAI_TYPED_WORDS=0
+
 # The candidate lines for a command name — the word before the first space — into
 # _TAI_LINES, newline-joined the way the index stores them.
 #
@@ -288,6 +343,19 @@ _tai_lines() {
 # _TAI_PREFIX_KEYS of them.
 _tai_best() {
   local prefix="$1" c line best="" best_score=-1 s
+  integer typed=0 leadw=0
+  # The words tai adds are the words judged: a candidate is hinted whole, so
+  # every marked word after what the user typed has to resolve here, or the
+  # hint is an error the user is offered. The lead carries the wrapper's words
+  # — typed by the user, absent from the stored line — so they come off the
+  # count before the test.
+  _tai_typed_words "$prefix"
+  typed=$_TAI_TYPED_WORDS
+  local -a lt
+  lt=( ${=_TAI_LINES_LEAD} )
+  leadw=${#lt}
+  (( typed -= leadw ))
+  (( typed < 0 )) && typed=0
   # The extends-the-line and echo tests are case-insensitive — the lookup that
   # filled _TAI_LINES is, and the two have to agree about what extends what.
   # `(#i)` needs extendedglob; localoptions hands this shell its own options
@@ -298,6 +366,7 @@ _tai_best() {
     for c in "${_TAI_LINES[@]}"; do
       line="$_TAI_LINES_LEAD$c"
       [[ -z "$c" || "$line" == (#i)"$prefix" ]] && continue
+      _tai_line_here "$c" "$typed" || continue
       best="$line"
       break
     done
@@ -305,6 +374,7 @@ _tai_best() {
     for c in "${_TAI_LINES[@]}"; do
       line="$_TAI_LINES_LEAD$c"
       [[ -z "$c" || "$line" == (#i)"$prefix" || "$line" != (#i)"$prefix"* ]] && continue
+      _tai_line_here "$c" "$typed" || continue
       s="${_TAI_SCORE[$c]:-0}"
       if (( s > best_score )); then best="$c"; best_score="$s"; fi
     done
@@ -457,6 +527,20 @@ _tai_query_do() {
       done
       _TAI_LOOSE_LINES=( "${live_l[@]}" )
     fi
+    # The same judgement for every other line the glimpse holds, because a pick
+    # here replaces the whole typed line: a relative path in a glimpse line was
+    # true where the line was recorded, and from this directory it can be the
+    # error the user is handed instead of a command. The cd lines above get the
+    # stricter destination test; these get the words test — the same rule, at
+    # the depth each line claims. The list is filtered fresh per query rather
+    # than inside the glimpse, whose cache outlives the directory.
+    local -a here_l
+    local gline
+    here_l=()
+    for gline in "${_TAI_LOOSE_LINES[@]}"; do
+      _tai_line_here "$gline" 0 && here_l+=( "$gline" )
+    done
+    _TAI_LOOSE_LINES=( "${here_l[@]}" )
   fi
 
   # A learned cd destination was judged for liveness where it was recorded,

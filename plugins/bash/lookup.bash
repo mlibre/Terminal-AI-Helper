@@ -161,6 +161,11 @@ _TAI_VALUES_ONE=0
 # replaces a walk over 2,600 lines with two or three tests.
 _tai_best() {
   local values="$1" prefix="$2" best="" best_score=-1 c s cl pl="${2,,}"
+  # The words tai adds are the words judged: the ghost writes the whole line it
+  # hints, so every marked word after what the user typed has to resolve here,
+  # or the hint is an error the user is offered.
+  _tai_typed_words "$prefix"
+  local typed=$_TAI_TYPED_WORDS
   # The extends-the-line and echo tests are case-insensitive — the lookup that
   # filled `values` is, and the two have to agree about what extends what.
   if [[ "${_TAI_VALUES_ONE:-0}" == "1" ]]; then
@@ -171,6 +176,7 @@ _tai_best() {
       # what it finds, and a byte that slips through is an escape sequence on
       # someone's terminal.
       [[ "$c" =~ [[:cntrl:]] ]] && continue
+      _tai_line_here "$c" "$typed" || continue
       best="$c"
       break
     done <<< "$values"
@@ -184,6 +190,7 @@ _tai_best() {
     # ghost text: the byte goes to the terminal as an escape sequence. The
     # store refuses at record time now, but this shell sources what it finds.
     [[ "$c" =~ [[:cntrl:]] ]] && continue
+    _tai_line_here "$c" "$typed" || continue
     s="${_TAI_SCORE[$c]:-0}"
     if (( s > best_score )); then best="$c"; best_score="$s"; fi
   done <<< "$values"
@@ -222,6 +229,53 @@ _tai_destination_live() {
   [[ "$t" == "-" ]] && return 0
   [[ "$t" == "~"* ]] && t="${t/\~/$HOME}"
   [[ -d "$t" ]]
+}
+
+# The words the index marks in _TAI_LIVE are the learned words that are
+# unambiguously *relative* filesystem paths — the one kind of word whose truth
+# is a fact about the directory it is offered in. A flag is true everywhere and
+# `~/.ollama` is true wherever this machine stands; `Data/INI` was true where it
+# was recorded and may exist nowhere else, and offered from another directory it
+# is the error the user reads the moment they take it. The shape test that
+# decided what gets marked lives in tai/paths.py and is deliberately not
+# re-implemented here — the shell only asks the one question left to it: does
+# the word resolve where the user stands. One builtin stat, paid only on a word
+# the index marked, on the paths that offer it.
+_tai_here() {
+  [[ -n "${_TAI_LIVE[$1]:-}" ]] || return 0
+  [[ -e "$1" ]]
+}
+
+# The marked words *after* the $2 words already typed all resolve here. This is
+# the question about a whole line — the ghost writes the rest of the line it
+# hints and a first-word completion commits it — so the claim under test is not
+# the next word but every word tai would add. The typed words are the user's
+# own and get no opinion; a line that splits to fewer tokens than that adds
+# nothing and passes. An empty _TAI_LIVE — an index that predates the map, or a
+# history with no relative path in it — passes without a split at all.
+_tai_line_here() {
+  local line="$1" n="$2" w
+  ((${#_TAI_LIVE[@]})) || return 0
+  local -a t=()
+  read -ra t <<< "$line"
+  for w in "${t[@]:n}"; do
+    _tai_here "$w" || return 1
+  done
+  return 0
+}
+
+# How many words of `$1` are complete: a trailing space finishes the word before
+# it, so `ls ` has one and `ls Da` still has only the command. Answered in
+# _TAI_TYPED_WORDS and not in the return status, because a pasted line can carry
+# more words than a status can hold and a wrapped count is a wrong count.
+_TAI_TYPED_WORDS=0
+_tai_typed_words() {
+  local -a t=()
+  read -ra t <<< "$1"
+  local n=${#t[@]}
+  [[ "$1" == *' ' ]] || (( n -= 1 ))
+  (( n < 0 )) && n=0
+  _TAI_TYPED_WORDS=$n
 }
 
 # Rank the line behind the wrapper and put the wrapper back. `sudo git ` completes

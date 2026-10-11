@@ -136,6 +136,17 @@ destinations (`..`, `.`, `-` rank below every real destination, never removed),
 and file arguments (a line ending in a *file* is answered from the filesystem,
 learned from what the command means and written into `_TAI_FILE`).
 
+Liveness asks two questions, and the split is what keeps both answers honest.
+Was the path ever true — judged from the directory a row was recorded in, the
+only evidence a snapshot shown in every directory can afford? And is it true
+*here* — the question the user answers with Enter, asked wherever the
+suggestion is shown: the index writes the unambiguously relative paths into
+`_TAI_LIVE`, and the shells stat exactly those words where they stand, so
+`ls Data/INI` learned in the directory that has it is not offered two
+directories away, where Enter reads "no such file or directory". Flags are
+never paths; `~`-paths and absolutes are the same in every directory and were
+judged at build.
+
 ## Three implementations of one rule
 
 `plugins/zsh/files.zsh`, `plugins/bash/files.bash` and `tai/fresh.py` all

@@ -11,6 +11,8 @@ Each snapshot stores:
   _TAI_WORD[word-prefix]    newline-separated candidates
   _TAI_SEQ[previous]        newline-separated candidates
   _TAI_FILE[line-without-its-last-word]  1, when that word is a file
+  _TAI_LIVE[word]           1, when the word is a relative path the shell
+                            must find where it stands before offering it
 
 Commands are escaped as POSIX single-quoted strings, which zsh accepts.
 """
@@ -25,7 +27,7 @@ from pathlib import Path
 from tai.engine import (Engine, LEN_PENALTY_DIV, MAX_LEN_PEN, W_FREQ,
                         W_RECENCY, W_SUCCESS, W_INSTALLED)
 from tai.knowledge import load_all as load_tool_knowledge
-from tai.paths import destinations_first, takes_file
+from tai.paths import destinations_first, relative_word_set, takes_file
 from tai.seed import SEED_COMMANDS
 from tai.store import load_rows
 from tai.typo import shadow_map
@@ -445,13 +447,21 @@ def build(max_commands: int = 20000) -> int:
             if head:
                 file_keys.add(head)
 
+    # The words the shells must ask the filesystem about before offering them:
+    # unambiguously relative paths, by the shape test paths.py already owns.
+    # Everything else is either not a path (flags, subcommands, bare words a
+    # `git` may mean), cwd-independent (`~`-paths and absolutes, judged at build
+    # by the stale set), or unjudgeable — and the module's rule is that an
+    # ambiguous token gets no opinion.
+    live = relative_word_set(cmds)
+
     zsh_file = index_path()
     zsh_file.parent.mkdir(parents=True, exist_ok=True)
     bash_file = bash_index_path()
     tmp = zsh_file.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         f.write("# tai embedded zsh index; generated, do not edit\n")
-        f.write("typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE\n")
+        f.write("typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE\n")
         # `_TAI_X+=(key value)` — a pair appended to an associative array, one
         # builtin call per entry and no function call at all.
         #
@@ -473,12 +483,14 @@ def build(max_commands: int = 20000) -> int:
             f.write(f"_TAI_SEQ+=({_zq(key)} {_zq(chr(10).join(values))})\n")
         for key in sorted(file_keys):
             f.write(f"_TAI_FILE+=({_zq(key)} 1)\n")
+        for word in sorted(live):
+            f.write(f"_TAI_LIVE+=({_zq(word)} 1)\n")
     os.replace(tmp, zsh_file)
 
     bash_tmp = bash_file.with_suffix(".tmp")
     with bash_tmp.open("w", encoding="utf-8") as f:
         f.write("# tai embedded bash index; generated, do not edit\n")
-        f.write("declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE\n")
+        f.write("declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE\n")
         for score, cmd in ranked:
             f.write(f"_TAI_SCORE[{_zq(cmd)}]={score}\n")
         for key, values in sorted(first.items()):
@@ -489,6 +501,8 @@ def build(max_commands: int = 20000) -> int:
             f.write(f"_TAI_SEQ[{_zq(key)}]={_zq(chr(10).join(values))}\n")
         for key in sorted(file_keys):
             f.write(f"_TAI_FILE[{_zq(key)}]=1\n")
+        for word in sorted(live):
+            f.write(f"_TAI_LIVE[{_zq(word)}]=1\n")
     os.replace(bash_tmp, bash_file)
     _compile_zsh_index()
     return len(cmds)

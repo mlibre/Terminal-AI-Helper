@@ -15,7 +15,7 @@ _TAI_INDEX_STAMP="${_TAI_INDEX_FILE}.stamp"
 # Declare the maps even when the index file is missing, so a shell started before
 # the first `tai refresh` is quiet and still gets the installed-command
 # fallback.
-typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE
+typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE
 
 # Is this file the index, or something that only looks like it?
 #
@@ -63,7 +63,7 @@ _tai_load_index() {
   # suggestion from the store, the next prompt re-read the index, and the stale
   # key was still there. Clearing first is what makes the file the whole truth
   # rather than a growing superset of every index this shell has ever seen.
-  _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=()
+  _TAI_SCORE=() _TAI_FIRST=() _TAI_WORD=() _TAI_SEQ=() _TAI_FILE=() _TAI_LIVE=()
   # A lookup may cache an answer about the lines it was asked from, so a reload
   # has to retire those answers: bumping the generation is what makes a cached
   # answer speak about the index that is installed now rather than the one that

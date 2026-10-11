@@ -434,13 +434,33 @@ for _p in _gen_paths:
     _p.unlink(missing_ok=True)
 os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _gen_db, _gen_index
 try:
-    for _c in ("git status", "cd ~/somewhere", "ls -la"):
-        tai_store.append_and_count(_c, cwd=os.path.expanduser("~"))
+    # `ls Data/INI` needs the directory to exist where the row was recorded, or
+    # the recorded-cwd liveness retires the row before the writer ever sees it.
+    # It is recorded here so the word survives to be marked.
+    (_gen_dir / "Data" / "INI").mkdir(parents=True, exist_ok=True)
+    for _c in ("git status", "cd ~/somewhere", "ls -la", "ls Data/INI"):
+        _cwd = os.path.expanduser("~")
+        if _c == "ls Data/INI":
+            _cwd = str(_gen_dir)
+        tai_store.append_and_count(_c, cwd=_cwd)
     assert tai_index.build() > 0, "the real writer built nothing to check"
     # The bash snapshot sits one derived name away from the zsh one, and it is
     # read by the same check, so both files have to be accepted.
     for _p in _gen_paths[:2]:
         assert _p.exists(), f"the writer did not produce {_p}"
+    # The words whose truth is a fact about the directory are marked for the
+    # shells: `Data/INI` is a relative path, `~/somewhere` is true wherever
+    # this machine stands and is judged at build, and `-la` is not a path at
+    # all. The marks are what keep `ls Data/INI` out of every directory that
+    # has no Data/INI in it.
+    _zsh_text = pathlib.Path(_gen_index).read_text(encoding="utf-8")
+    _bash_text = pathlib.Path(_gen_dir / "bash-index.bash").read_text(encoding="utf-8")
+    # The writer quotes every key the way _zq spells it, so the marks read in
+    # the shape the shells source.
+    assert "_TAI_LIVE+=('Data/INI' 1)" in _zsh_text, _zsh_text[-2000:]
+    assert "_TAI_LIVE['Data/INI']=1" in _bash_text, _bash_text[-2000:]
+    assert "_TAI_LIVE+=('-la'" not in _zsh_text, _zsh_text[-2000:]
+    assert "_TAI_LIVE+=('~" not in _zsh_text, _zsh_text[-2000:]
     for _shell, _plugin in (("zsh", "plugins/tai.zsh"), ("bash", "plugins/tai.bash")):
         # A bash-only machine skips the zsh half rather than failing here; the
         # rest of this suite has already run, which is the point of the suite.

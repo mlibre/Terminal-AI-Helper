@@ -995,6 +995,39 @@ finally:
     tai_predictor._STALE = _tai_predictor_S
 print("OK — the one-shot file answer: evidence, wrappers, word boundaries.")
 
+# The words the one-shot adds are the words judged where the answer is taken.
+# `ls Data/INI` recorded in the directory that has Data/INI is alive by the
+# recorded-cwd rule forever, and the one-shot is shown in exactly one directory
+# — the one the user answers from. There the line is not an answer, and the
+# same question in the directory that has it answers with it.
+_live_root = pathlib.Path("/tmp/tai/tai_edge_live")
+_live_with = _live_root / "with"
+_live_without = _live_root / "without"
+_live_with.mkdir(parents=True, exist_ok=True)
+_live_without.mkdir(parents=True, exist_ok=True)
+(_live_with / "Data" / "INI").mkdir(parents=True, exist_ok=True)
+_live_eng = Engine()
+_live_eng.add("ls Data/INI", cwd=str(_live_with))
+_live_eng.add("ls Data/INI", cwd=str(_live_with))
+_live_eng.add("ls -la", cwd=str(_live_with))
+_live_eng.add("ls -la", cwd=str(_live_with))
+tai_predictor._E = _live_eng
+tai_predictor._STALE = frozenset()
+try:
+    os.chdir(_live_without)
+    _res = tai_predictor.suggest("ls ", limit=5)
+    assert _res["choice"] == "ls -la", _res
+    assert "ls Data/INI" not in {c["cmd"] for c in _res["choices"]}, _res
+    assert "ls Data/INI" not in _res["probabilities"], _res
+    os.chdir(_live_with)
+    _res = tai_predictor.suggest("ls ", limit=5)
+    assert "ls Data/INI" in {c["cmd"] for c in _res["choices"]}, _res
+finally:
+    os.chdir(str(REPO))
+    tai_predictor._E = _tai_predictor_E
+    tai_predictor._STALE = _tai_predictor_S
+print("OK — the one-shot answers only what works in the directory it answers in.")
+
 # A store that cannot be read is announced and answered from the seed corpus —
 # never an empty ranking, and never silence.
 _garbage_db = _section_db("tai_edge_garbage.db")

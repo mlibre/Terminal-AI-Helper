@@ -1161,6 +1161,133 @@ def test_cd_answers_directories() -> None:
     s.close()
 
 
+# A learned relative path is a suggestion where it exists, and nowhere else.
+# The fixture index is its own files rather than the shared one, because the
+# marks under test are the shared fixture's deliberate absence: every other
+# menu test runs with an empty _TAI_LIVE and proves nothing changed for a
+# history without relative paths in it.
+LIVE_DIR = pathlib.Path("/tmp/tai/tai_live_cwd")
+LIVE_WITH = LIVE_DIR / "with"
+LIVE_WITHOUT = LIVE_DIR / "without"
+LIVE_INDEX = pathlib.Path("/tmp/tai/tai_test_live_index")
+LIVE_ZSH = LIVE_INDEX / "zsh-index.zsh"
+LIVE_BASH = LIVE_INDEX / "bash-index.bash"
+
+
+def _write_live_index() -> None:
+    """The generated shape, small enough to read: three `ls` rows, one marked.
+
+    `Data/INI` is a relative path — exactly what tai.paths.is_path_like calls
+    one — so the generator marks it and the shells judge it where they stand.
+    `-la` is a flag and `/usr` is absolute: neither is ever marked, and both
+    are offered in every directory as they always were.
+    """
+    LIVE_WITH.mkdir(parents=True, exist_ok=True)
+    LIVE_WITHOUT.mkdir(parents=True, exist_ok=True)
+    (LIVE_WITH / "Data" / "INI").mkdir(parents=True, exist_ok=True)
+    LIVE_INDEX.mkdir(parents=True, exist_ok=True)
+    zsh = ["# tai zsh index; test fixture, not generated",
+           "typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE",
+           "_TAI_SCORE+=(ls\\ -la 50)",
+           "_TAI_SCORE+=(ls\\ /usr 49)",
+           "_TAI_SCORE+=(ls\\ Data/INI 48)",
+           "_TAI_FIRST+=(ls 'ls -la\nls /usr\nls Data/INI')",
+           "_TAI_LIVE+=(Data/INI 1)"]
+    LIVE_ZSH.write_text("\n".join(zsh) + "\n", encoding="utf-8")
+    bash = ["# tai bash index; test fixture, not generated",
+            "declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE",
+            "_TAI_SCORE[ls\\ -la]=50",
+            "_TAI_SCORE[ls\\ /usr]=49",
+            "_TAI_SCORE[ls\\ Data/INI]=48",
+            "_TAI_FIRST[ls]=$'ls -la\\nls /usr\\nls Data/INI'",
+            "_TAI_LIVE[Data/INI]=1"]
+    LIVE_BASH.write_text("\n".join(bash) + "\n", encoding="utf-8")
+
+
+def test_live_words_zsh() -> None:
+    """The word the menu completes is judged where the menu stands."""
+    if not SHELLS["zsh"]:
+        return
+    _write_live_index()
+    print("zsh a learned path is offered where it exists, not everywhere")
+    s = Session("zsh", env_extra={"TAI_INDEX": str(LIVE_ZSH)})
+    s.run(f"cd {LIVE_WITHOUT}")
+    s.send("ls ")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    entries = menu_entries(drawn)
+    check("the menu opened", size > 0, True)
+    check("a flag is offered, unjudged", "-la" in entries, True)
+    check("an absolute path is offered, unjudged", "/usr" in entries, True)
+    check("a relative path that is not here is not offered",
+          "Data/INI" in entries, False)
+    s.write("\x15")
+    s.run(f"cd {LIVE_WITH}")
+    s.send("ls ")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    entries = menu_entries(drawn)
+    check("the same word is offered where it exists", "Data/INI" in entries, True)
+    check("no noise from the live menus", s.noise(), [])
+    s.write("\x15")
+
+    # A first word commits whole lines, so the line is the claim under test:
+    # `ls Data/INI` offered on `l` in the wrong directory writes an error, and
+    # the whole-line test answers the same question the word test does.
+    s.run(f"cd {LIVE_WITHOUT}")
+    s.send("l")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    # A first-word menu's rows are whole lines, and the entries splitter is a
+    # word splitter — the drawn text is the assertion here, the same way
+    # test_first_word_menu reads its rows.
+    check("the whole line is not offered where the path is not",
+          "ls Data/INI" in drawn, False)
+    check("the other whole lines are", "ls -la" in drawn, True)
+    s.write("\x15")
+    s.run(f"cd {LIVE_WITH}")
+    s.send("l")
+    s.write(TAB)
+    s.settle()
+    line, drawn, size, idx = s.menu(clear=False)
+    check("the whole line is offered where it exists",
+          "ls Data/INI" in drawn, True)
+    check("no noise from the whole-line menus", s.noise(), [])
+    s.write("\x15")
+    s.close()
+
+
+def test_live_words_bash() -> None:
+    """The same judgement in the other shell, by its own doors."""
+    if not SHELLS["bash"]:
+        return
+    _write_live_index()
+    print("bash a learned path is offered where it exists, not everywhere")
+    s = Session("bash", env_extra={"TAI_INDEX": str(LIVE_ZSH),
+                                   "TAI_COMPLETE_ALL": "1"})
+    s.run(f"cd {LIVE_WITHOUT}")
+    s.send("ls ")
+    s.write(TAB)
+    s.settle()
+    raw = s.raw()
+    check("a flag is offered, unjudged", "-la" in raw, True)
+    check("an absolute path is offered, unjudged", "/usr" in raw, True)
+    check("a relative path that is not here is not offered",
+          "Data/INI" in raw, False)
+    s.write("\x15")
+    s.run(f"cd {LIVE_WITH}")
+    s.send("ls ")
+    s.write(TAB)
+    s.settle()
+    check("the same word is offered where it exists", "Data/INI" in s.raw(), True)
+    check("no noise from the live menus", s.noise(), [])
+    s.write("\x15")
+    s.close()
+
+
 def test_first_word_menu() -> None:
     """Tab on a one-word line offers the learned lines first, whole.
 

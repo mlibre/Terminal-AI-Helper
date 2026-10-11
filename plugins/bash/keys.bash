@@ -201,7 +201,12 @@ _tai_complete() {
       for c in "${_TAI_LEARNED_LINES[@]}"; do
         # Folded, like the lookup that produced them: `ls down` offers
         # `ls Downloads`.
-        [[ "${c,,}" == "${line,,}"* ]] && _tai_reply "$c"
+        [[ "${c,,}" == "${line,,}"* ]] || continue
+        # A whole learned line is committed whole, so every word in it that the
+        # index marked as a relative path has to resolve here — the same
+        # question the ghost asks about the line it hints.
+        _tai_line_here "$c" 0 || continue
+        _tai_reply "$c"
       done
     fi
     local -i names=0
@@ -211,7 +216,15 @@ _tai_complete() {
   fi
   local stem x
   while IFS= read -r c; do
-    [[ -n "$c" && "${c,,}" == "${line,,}"* ]] && _tai_reply "${c##*[[:space:]]}"
+    [[ -n "$c" && "${c,,}" == "${line,,}"* ]] || continue
+    stem="${c##*[[:space:]]}"
+    # The word this completion offers is judged where the shell stands: a
+    # learned word that is unambiguously a relative path (the index marked it
+    # in _TAI_LIVE) was true where it was recorded and may exist nowhere else.
+    # Flags and bare words are never marked; the file and directory sources
+    # above read the disk itself.
+    _tai_here "$stem" || continue
+    _tai_reply "$stem"
   done <<< "$values"
   if (( dir_arg )); then
     local curw=""

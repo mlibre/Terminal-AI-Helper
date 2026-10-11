@@ -78,6 +78,11 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
 - A suggestion must extend the line, and must exist: an answer equal to what
   was typed is not an answer, and a candidate whose path is gone is not a
   candidate.
+- A word learned somewhere is offered where it works: a word that is
+  unambiguously a relative path (`_TAI_LIVE`, written at build) is judged in
+  the directory it is offered in — ghost, menu, glimpse and completion, both
+  shells — and stays offered in the directories that have it. Flags are never
+  judged; `~`-paths and absolutes were judged at build.
 - A directory argument is answered by directories that exist here — in the
   ghost, the menu, the loose glimpse, and the completion, in both shells.
 - A buffer that arrived from the history is not typed.

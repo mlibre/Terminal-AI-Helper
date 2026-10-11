@@ -459,3 +459,58 @@ def stale_in(engine, cwd: str = "") -> set[str]:
     return stale_commands(
         ((cmd, list(st.cwd)) for cmd, st in engine.cmds.items()),
         cwd)
+
+
+def relative_word_set(cmds) -> frozenset[str]:
+    """The learned words that are unambiguously *relative* filesystem paths.
+
+    The one kind of word whose truth is a fact about the directory it is
+    offered in. A flag is true everywhere; `~/.ollama` and `/usr/bin` are true
+    wherever this machine stands, and were already judged at build; `Data/INI`
+    was true where it was recorded and may exist nowhere else — offered from
+    another directory it is the error the user is shown the moment they take
+    it. The shape test is this module's, unquoted first: reimplementing it in
+    two shells is how `git diff ~main` and `date 1/2/2024` come to be judged
+    as paths. The index writes the set out as _TAI_LIVE, and the shells ask
+    the filesystem the one question a marked word costs.
+    """
+    out: set[str] = set()
+    for cmd in cmds:
+        for token in (cmd or "").split():
+            token = _unquote(token)
+            if token.startswith("~") or token.startswith("/"):
+                continue
+            if is_path_like(token):
+                out.add(token)
+    return frozenset(out)
+
+
+def alive_in(cmd: str, cwd: str = "") -> bool:
+    """True when every relative path in `cmd` resolves in `cwd`.
+
+    `command_verdict` above asks whether a command was ever true: a row
+    recorded in a directory that still holds the path survives. This asks the
+    other question, the one the user answers with Enter: is it true *here*,
+    in the directory the suggestion is being shown in? A `ls Data/INI`
+    recorded in the directory that has Data/INI is alive by the first answer
+    and dead by the second everywhere else, and it was the second answer the
+    report was about.
+
+    Every judgement is a stat against `cwd`, never a removal decision about a
+    stored row — this gates what is shown, and the recorded evidence above
+    stays the only thing that can retire a row. No directory, no opinion.
+    """
+    if not enabled():
+        return True
+    cwd = cwd or os.getcwd()
+    if not cmd or not os.path.isdir(cwd):
+        return True
+    for token in cmd.split():
+        token = _unquote(token)
+        if not is_path_like(token):
+            continue
+        if token.startswith("~") or os.path.isabs(token):
+            continue
+        if not os.path.exists(os.path.join(cwd, token)):
+            return False
+    return True
