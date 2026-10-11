@@ -266,6 +266,7 @@ def cmd_update(a) -> int:
 
     import shutil
     import subprocess
+    from pathlib import Path
 
     git = shutil.which("git")
     if not git:
@@ -281,15 +282,49 @@ def cmd_update(a) -> int:
         return subprocess.run([git, "-C", str(repo), "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
 
+    def run_git(*argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run([git, "-C", str(repo), *argv],
+                              capture_output=True, text=True)
+
+    # The checkout the one-liner cloned is this install's own tree, not a
+    # development branch: nobody commits in it, so the update is a fetch one
+    # commit deep and a reset to what origin named — the same three commands
+    # install.sh's piped door runs. A pull here would download every commit
+    # made since the checkout was cut, and one that predates --depth 1 would
+    # carry its whole history forever. A checkout anywhere else is somebody's
+    # tree — maybe a fork they develop in — and it keeps the careful pull:
+    # fast-forward only, a divergence fails loudly rather than resetting
+    # anybody's work away.
+    managed = (repo.resolve()
+               == Path(os.environ.get("TAI_DIR")
+                       or Path.home() / ".tai").resolve())
+
     before = head()
-    pull = subprocess.run([git, "-C", str(repo), "pull", "--ff-only"],
-                          capture_output=True, text=True)
-    if pull.returncode != 0:
-        # A local edit in the checkout is the usual cause, and git's own message
-        # says exactly what to do about it, so pass it through rather than guess.
-        print("tai: git pull failed:")
-        print((pull.stderr or pull.stdout).strip())
-        return 1
+    if managed:
+        branch = run_git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        failed = None
+        for argv in (("fetch", "--depth", "1", "--quiet", "origin", branch),
+                     ("reset", "--hard", "--quiet", "FETCH_HEAD")):
+            done = run_git(*argv)
+            if done.returncode != 0:
+                failed = argv[0]
+                break
+        if failed:
+            print(f"tai: git {failed} failed:")
+            print((done.stderr or done.stdout).strip())
+            return 1
+        # Hygiene, not a step: what the old history weighed is already
+        # unreachable after the reset, and a failed prune costs nothing.
+        run_git("gc", "--prune=now", "--quiet")
+    else:
+        pull = run_git("pull", "--ff-only")
+        if pull.returncode != 0:
+            # A local edit in the checkout is the usual cause, and git's own
+            # message says exactly what to do about it, so pass it through
+            # rather than guess.
+            print("tai: git pull failed:")
+            print((pull.stderr or pull.stdout).strip())
+            return 1
     after = head()
     # Flushed, because the installer below writes to the same terminal from a
     # child process and would otherwise appear ahead of this line.
@@ -587,21 +622,29 @@ def cmd_uninstall(a) -> int:
             removed.append(str(rc))
     # The piped door clones the code itself to TAI_DIR (default ~/.tai), and
     # leaving it behind would leave the program installed in every way but the
-    # wrapper — the same rule the rc blocks above are held to. What makes the
-    # directory tai's is its layout: cli.py and the installer inside it. A
-    # directory without that shape is not ours to delete, so it is named and
-    # kept. Last on purpose: this command usually runs from inside the checkout
-    # (the wrapper execs this very file), so removing it has to be the last
-    # thing the run does.
+    # wrapper — the same rule the rc blocks above are held to. The name is the
+    # identity: the path is tai's namespace, created by tai's installer and
+    # claimed by nothing else, so whatever the checkout has grown into — a
+    # shape an older door left half-made, files the user dropped beside the
+    # code — goes with the uninstall, and the report says which kind it was.
+    # One floor stands: never a directory the home lives in or under, so a
+    # mistyped TAI_DIR cannot name more than tai owns. Last on purpose: this
+    # command usually runs from inside the checkout (the wrapper execs this
+    # very file), so removing it has to be the last thing the run does.
     checkout = Path(os.environ.get("TAI_DIR") or home / ".tai")
-    left = None
+    held = ""
     if checkout.exists():
-        if ((checkout / "tai" / "cli.py").exists()
-                and (checkout / "install.sh").exists()):
-            shutil.rmtree(checkout)
-            removed.append(str(checkout))
+        if home.is_relative_to(checkout):
+            held = f"left {checkout} — it holds the home directory"
         else:
-            left = checkout
+            ours = ((checkout / "tai" / "cli.py").exists()
+                    and (checkout / "install.sh").exists())
+            if checkout.is_dir():
+                shutil.rmtree(checkout)
+            else:
+                checkout.unlink()
+            removed.append(str(checkout) + ("" if ours
+                           else " (not a tai checkout — removed anyway)"))
     # The npm door's code is npm's to remove, and the running tree says the
     # same thing the wrapper did — this process may itself be executing from
     # the package npm owns. Last, for the same reason the checkout is: the
@@ -622,10 +665,10 @@ def cmd_uninstall(a) -> int:
     print("tai removed" if removed else "tai was not installed")
     for path in removed:
         print(f"  removed {path}")
-    if left:
-        print(f"  left {left} — not a tai checkout")
     if npm_note:
         print(f"  {npm_note}")
+    if held:
+        print(f"  {held}")
     return 0
 
 

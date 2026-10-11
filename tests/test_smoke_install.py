@@ -428,6 +428,31 @@ with tempfile.TemporaryDirectory() as piped_home:
     assert again.returncode == 0, again.stderr
     assert "→ updating the checkout at" in again.stdout, again.stdout
 
+    # The update is one commit deep, not a pull that re-downloads every commit
+    # the remote gained since the checkout was cut: the clone is shallow and
+    # the refetch keeps it that way.
+    shallow = subprocess.run(["git", "-C", tai_dir, "rev-parse",
+                              "--is-shallow-repository"],
+                             capture_output=True, text=True)
+    assert shallow.stdout.strip() == "true", shallow.stdout + shallow.stderr
+
+    # The remote moves, and the next run carries the checkout with it — still
+    # one commit deep, sitting on exactly the commit the remote names.
+    subprocess.run(["git", "-C", _piped_remote, "-c", "user.email=tai@test",
+                    "-c", "user.name=tai", "commit", "-qm", "the second word",
+                    "--allow-empty"], check=True)
+    third = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": tai_dir})
+    assert third.returncode == 0, third.stderr
+    tip = subprocess.run(["git", "-C", _piped_remote, "rev-parse", "HEAD"],
+                         capture_output=True, text=True).stdout.strip()
+    at = subprocess.run(["git", "-C", tai_dir, "rev-parse", "HEAD"],
+                        capture_output=True, text=True).stdout.strip()
+    assert at == tip, f"{at} != {tip}"
+    still = subprocess.run(["git", "-C", tai_dir, "rev-parse",
+                            "--is-shallow-repository"],
+                           capture_output=True, text=True)
+    assert still.stdout.strip() == "true", still.stdout + still.stderr
+
     # A directory that is there but is not a checkout is named, never clobbered.
     occupied = pathlib.Path(piped_home) / "occupied"
     occupied.mkdir()
@@ -447,7 +472,23 @@ with tempfile.TemporaryDirectory() as piped_home:
     assert "tai removed" in gone.stdout, gone.stdout
     assert not checkout.exists(), "the checkout the pipe cloned went with it"
     assert not (pathlib.Path(piped_home) / "bin" / "tai").exists(), gone.stdout
-print("OK — the one-line install: clones, installs, updates, and asks before overwriting.")
+
+# A checkout that predates --depth 1 — a full clone from the era when the
+# readme taught git clone by hand — is healed by the same update rather than
+# re-pulled commit by commit forever: after one run the tree is shallow and
+# carries nothing older than its tip.
+with tempfile.TemporaryDirectory() as fat_home:
+    fat_dir = f"{fat_home}/.tai"
+    subprocess.run(["git", "clone", "-q", remote, fat_dir], check=True)
+    fat = _install_piped(fat_home, {"TAI_REMOTE": remote, "TAI_DIR": fat_dir})
+    assert fat.returncode == 0, fat.stderr
+    assert "→ updating the checkout at" in fat.stdout, fat.stdout
+    slim = subprocess.run(["git", "-C", fat_dir, "rev-parse",
+                           "--is-shallow-repository"],
+                          capture_output=True, text=True)
+    assert slim.stdout.strip() == "true", slim.stdout + slim.stderr
+print("OK — the one-line install: clones, installs, updates one commit deep, "
+      "and asks before overwriting.")
 
 # Everything below speaks to a real zsh: the pause is install.sh editing a
 # zshrc, which it only does when zsh itself is present, and the errexit checks

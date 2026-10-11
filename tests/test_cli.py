@@ -306,13 +306,23 @@ def main() -> int:
     check("nothing installed is said plainly and succeeds",
           (r.returncode, r.stdout.strip()), (0, "tai was not installed"))
 
-    print("tai uninstall: the checkout goes with it, junk does not")
+    print("tai uninstall: the name is the identity — checkout and junk alike")
     junk = pathlib.Path(env["HOME"]) / ".tai"
     junk.mkdir(exist_ok=True)
     (junk / "notes.txt").write_text("mine")
     r = run("uninstall", env=env)
-    check("a folder that is not a checkout is named and kept",
-          (r.returncode, junk.exists(), "not a tai checkout" in r.stdout),
+    check("whatever the name holds goes with the uninstall, kind and all",
+          (r.returncode, junk.exists(),
+           "not a tai checkout — removed anyway" in r.stdout),
+          (0, False, True))
+
+    # The floor under the name: a TAI_DIR the home lives in or under is
+    # refused, not removed — the env var must not be able to name more than
+    # tai owns, whatever sits there.
+    above = pathlib.Path(env["HOME"]).parent
+    r = run("uninstall", env=dict(env, TAI_DIR=str(above)))
+    check("a TAI_DIR holding the home is named and left",
+          (r.returncode, above.exists(), "holds the home directory" in r.stdout),
           (0, True, True))
 
     env = world("uninstall_checkout")

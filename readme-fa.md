@@ -30,20 +30,6 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 exec zsh
 ```
 
-یا با npm
-
-```sh
-npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
-exec zsh
-```
-
-پرچم از آنِ npm است: نسخه‌های تازه‌ی npm اسکریپت‌های نصب را به‌پیش‌فرض مسدود
-می‌کنند و بدون آن بسته فقط باز می‌شود — نه فرمان `tai`، نه خط‌های rc.
-
-این فرمان TAI را در `~/.tai` دانلود می‌کند و نصب‌کننده را از همان‌جا اجرا
-می‌کند؛ اجرای دوباره‌اش بعداً در‌جا به‌روز می‌کند. برای هر دو پوسته فعال،
-تاریخچه را وارد و نمایه‌ی اول را می‌سازد:
-
 ```text
 → cloning tai to /home/you/.tai…
 → learning from your history, building the index…
@@ -63,6 +49,13 @@ exec zsh
 نصبش را عوض کرده باشد می‌تواند خط `source` پوسته را به درخت قدیمی‌تر اشاره بدهد —
 به‌روزرسانی‌ها به آن نمی‌رسند؛ `tai update` آن خط را به درخت تازه نشانه می‌رود و
 `tai version` می‌گوید خط به کجا وصل است.
+
+یا با npm
+
+```sh
+npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
+exec zsh
+```
 
 ## کلیدها
 

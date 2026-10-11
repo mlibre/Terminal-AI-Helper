@@ -23,11 +23,19 @@ else
     exit 1
   }
   if [ -d "$TAI_DIR/.git" ]; then
-    # The one-liner is also the update path: an existing checkout is pulled
-    # forward and reinstalled, never cloned over. A pull that cannot happen
-    # (diverged, offline) fails here, loudly, rather than installing old code.
+    # The one-liner is also the update path: an existing checkout is refetched
+    # and reinstalled, never cloned over. The checkout is this install's own —
+    # nobody develops in it — so the update is one commit deep every time:
+    # fetch --depth 1, reset to what origin named, prune what is left behind.
+    # A pull here would download every commit made since the checkout was cut,
+    # and a checkout that predates --depth 1 would carry its whole history
+    # forever. Offline, the fetch fails and set -e stops the install loudly —
+    # the old rule stands: never install old code on the strength of a guess.
     echo "→ updating the checkout at $TAI_DIR…"
-    git -C "$TAI_DIR" pull --ff-only --quiet
+    _branch="$(git -C "$TAI_DIR" rev-parse --abbrev-ref HEAD)"
+    git -C "$TAI_DIR" fetch --depth 1 --quiet origin "$_branch"
+    git -C "$TAI_DIR" reset --hard --quiet FETCH_HEAD
+    git -C "$TAI_DIR" gc --prune=now --quiet 2>/dev/null || true
   elif [ -e "$TAI_DIR" ]; then
     echo "tai: $TAI_DIR exists and is not a tai checkout — remove it or set TAI_DIR" >&2
     exit 1

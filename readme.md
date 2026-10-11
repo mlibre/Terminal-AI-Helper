@@ -28,20 +28,6 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 exec zsh
 ```
 
-Or using npm
-
-```sh
-npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
-exec zsh
-```
-
-The flag is npm's: newer npm blocks install scripts by default, and without
-it the package unpacks and nothing is wired — no `tai` command, no rc lines.
-
-The line downloads TAI to `~/.tai` and runs the installer from there; run it
-again later and it updates in place. It enables both shells, imports your
-history, and builds the first index:
-
 ```text
 → cloning tai to /home/you/.tai…
 → learning from your history, building the index…
@@ -61,6 +47,13 @@ version until you open a new one — same after `tai update`. An install
 that switched doors could leave the shell's `source` line naming the
 older tree — code updates never reach it; `tai update` retargets that
 line, and `tai version` says where it points.
+
+Or using npm
+
+```sh
+npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
+exec zsh
+```
 
 ## Commands
 
