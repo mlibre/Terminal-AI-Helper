@@ -449,12 +449,18 @@ def rows(db: pathlib.Path) -> list[str]:
 
 
 def await_rows(db: pathlib.Path, expected: list[str],
-               timeout: float = 15.0) -> list[str]:
+               timeout: float = 45.0) -> list[str]:
     """The typed commands that have *not* been recorded yet, once they land.
 
     The plugin's record runs in the background, so the rows appear some time
     after the prompt returns. Polling for them is both faster than a fixed pause
     and honest: it is the only wait here that ends on the thing being asserted.
+    The ceiling is the runner's, not the product's — the flush chain is a
+    python start on a machine that may be running every other job at once, and
+    a success pays nothing for the room, because the poll ends the moment the
+    rows land. 15s was a ceiling a loaded CI runner crossed; the suite lost
+    `bash records when enabled` to it while the same suite passed three times
+    in a row on the development machine the same commit came from.
     """
     end = time.monotonic() + timeout
     missing = expected
