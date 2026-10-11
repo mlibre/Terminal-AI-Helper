@@ -142,12 +142,12 @@ _tai_enable() {
   local rc="$1" plugin="$2" source_line="$3" plugin_name
   plugin_name="${plugin##*/}"
   mkdir -p "$(dirname "$rc")"
-  python3 - "$rc" "$source_line" "$plugin_name" <<'PY'
+  python3 - "$rc" "$source_line" "$plugin_name" "$plugin" <<'PY'
 import os
 import sys
 from pathlib import Path
 
-rc, source_line, plugin_name = sys.argv[1:]
+rc, source_line, plugin_name, ours = sys.argv[1:]
 path = Path(rc)
 # surrogateescape, not errors="replace": a dotfile in a legacy encoding has bytes
 # that are not valid UTF-8, and replacing them on read would silently rewrite the
@@ -156,17 +156,46 @@ text = path.read_text(encoding="utf-8", errors="surrogateescape") if path.exists
 marker = "# tai autocomplete (installed by ./install.sh)"
 lines = text.splitlines(keepends=True)
 cleaned = []
+retargeted = []
 i = 0
 while i < len(lines):
     line = lines[i]
     if line.strip() == marker:
-        # Replace the managed two-line block when the checkout path changes.
+        # The managed block: refresh its line in place rather than removing and
+        # re-appending, so the block keeps its place and a moved tree rewrites
+        # the one line instead of gaining a second one.
+        cleaned.append(line)
         i += 1
         if i < len(lines) and plugin_name in lines[i] and "source" in lines[i]:
-            i += 1
+            lines[i] = source_line + "\n"
         continue
+    stripped = line.lstrip()
+    if (not stripped.startswith("#") and "source" in line
+            and "plugins/" in line and plugin_name in line
+            and ours not in line):
+        # A tai source line left by an older door: the same plugin name from
+        # another tree — the checkout the curl one-liner cloned, still in the
+        # rc after npm took over the wrapper. Matching by name alone said
+        # "already enabled" and kept the shell sourcing code npm's updates
+        # never touch: `tai version` reported one tree while the shell ran
+        # another. The line is this install's to own, so it is retargeted.
+        old = [t for t in line.split() if plugin_name in t]
+        retargeted.append(old[-1].strip("\"'") if old else line.strip())
+        line = source_line + "\n"
     cleaned.append(line)
     i += 1
+
+# A retarget can meet a stale line twice (a managed block and a stray copy);
+# the line is sourced once, first occurrence wins.
+wanted = source_line + "\n"
+deduped, seen = [], False
+for line in cleaned:
+    if line == wanted:
+        if seen:
+            continue
+        seen = True
+    deduped.append(line)
+cleaned = deduped
 
 # A manually configured integration is already enabled; do not add a second
 # copy when the installer is rerun.
@@ -179,6 +208,9 @@ if not has_source:
         cleaned[-1] += "\n"
     cleaned.append(marker + "\n")
     cleaned.append(source_line + "\n")
+
+for old in retargeted:
+    print(f"tai: retargeted the {plugin_name} source line ({old} — was another install's tree)")
 
 # Replaced atomically, the same rule the index builder follows. This file is the
 # user's shell: an interrupt between truncate and write would otherwise leave a

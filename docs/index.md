@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 npm is a door to the same install: `npm i -g terminal-ai-helper@latest
 --allow-scripts=terminal-ai-helper` unpacks the same files and runs the same
 installer itself, and `tai update` knows an npm install and updates it from
-the registry.
+the registry — and retargets a plugin line an older install left behind.
 
 </div>
 

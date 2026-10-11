@@ -52,18 +52,22 @@ def _stage_npm_tree(root: str) -> str:
     return str(tree)
 
 
-def _fake_npm(fakebin: str, tree: str) -> None:
+def _fake_npm(fakebin: str, tree: str, bump: bool = True) -> None:
     """A `npm` that records its argv and bumps the tree's VERSION, as a real
     global install would — but runs no postinstall, which is the
-    --ignore-scripts world the update path still has to survive."""
+    --ignore-scripts world the update path still has to survive. `bump=False`
+    holds the version, which is how a scene reaches the "already up to date"
+    branch with a real registry's answer."""
     bin_dir = pathlib.Path(fakebin)
     bin_dir.mkdir(parents=True, exist_ok=True)
     script = bin_dir / "npm"
+    grow = (f'v="$(cat {tree}/VERSION)"; '
+            f'echo "${{v%.*}}.$(( ${{v##*.}} + 1 ))" > {tree}/VERSION\n'
+            if bump else "")
     script.write_text(
         "#!/usr/bin/env bash\n"
         'echo "npm argv: $*" >> "$NPM_LOG"\n'
-        f'v="$(cat {tree}/VERSION)"; '
-        f'echo "${{v%.*}}.$(( ${{v##*.}} + 1 ))" > {tree}/VERSION\n'
+        + grow +
         "exit 0\n")
     script.chmod(0o755)
 
@@ -187,6 +191,68 @@ with tempfile.TemporaryDirectory() as root:
     assert "npm is not installed" in done.stdout
     assert "npm i -g terminal-ai-helper@latest" in done.stdout
     print("OK — update without npm says what to do instead.")
+
+# The mixed-doors repair, and the report that made it visible. An install
+# that switched doors left the rc line naming the tree the curl one-liner
+# cloned: the wrapper pointed at the npm package, so `tai version` and
+# `tai bench` reported a release the interactive shell was not running —
+# and the shell kept paying for code npm's updates never touched. Two
+# changes close it: the installer retargets a foreign `plugins/tai.*` line
+# instead of reading it as "already enabled", and the update's rerun guard
+# asks the wiring rather than the version, so an up-to-date-but-miswired
+# install is repaired by the very command that said "already up to date".
+with tempfile.TemporaryDirectory() as root:
+    home = pathlib.Path(root) / "home"
+    tree = _stage_npm_tree(root)
+    fakebin = pathlib.Path(root) / "fakebin"
+    _fake_npm(str(fakebin), tree, bump=False)
+    log = pathlib.Path(root) / "npm.log"
+    env = _sandbox_env(str(home), {
+        "PATH": f"{fakebin}:{os.environ['PATH']}", "NPM_LOG": str(log)})
+
+    # The old door's leavings: a checkout with both plugins, rc lines that
+    # source it — one under the managed marker, one bare — and a wrapper
+    # naming the npm tree, which is what made `tai version` lie.
+    stale = home / ".tai" / "plugins"
+    stale.mkdir(parents=True)
+    for name in ("tai.zsh", "tai.bash"):
+        (stale / name).write_text("# the old checkout's copy\n")
+    (home / ".zshrc").write_text(
+        "# tai autocomplete (installed by ./install.sh)\n"
+        f"source {home}/.tai/plugins/tai.zsh\n")
+    (home / ".bashrc").write_text(f"source {home}/.tai/plugins/tai.bash\n")
+    wrapper = home / "bin"
+    wrapper.mkdir()
+    (wrapper / "tai").write_text(
+        "#!/usr/bin/env bash\n"
+        f"exec python3 -S -E {tree}/tai/cli.py \"$@\"\n")
+
+    done = _run_update(tree, env)
+    assert done.returncode == 0, done.stderr
+    assert "✓ already up to date" in done.stdout, done.stdout
+    assert "retargeted" in done.stdout, done.stdout
+    assert done.stdout.count("the terminal that knows your next command") == 1
+    text = (home / ".zshrc").read_text()
+    assert f"source {tree}/plugins/tai.zsh" in text, text
+    assert ".tai/plugins" not in text, text
+    # The managed block keeps its place, line refreshed underneath it.
+    assert "# tai autocomplete (installed by ./install.sh)" in text, text
+    assert text.index("# tai autocomplete") < text.index(f"source {tree}"), text
+    btext = (home / ".bashrc").read_text()
+    assert f"source {tree}/plugins/tai.bash" in btext, btext
+    assert ".tai/plugins" not in btext, btext
+    # Exactly one line per shell: a retarget must not stack a second copy.
+    assert text.count(f"source {tree}/plugins/tai.zsh") == 1, text
+    assert btext.count(f"source {tree}/plugins/tai.bash") == 1, btext
+    print("OK — update: an rc line naming the old door's tree is "
+          "retargeted in place, marker and all.")
+
+    # Converged: the second update finds the wiring it wrote and prints no
+    # welcome over it.
+    done = _run_update(tree, env)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.count("the terminal that knows your next command") == 0
+    print("OK — update: the healed wiring converges, no welcome again.")
 
 # In-process, because the no-npm answer is one `which` away and a subprocess
 # with a gutted PATH could not run the installer it must not reach. The repo

@@ -12,7 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/inst
 npm is a door to the same install: `npm i -g terminal-ai-helper@latest
 --allow-scripts=terminal-ai-helper` unpacks the same files and runs the same
 installer itself, and `tai update` knows an npm install and updates it from
-the registry.
+the registry — and retargets a plugin line an older install left behind,
+the mismatch `tai version` names.
 
 The line downloads TAI to `~/.tai`, enables both shells, imports your
 history and builds the first index; run it again later and it updates in
@@ -98,7 +99,7 @@ tai bench       # build time, latency, memory, each shell's index read time
 tai web         # a read-only localhost dashboard (alias: tai dashboard)
 tai eval        # candidate coverage against your own history
 tai update      # newest version — GitHub for a checkout, npm for an npm install (alias: tai upgrade)
-tai version     # print the release this install is running
+tai version     # this install's release, and where the shell plugin is wired
 tai purge       # drop unusable rows, then rebuild
 tai forget git sta   # drop every stored row for a command, exactly as typed
 tai uninstall   # remove everything tai added

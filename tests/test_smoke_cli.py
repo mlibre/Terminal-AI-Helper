@@ -567,7 +567,12 @@ assert _help.returncode == 0 and "--exit" in _help.stdout, _help.stdout
 assert tai_store.count()[0] > 0
 _ver = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"), "version"],
                       env=_predict_env, capture_output=True, text=True, timeout=60)
-assert _ver.stdout.strip() == f"tai {(REPO / 'VERSION').read_text().strip()}", _ver.stdout
+# The release line first, and the wiring lines a user can act on: this
+# sandbox wires neither shell, and the report says so instead of staying
+# silent about it.
+assert _ver.stdout.splitlines() == [
+    f"tai {(REPO / 'VERSION').read_text().strip()}",
+    "zsh plugin not wired", "bash plugin not wired"], _ver.stdout
 _alias = subprocess.run([sys.executable, "-S", "-E", str(REPO / "tai" / "cli.py"), "--help"],
                         env=_predict_env, capture_output=True, text=True, timeout=60)
 assert "upgrade" in _alias.stdout, "the `tai upgrade` alias is missing from --help"

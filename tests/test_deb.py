@@ -50,7 +50,12 @@ def main() -> int:
         env = dict(os.environ, TAI_DB=str(root / "scratch.db"))
         got = subprocess.run([sys.executable, str(cli), "version"], env=env,
                              capture_output=True, text=True, timeout=60)
-        assert got.stdout.strip() == f"tai {version}", got.stdout
+        # The release line, then the wiring report: this extract wires no
+        # shell, and the packaged CLI says so rather than printing a bare
+        # number a user could read as "everything is set up".
+        assert got.stdout.splitlines() == [
+            f"tai {version}", "zsh plugin not wired",
+            "bash plugin not wired"], got.stdout
         # Both plugins are present and parse, since the shell integration is
         # what a package install is actually for.
         zsh = REPO / "tests" / "bin" / "zsh"

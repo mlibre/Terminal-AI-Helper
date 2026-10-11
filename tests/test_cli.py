@@ -328,6 +328,42 @@ def main() -> int:
           (r.returncode, clone.exists(), "tai removed" in r.stdout),
           (0, False, True))
 
+    print("tai version: the release, and where the shell's plugin line points")
+    env = world("version")
+    home = pathlib.Path(env["TAI_DB"]).parent
+    # The world dir outlives the suite's own runs (the uninstall section says
+    # why), so this one clears what it is about to assert on: an empty home,
+    # a foreign line, this tree's line — in that order, every run.
+    for rc_name in (".zshrc", ".bashrc"):
+        (home / rc_name).unlink(missing_ok=True)
+    shutil.rmtree(home / ".tai", ignore_errors=True)
+    env = dict(env, HOME=str(home))
+    r = run("version", env=env)
+    check("an empty home says neither shell is wired",
+          (r.returncode, r.stdout.startswith("tai "),
+           "zsh plugin not wired" in r.stdout,
+           "bash plugin not wired" in r.stdout), (0, True, True, True))
+    stale = home / ".tai" / "plugins"
+    stale.mkdir(parents=True)
+    (stale / "tai.zsh").write_text("# the old checkout's copy\n")
+    # One line quoted the way a hand-written one often is, one bare.
+    (home / ".zshrc").write_text(f'source "{home}/.tai/plugins/tai.zsh"\n')
+    (home / ".bashrc").write_text(f"source {home}/.tai/plugins/tai.bash\n")
+    r = run("version", env=env)
+    check("a line naming another install is flagged, path and all",
+          ("another install" in r.stdout,
+           f"{home}/.tai/plugins/tai.zsh" in r.stdout,
+           f"{home}/.tai/plugins/tai.bash" in r.stdout), (True, True, True))
+    check("the quoted path is read as a path, not a token with quotes",
+          f'"{home}/.tai' in r.stdout, False)
+    (home / ".zshrc").write_text(f"source {REPO}/plugins/tai.zsh\n")
+    (home / ".bashrc").write_text(f"source {REPO}/plugins/tai.bash\n")
+    r = run("version", env=env)
+    check("this checkout's own tree reads clean, both shells",
+          ("another install" in r.stdout,
+           f"{REPO}/plugins/tai.zsh" in r.stdout,
+           f"{REPO}/plugins/tai.bash" in r.stdout), (False, True, True))
+
     print("the argument wall")
     env = world("args")
     r = run(env=env)

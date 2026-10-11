@@ -213,6 +213,15 @@ def _update_npm(repo: "Path") -> int:
     The allow-scripts flag rides along because npm's newer vintages block
     install scripts by default — the same gate the readme's install line
     opens — and a blocked hook would leave a replaced tree nobody wired.
+
+    The rerun is decided by the wiring, not by the version. An install that
+    switched doors could leave the rc line naming an older tree — the
+    checkout the curl one-liner cloned, still sourced after npm took over
+    the wrapper — and then every `tai update` reported a version the shell
+    was not running, "already up to date" being exactly when the old guard
+    (`after == before or configured`) skipped the repair. The installer is
+    idempotent and its configured check is the wiring's own test, so it runs
+    whenever that test fails, whichever the version says.
     """
     import shutil
     import subprocess
@@ -233,7 +242,7 @@ def _update_npm(repo: "Path") -> int:
     # progress, and this line is the verdict.
     print("✓ already up to date" if after == before else f"✓ updated to {after}",
           flush=True)
-    if after == before or _npm_configured():
+    if _npm_configured():
         return 0
     installer = repo / "install.sh"
     if not installer.exists():
@@ -694,9 +703,47 @@ def cmd_jev(a) -> int:
 
 
 def cmd_version(a) -> int:
-    """Say which release this is."""
+    """Which release this is, and where the shell's plugin line points.
+
+    The second half exists because the two can disagree. An install that
+    switched doors — the curl one-liner's checkout replaced by the npm
+    package — left the rc line naming the older tree, and the shell went on
+    running code `tai version` no longer reported: the release number comes
+    from the tree the wrapper execs, the plugin comes from wherever the rc
+    says. Both facts are read here, so the mismatch is visible in the same
+    command a user runs to answer "which tai is this".
+    """
     version = _read_version()
     print(f"tai {version}")
+    from pathlib import Path
+    repo = _repo_dir()
+    home = Path.home()
+    for shell, rc_name, plugin in (("zsh", ".zshrc", "tai.zsh"),
+                                   ("bash", ".bashrc", "tai.bash")):
+        wired = ""
+        try:
+            for line in (home / rc_name).read_text(
+                    encoding="utf-8", errors="surrogateescape").splitlines():
+                if line.lstrip().startswith("#") or "source" not in line \
+                        or plugin not in line:
+                    continue
+                tokens = [t for t in line.split() if plugin in t]
+                if tokens:
+                    wired = tokens[-1].strip("\"'")
+                    break
+        except OSError:
+            pass
+        if not wired:
+            print(f"{shell} plugin not wired")
+            continue
+        note = ""
+        try:
+            if Path(wired).expanduser().resolve() != \
+                    (repo / "plugins" / plugin).resolve():
+                note = " — another install; 'tai update' rewires it here"
+        except OSError:
+            pass
+        print(f"{shell} plugin {wired}{note}")
     return 0
 
 
@@ -842,8 +889,10 @@ def main() -> int:
     if argv and argv[0] == "record" and "--help" not in argv and "-h" not in argv:
         return cmd_record(_fast_record(argv[1:]))
     if argv == ["version"]:
-        print(f"tai {_read_version()}")
-        return 0
+        # The report is two small rc reads beside the version file — the lean
+        # path can afford what the parser path would print, and both doors
+        # must say the same thing about the wiring.
+        return cmd_version(None)
     # Any other command is a tai process the user asked for, and a non-empty
     # spool is records waiting for one: drain it here, so `tai suggest`,
     # `tai refresh` or the dashboard never answer from a store that is a few

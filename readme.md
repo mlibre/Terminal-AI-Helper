@@ -57,7 +57,10 @@ history, and builds the first index:
 ```
 
 That last line matters: a terminal that is already open keeps the old
-version until you open a new one — same after `tai update`.
+version until you open a new one — same after `tai update`. An install
+that switched doors could leave the shell's `source` line naming the
+older tree — code updates never reach it; `tai update` retargets that
+line, and `tai version` says where it points.
 
 ## Commands
 
@@ -69,7 +72,7 @@ tai doctor      # what is indexed, and what is held back
 tai bench       # build time, latency, memory, each shell's index read time
 tai web         # a read-only localhost dashboard (alias: tai dashboard)
 tai eval        # candidate coverage against your own history
-tai version     # print the release this install is running
+tai version     # this install's release, and where the shell plugin is wired
 tai purge       # drop unusable rows, then rebuild
 tai forget git sta   # drop every stored row for a command, exactly as typed
 tai uninstall   # remove everything tai added
