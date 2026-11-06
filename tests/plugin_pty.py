@@ -180,8 +180,8 @@ class Session:
         """Write bytes and return immediately, with no waiting attached."""
         os.write(self.fd, data.encode())
 
-    def send(self, data: str) -> None:
-        """Write keys and wait for the shell to have dealt with them.
+    def send(self, data: str, pause: float = 0.03) -> None:
+        """Press `data` like a person, and wait for the shell to catch up.
 
         The wait ends on the shell going quiet, not on a fixed pause. Control keys
         echo nothing, so there is nothing to match on; printable text is no better,
@@ -190,12 +190,24 @@ class Session:
         burst of output to end is the only signal that is true in both cases, and
         it costs one `QUIET` interval rather than a guess.
 
-        A tempting refinement is to wait for the shell's own echo of the text, which
-        sounds like real evidence instead of silence. It is slower, not faster:
-        measured 245s against 16s for the whole suite. See the note on ZLE and
-        KEYTIMEOUT for the other trap in this area.
+        And the presses themselves are a person's now, not a terminal's. A whole
+        string in one write is byte-for-byte what a terminal delivers when the
+        user pastes, and the plugin's paste rule is right to treat it as one: no
+        hand moves that fast, so a test that means typing has to type — one
+        character per press, thirty milliseconds between them, which is slower
+        than the plugin's fiftieth-of-a-second paste bound and faster than the
+        wait-each-echo style this docstring warns against. Control bytes keep no
+        pause, and neither does the byte that ends an escape sequence, so the
+        suite's arrow keys and Enters cost nothing and bindkey sequences stay
+        whole. Text a test wants to arrive as a *paste* goes through `write` —
+        that is the terminal speaking, and `write` is what the terminal sounds
+        like.
         """
-        self.write(data)
+        for i, ch in enumerate(data):
+            self.write(ch)
+            nxt = data[i + 1] if i + 1 < len(data) else ""
+            if ch > " " and ch != "\x7f" and nxt > " " and nxt != "\x7f":
+                time.sleep(pause)
         self.settle()
 
     def run(self, cmd: str) -> None:

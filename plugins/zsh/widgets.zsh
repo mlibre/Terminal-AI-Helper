@@ -29,6 +29,29 @@ typeset -g _TAI_PASTE_PREV=""
 typeset -gi _TAI_PASTE_QUIET=0
 typeset -gi _TAI_PASTE_JUMP=25
 
+# The clock the chunk rule reads, the redraw that raised the quiet, and the
+# query an arrival skipped. zsh/datetime is what makes $EPOCHREALTIME exist;
+# on a zsh too old for it the chunk rule is inert and the two bounds above
+# keep the behaviour this file was shipped with — the module load is best-
+# effort on purpose.
+zmodload zsh/datetime 2>/dev/null
+# A fiftieth of a second, in microseconds. The fastest coalesced burst of
+# ordinary typing is a read every few tens of milliseconds (a hand, not a
+# terminal, is the thing being told apart), and the harness's own quiet
+# window is built on the same arithmetic.
+typeset -gi _TAI_PASTE_CHUNK_US=20000
+# How many edit events at terminal speed make a paste. Five insertions in a
+# row, each within a fiftieth of a second of the last, is 250 characters a
+# second — no hand does that; keyboard auto-repeat at its fastest stock rate
+# (about 30 a second) does not either, and a rate set past 50 a second only
+# holds the quiet while the key is held, which costs one stale hint.
+typeset -gi _TAI_PASTE_MIN_RUN=5
+typeset -g _TAI_PASTE_TICK=""
+typeset -gi _TAI_PASTE_RUN=0
+typeset -gi _TAI_PASTE_NEW=0
+typeset -gi _TAI_PASTE_FAST=0
+typeset -gi _TAI_Q_OWED=0
+
 # Is the line *typed*? A history line is not: Up fills the buffer with a
 # command the user ran once, and on that buffer Down means "the next history
 # entry" — it did not mean "open the list" until something was typed. The flag
@@ -39,18 +62,71 @@ typeset -gi _TAI_PASTE_JUMP=25
 # a line nobody typed, with the line itself as its only row.
 typeset -gi _TAI_TYPED=0
 
+# $EPOCHREALTIME as whole microseconds in REPLY, and false where there is no
+# clock. String surgery, not arithmetic on the float: the fraction is padded
+# and cut to six digits by hand, and `10#` keeps a fraction that opens in a
+# zero from being read as octal. This build's fraction runs longer than six
+# digits, which is why the cut is there at all.
+_tai_now_us() {
+  REPLY=0
+  [[ -n "$EPOCHREALTIME" ]] || return 1
+  local fr="${EPOCHREALTIME#*.}"
+  REPLY=$(( ${EPOCHREALTIME%%.*} * 1000000 + 10#${(r:6::0:)fr} ))
+}
+
 _tai_paste_state() {
   # The unwrapped case: how far the buffer moved since the last redraw. One
   # character in either direction is a keystroke — typed or removed — and ends
   # the quiet; more than _TAI_PASTE_JUMP at once is an arrival and starts it.
-  # Everything between leaves the flag as it is.
+  # Everything between leaves the flag as it is — unless the clock says it is
+  # a chunk of a paste, which is the branch below.
+  _TAI_PASTE_NEW=0
   local -i d=$(( ${#BUFFER} - ${#_TAI_PASTE_PREV} ))
   (( d < 0 )) && d=$(( -d ))
-  if (( d == 1 )); then
-    _TAI_PASTE_QUIET=0
-  elif (( d > _TAI_PASTE_JUMP )); then
-    _TAI_PASTE_QUIET=1
+  local -i now_us=0
+  _tai_now_us && now_us=$REPLY
+  # Terminal speed, judged against the previous redraw: an insertion within a
+  # fiftieth of a second of the last one is not a hand. The hook fires per
+  # widget, so a three-character chunk is three calls — two of them one
+  # character apart, microseconds together — and the last character of every
+  # chunk looks exactly like a keystroke. Without the clock, the tail of a
+  # paste would end the quiet that the middle of the same paste raised.
+  local -i fast=0
+  (( now_us && ${#_TAI_PASTE_TICK} )) && \
+    (( now_us - _TAI_PASTE_TICK < _TAI_PASTE_CHUNK_US )) && fast=1
+  _TAI_PASTE_FAST=$fast
+  # The run: consecutive edit events at terminal speed. The hook fires per
+  # widget, so a pasted character and a typed character both arrive as d==1 —
+  # the buffer cannot tell them apart, and neither bound above sees anything
+  # but one keystroke at a time. Only the clock separates a hand from a
+  # terminal, and only a run of them separates a paste from one lucky
+  # keystroke: two fast keys in a row happens to hands (rollover), twenty in
+  # a row does not.
+  if (( d != 0 )) && (( fast )); then
+    _TAI_PASTE_RUN+=1
+  else
+    _TAI_PASTE_RUN=0
   fi
+  if (( d == 1 )); then
+    (( fast )) || _TAI_PASTE_QUIET=0
+  elif (( d > _TAI_PASTE_JUMP )); then
+    (( _TAI_PASTE_QUIET )) || { _TAI_PASTE_QUIET=1; _TAI_PASTE_NEW=1; }
+  elif (( d > 1 )); then
+    # A coalesced insertion — several characters in one read — is one event
+    # that moved more than a keystroke and less than an arrival. At human
+    # speed it is a typing burst like any other; at terminal speed it is a
+    # chunk of a paste, and the run below will agree with it.
+    (( fast && ! _TAI_PASTE_QUIET )) && { _TAI_PASTE_QUIET=1; _TAI_PASTE_NEW=1; }
+  fi
+  # Enough of a run is a paste, whoever delivered it. Raised once — the
+  # crossing is the arrival, and everything after it rides the same quiet —
+  # and ended by the next edit at human speed, which is the keystroke rule
+  # above doing what it always did.
+  if (( _TAI_PASTE_RUN >= _TAI_PASTE_MIN_RUN && ! _TAI_PASTE_QUIET )); then
+    _TAI_PASTE_QUIET=1
+    _TAI_PASTE_NEW=1
+  fi
+  (( now_us )) && _TAI_PASTE_TICK=$now_us
   _TAI_PASTE_PREV="$BUFFER"
 }
 
@@ -158,7 +234,27 @@ _tai_update() {
     (( ours_was )) && POSTDISPLAY=""
   fi
   _tai_paste_state
-  _tai_query "$BUFFER" "$_TAI_LAST"
+  # A paste is not a query — all of it, not only its menu. The redraw that
+  # raised the quiet answers nothing: the line is still arriving, and a full
+  # query on a real index for a line nobody has read is the cost the chunk
+  # rule exists to stop. What it skips it owes — one query, at the first
+  # redraw that is not itself arriving at terminal speed, the keystroke that
+  # ends the paste or any edit after it — by which time the buffer is the
+  # line the user is reading, so the answer is the one they would have asked
+  # for. The hook fires per widget, so the middle of a paste owes and the
+  # tail of it is still fast: paying at any fast redraw would put the storm
+  # back one chunk at a time. The envelope keeps its single query: quiet
+  # raised by the paste widget is not an arrival this hook raised, and one
+  # query for a line that arrived at once is the deal the bracketed-paste
+  # tests have always held.
+  if (( _TAI_PASTE_NEW )); then
+    _TAI_Q_OWED=1
+  elif (( _TAI_Q_OWED )) && (( ! _TAI_PASTE_FAST )); then
+    _TAI_Q_OWED=0
+    _tai_query "$BUFFER" "$_TAI_LAST"
+  elif (( ! _TAI_Q_OWED )); then
+    _tai_query "$BUFFER" "$_TAI_LAST"
+  fi
   # The extends test folds case — the lookup that filled _TAI_BEST does, and
   # `ls down` reaching `ls Downloads` is the point of it — and the strip is
   # positional: the head of the best line that matched is the buffer's own
@@ -589,9 +685,14 @@ _tai_line_init() {
   _TAI_DREW=0
   _TAI_MENU_DISMISS=""
   # A new line is a new story: no paste has arrived on it yet, and nothing
-  # on it is typed.
+  # on it is typed. An owed query belongs to the line that skipped it — a
+  # debt carried past the prompt would be paid against a line nobody pasted.
   _TAI_PASTE_PREV=""
   _TAI_PASTE_QUIET=0
+  _TAI_PASTE_TICK=""
+  _TAI_PASTE_NEW=0
+  _TAI_PASTE_FAST=0
+  _TAI_Q_OWED=0
   _TAI_TYPED=0
   # And no directory snapshot is worth keeping either: the file answer reads
   # its snapshots for a second after taking them, and a line that starts now

@@ -12,10 +12,12 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from plugin_env import *  # noqa: F401,F403  (constants, fixture writers, setup)
+import plugin_env  # the module, for tests that must pin and restore COMMANDS
 from plugin_env import _zq  # underscore names are not re-exported by *
 from plugin_screen import *  # noqa: F401,F403  (Screen and the styled-menu helpers)
 from plugin_pty import *  # noqa: F401,F403  (Session, Ghosts, check, probe, failures)
@@ -895,6 +897,112 @@ def test_pasted_text_is_not_a_typo() -> None:
         write_index()
 
 
+def test_paste_chunks_are_a_paste_too() -> None:
+    """A paste delivered without the envelope is still one paste.
+
+    The bracketed-paste envelope is what most terminals wrap a paste in, and
+    it is the only arrival the paste rule could see: a keystroke is one
+    character, an arrival is more than `_TAI_PASTE_JUMP` (25), and a paste
+    that a terminal delivers as a burst of small insertions — no envelope,
+    which is what some ssh transports, VNC clients and terminals with the
+    mode off produce — lands between the two on every chunk. Each chunk's
+    redraw then paid a full query for a line nobody had finished reading;
+    on a real index the shell the report came from did not come back, and
+    the user read it as the terminal crashing on a plain ctrl+shift+v.
+
+    So chunks are timed, not measured: an insertion that arrives within a
+    fiftieth of a second of the previous one is a terminal, not a hand. The
+    quiet engages on the first chunk that follows another closely enough,
+    the arrival redraw answers nothing, and the answer the line owes is
+    paid at the next redraw that is not itself an arrival — here, the
+    keystroke that re-arms the glimpse, exactly as the envelope paste does
+    on the same keystroke (see test_pasted_text_is_not_a_typo, whose final
+    buffer and re-arm answer this test ends on).
+    """
+    if not SHELLS["zsh"]:
+        return
+    print("an envelope-less paste in chunks is still a paste")
+    # The fixture this test answers from, pinned on purpose. write_index()
+    # rebinds the ambient COMMANDS to whatever it was last handed — the test
+    # before this one leaves the two-thousand-line loose fixture there — so
+    # "restore the fixture" without naming it restores whatever the last
+    # test happened to leave. The one line the re-arm answers from is named
+    # here, and the ambient list goes back in the finally.
+    saved_commands = plugin_env.COMMANDS
+    write_index(["git pull --rebase"])
+
+    def paste_flags(s: Session) -> str:
+        """The two flags the chunk rule owns, read inside the editor.
+
+        ^O is accept-line-and-down in emacs mode and bound by nobody else in
+        this session; the widget writes the file at widget time, so the
+        values are the ones the paste left, not the next redraw's.
+        """
+        s.buf.unlink(missing_ok=True)
+        s.write("\x0f")
+        s.wait_file(s.buf, "paste state")
+        got = s.buf.read_text().strip()
+        s.buf.unlink(missing_ok=True)
+        return got
+
+    s = Session("zsh")
+    # The newline is the Enter: without it the definition sits in the editing
+    # buffer and the paste below merges into it — the mistake is its own
+    # argument for why this dump is bound before anything else happens.
+    s.write("tai_paste_dump() { print -r -- \"QUIET=[$_TAI_PASTE_QUIET] "
+            "OWED=[$_TAI_Q_OWED]\" > \"$TAI_TEST_DUMP\"; }; "
+            "zle -N tai_paste_dump; bindkey '^O' tai_paste_dump\n")
+    s.settle()
+    try:
+        # First paste: long enough that the chunks cannot arrive as one read,
+        # ending in a chunk wider than a keystroke so the quiet it raised is
+        # still up when the settle ends. 23 characters, 3 at a time: eight
+        # chunks, every one of them between the keystroke and the jump.
+        long_paste = "pull --rebase --onto xy"
+        assert len(long_paste) % 3 == 2 and len(long_paste) > 25 // 2
+        for i in range(0, len(long_paste), 3):
+            s.write(long_paste[i:i + 3])
+            time.sleep(0.01)
+        s.settle()
+        check("a chunked paste raises the quiet", paste_flags(s),
+              "QUIET=[1] OWED=[1]")
+
+        # The line it left answers nothing yet: the arrival redraws owed
+        # their query, and the loose list — the thing that costs — never ran
+        # for a line nobody has read.
+        check("and it opens no list on its own", s._dump(clear=False)[2],
+              "MENU=[] N=[0] IDX=[0]")
+
+        # Now the shape the envelope test ends on: the same buffer, pasted
+        # the same way, then one keystroke. The debt is paid there — one
+        # query for the finished line — and the glimpse answers exactly as
+        # it does after an envelope paste.
+        s.write(CTRL_U)
+        s.settle()
+        for i in range(0, len("pull --re"), 3):
+            s.write("pull --re"[i:i + 3])
+            time.sleep(0.01)
+        s.settle()
+        check("a shorter chunked paste is quiet too", paste_flags(s),
+              "QUIET=[1] OWED=[1]")
+        # The keystroke that re-arms the glimpse is a hand's keystroke: a
+        # pause after the dump key's own redraw, so the paste rule reads it
+        # at the speed it arrives at and ends the quiet, the way it ends for
+        # the user who typed it.
+        time.sleep(0.05)
+        s.write(BACKSPACE)
+        s.settle()
+        check("and one keystroke re-arms the glimpse",
+              s._dump(clear=False)[2],
+              "MENU=[\\n  git pull --rebase] N=[1] IDX=[1]")
+        check("with the debt paid where the line could be read",
+              paste_flags(s), "QUIET=[0] OWED=[0]")
+        s.close()
+    finally:
+        plugin_env.COMMANDS = saved_commands
+        write_index()
+
+
 def test_unpaintable_rows_are_never_drawn() -> None:
     """A learned row with raw control bytes never reaches the terminal.
 
@@ -1671,6 +1779,7 @@ def main() -> int:
     test_stem_never_cuts_untyped_text()
     test_loose_tiers()
     test_pasted_text_is_not_a_typo()
+    test_paste_chunks_are_a_paste_too()
     test_unpaintable_rows_are_never_drawn()
     test_unpaintable_rows_are_never_drawn_bash()
     test_history_browsing_opens_no_list()
