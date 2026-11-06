@@ -14,10 +14,11 @@ import time
 
 from tai.engine import WRAPPERS, Engine
 from tai.fresh import files
-from tai.paths import alive_in, db_path, takes_file
+from tai.paths import (MISSING, alive_in, command_verdict, db_location,
+                       enabled, takes_file)
 
 _E: Engine | None = None
-_STALE: frozenset = frozenset()
+_STALE: "LazyStale | frozenset" = frozenset()
 
 # Is this command's first word installed? Asked once per word per process and
 # kept here, because PATH does not change under a running process in any way
@@ -29,25 +30,126 @@ _STALE: frozenset = frozenset()
 _WHICH: dict[str, bool] = {}
 
 
+def _path_lookup(word: str) -> bool:
+    """`shutil.which(word) is not None`, answered without importing shutil.
+
+    shutil was 5ms of a warm one-shot suggest — and it dragged re, fnmatch,
+    bz2 and lzma in behind it — for a PATH scan this module can do with os
+    alone. The walk is shutil.which's own, POSIX branch, line for line: a
+    word with a directory part is looked up directly; an empty PATH element
+    means the current directory; a hit must exist, be executable, and not be
+    a directory. Only the Windows PATHEXT machinery is absent — the plugin
+    and the installer are Linux-only anyway.
+    """
+    dirname, name = os.path.split(word)
+    if dirname:
+        dirs = [dirname]
+    else:
+        path = os.environ.get("PATH")
+        if path is None:
+            try:
+                path = os.confstr("CS_PATH")
+            except (AttributeError, ValueError):
+                path = os.defpath
+        if not path:
+            return False
+        dirs = os.fsdecode(path).split(os.pathsep)
+    seen: set[str] = set()
+    for d in dirs:
+        norm = os.path.normcase(d)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        cand = os.path.join(d, name)
+        if (os.path.exists(cand) and os.access(cand, os.F_OK | os.X_OK)
+                and not os.path.isdir(cand)):
+            return True
+    return False
+
+
 def _on_path(word: str) -> bool:
     """Whether `word` resolves to an executable on this machine's PATH."""
-    import shutil
     hit = _WHICH.get(word)
     if hit is None:
-        hit = _WHICH[word] = shutil.which(word) is not None
+        hit = _WHICH[word] = _path_lookup(word)
     return hit
 
 
-def _stale_for(eng: Engine) -> set:
-    """Commands whose paths no longer exist, per the engine's own cwd records.
+class LazyStale:
+    """The engine's stale set, asked lazily and remembered per command.
+
+    `paths.stale_in` walks every distinct command's every token up front, and
+    the one-shot suggest paid that whole walk — measured at more than half of
+    its process on a 20k-row history — before ranking a handful of candidates
+    for one prefix. The verdict for one command is a pure function of the
+    command, the directories it was recorded in, and the directory the answer
+    is shown in, so it can be asked per candidate instead: the engine consults
+    `exclude` for exactly the names it would have filtered, and only those
+    verdicts are ever computed. For `tai suggest git ` that is the ~300
+    candidates behind the prefix instead of every command in the store; for an
+    empty prefix it is the same walk, deferred.
+
+    The full walk is still available — `materialize`, for the one reader that
+    counts the set, the dashboard's state panel. Behaves like a set for every
+    question the engine and the web page ask: `in`, `len`, truthiness.
+
+    The evidence rule is `stale_commands`' own, verbatim: a command is stale
+    when any of its path-like tokens is MISSING, judged from the directories
+    it was recorded in plus the one fallback directory (the cwd the answer is
+    shown in, appended only when the records do not already have it), and
+    `TAI_SKIP_PATH_CHECK=1` turns the whole question off.
+    """
+
+    __slots__ = ("_eng", "_cwd", "_memo")
+
+    def __init__(self, eng: Engine, cwd: str = ""):
+        self._eng = eng
+        self._cwd = cwd or ""
+        self._memo: dict[str, bool] = {}
+
+    def _ask(self, cmd: str) -> bool:
+        hit = self._memo.get(cmd)
+        if hit is None:
+            if not enabled():
+                return False
+            st = self._eng.cmds.get(cmd)
+            cwds = list(st.cwd) if st is not None else []
+            if self._cwd and self._cwd not in cwds:
+                cwds.append(self._cwd)
+            hit = self._memo[cmd] = command_verdict(cmd, cwds) == MISSING
+        return hit
+
+    def __call__(self, cmd: str) -> bool:
+        return self._ask(cmd)
+
+    def __contains__(self, cmd: str) -> bool:
+        return self._ask(cmd)
+
+    def __bool__(self) -> bool:
+        # Truthy so the engine always consults the verdicts; an all-alive
+        # history filters to exactly what it filtered when the walk was eager.
+        return True
+
+    def __len__(self) -> int:
+        self.materialize()
+        return sum(1 for v in self._memo.values() if v)
+
+    def materialize(self) -> "LazyStale":
+        """Ask every command in the engine once, so `len` is the full count."""
+        for cmd in self._eng.cmds:
+            self._ask(cmd)
+        return self
+
+
+def _stale_for(eng: Engine) -> LazyStale:
+    """The stale question for this engine, asked lazily.
 
     The one-shot suggestion is shown in the directory the suggest process runs
     in, so the fallback cwd is passed explicitly here — and only here. The
     index builder uses recorded evidence alone, because its snapshot is shown
     in every directory, not just this one.
     """
-    from tai.paths import stale_in
-    return stale_in(eng, os.getcwd())
+    return LazyStale(eng, os.getcwd())
 
 
 def _build_engine() -> Engine:
@@ -87,10 +189,12 @@ def suggest(prefix: str = "", cwd: str = "", repo: str = "",
     if _E is None:
         # A fresh process rebuilds the engine from SQLite unless a disk cache
         # taken by an earlier process is still current — see tai/engcache.py.
-        # The path-liveness set is deliberately NOT cached: it answers against
-        # the directory this process runs in, which changes call to call.
+        # The path-liveness set is deliberately NOT cached across processes: it
+        # answers against the directory this process runs in, which changes
+        # call to call. The store is named as a plain string so a warm cache
+        # imports no pathlib, no sqlite3 and no re — see tai.paths.db_location.
         from tai.engcache import get
-        _E = get(db_path(), _build_engine)
+        _E = get(db_location(), _build_engine)
         _STALE = _stale_for(_E)
     res = _E.suggest(prefix=prefix or "", cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [], limit=limit, temp=temp,
@@ -138,7 +242,7 @@ def explain(prefix: str, cmd: str, cwd: str = "", repo: str = "",
     global _E, _STALE
     if _E is None:
         from tai.engcache import get
-        _E = get(db_path(), _build_engine)
+        _E = get(db_location(), _build_engine)
         _STALE = _stale_for(_E)
     out = _E.explain(prefix or "", cmd, cwd=cwd, repo=repo, branch=branch,
                      last_commands=last_commands or [], on_path=_on_path)

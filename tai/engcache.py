@@ -28,7 +28,11 @@ from __future__ import annotations
 
 import marshal
 import os
-from pathlib import Path
+
+# `pathlib` is deliberately not imported at module level: the one-shot suggest
+# loads this module on its warm path, and a warm cache reads no `Path` — only
+# `_cache_path`'s Path-in-Path-out contract for tests and tools that pass one
+# needs the type, and that import happens on the first call that wants it.
 
 # Bump when the cached shape changes (new fields on CmdStats, new maps, a new
 # serialization). 2: CmdStats gained `nf`. 3: pickle gave way to marshal, and
@@ -41,26 +45,46 @@ VERSION = 4
 _MAGIC = "tai-engine-m"
 
 
-def _cache_path(db: Path) -> Path:
+def _cache_path(db) -> "Path | str":
     # Beside the database, named for it: a scratch TAI_DB in a test cannot
     # stamp a cache over the developer's real one, and `tai uninstall` (which
     # removes the whole data directory) removes the cache with everything else.
+    # A `Path` in, a `Path` out; a string in, a string out — the one-shot path
+    # passes the string form so a warm process imports no pathlib at all.
     import hashlib
 
-    name = hashlib.sha1(str(db).encode("utf-8", "replace")).hexdigest()[:16]
-    return db.parent / f"engine-{name}.cache"
+    dsp = os.fspath(db)
+    name = hashlib.sha1(dsp.encode("utf-8", "replace")).hexdigest()[:16]
+    out = os.path.join(os.path.dirname(dsp), f"engine-{name}.cache")
+    if type(db) is str:
+        return out
+    from pathlib import Path
+    return Path(out)
 
 
-def get(db_path: Path, build) -> object:
+def _sibling(cp, name: str):
+    """`name` in the directory `cp` lives in, in `cp`'s own kind."""
+    out = os.path.join(os.path.dirname(os.fspath(cp)), name)
+    if type(cp) is str:
+        return out
+    from pathlib import Path
+    return Path(out)
+
+
+def get(db_path, build) -> object:
     """The built engine for `db_path`, loading a cached one when it is current.
 
-    `build` is called with no arguments and must return the engine; it runs at
-    most once per process, and only when the cache is missing or stale.
+    `db_path` may be a `Path` or a plain string — the one-shot path passes the
+    string form (`tai.paths.db_location`) so a warm process never imports
+    pathlib. `build` is called with no arguments and must return the engine;
+    it runs at most once per process, and only when the cache is missing or
+    stale.
     """
     if os.environ.get("TAI_NO_ENGINE_CACHE") == "1":
         return build()
+    dsp = os.fspath(db_path)
     try:
-        st = db_path.stat()
+        st = os.stat(dsp)
     except OSError:
         return build()          # no store yet: nothing to cache against
     key = (st.st_size, st.st_mtime_ns)
@@ -76,11 +100,12 @@ def get(db_path: Path, build) -> object:
         pass                    # torn, stale, or foreign: build instead
     eng = build()
     try:
-        tmp = cp.with_name(cp.name + f".tmp{os.getpid()}")
+        tmp = _sibling(cp, (cp.name if type(cp) is not str
+                            else os.path.basename(cp)) + f".tmp{os.getpid()}")
         with open(tmp, "wb") as f:
             f.write(f"{_MAGIC} {VERSION} {key[0]} {key[1]}\n".encode("ascii"))
             marshal.dump(_snapshot(eng), f, 4)
-        os.replace(tmp, cp)
+        os.replace(os.fspath(tmp), os.fspath(cp))
     except Exception:
         pass                    # a read-only or vanished directory is fine
     return eng

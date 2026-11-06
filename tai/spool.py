@@ -33,6 +33,8 @@ from __future__ import annotations
 import os
 import time
 
+from tai.paths import data_location
+
 RS = "\x1e"
 US = "\x1f"
 
@@ -59,7 +61,9 @@ def spool_path() -> str:
     The answer is a plain path string, not a `Path`: this module loads on the
     record fallback and the flush, and importing pathlib costs about 9ms of
     enum, re and urllib.parse — per process, for what is here only string
-    plumbing. The one caller that genuinely wants a `Path` wraps it itself.
+    plumbing. The default is joined with os.path from the same base
+    `tai.paths.data_location` reads, so the module imports nothing heavier
+    than `os`; the one caller that genuinely wants a `Path` wraps it itself.
     """
     env = os.environ.get("TAI_SPOOL")
     if env:
@@ -69,8 +73,7 @@ def spool_path() -> str:
         if "/" in db:
             return db.rsplit("/", 1)[0] + "/spool.log"
         return "spool.log"
-    from tai.paths import data_dir
-    return os.path.join(str(data_dir()), "spool.log")
+    return os.path.join(data_location(), "spool.log")
 
 
 def spool_append(cmd: str, cwd: str = "", exit_code: int = 0,

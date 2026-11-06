@@ -1123,8 +1123,13 @@ print("OK — _which: executable and a file, and nothing else counts.")
 # clock.
 import tai.index as tai_index_mod
 import tai.maintenance as tai_maint_mod
+import tai.paths as tai_paths_mod
 
-_real_index_path, _real_rebuild = tai_index_mod.index_path, tai_maint_mod._rebuild_quietly
+# The freshness check reads the index by its string name (`tai.paths
+# .index_location`, imported without the engine or pathlib); the decision
+# under test is the same one `tai.index.index_path` answers at build time, so
+# the seam is patched where the product reads it now.
+_real_index_path, _real_rebuild = tai_paths_mod.index_location, tai_maint_mod._rebuild_quietly
 _refresh_dir = pathlib.Path("/tmp/tai/tai_edge_refresh")
 _refresh_dir.mkdir(parents=True, exist_ok=True)
 _idx = _refresh_dir / "index.zsh"
@@ -1133,11 +1138,11 @@ _rebuilds: list[str] = []
 tai_maint_mod._rebuild_quietly = lambda: _rebuilds.append("build")
 try:
     def _with_index_path(fn):
-        tai_index_mod.index_path = lambda: _idx
+        tai_paths_mod.index_location = lambda: str(_idx)
         try:
             return fn()
         finally:
-            tai_index_mod.index_path = _real_index_path
+            tai_paths_mod.index_location = _real_index_path
 
     from tai.cli import _auto_maintain, _rebuild_when_stale
 
@@ -1161,14 +1166,14 @@ try:
     assert _rebuilds == [], "rows older than the index are not worth a rebuild"
 
     _rebuilds.clear()
-    tai_index_mod.index_path = lambda: _idx
+    tai_paths_mod.index_location = lambda: str(_idx)
     _auto_maintain(100, 0)
     assert _rebuilds == ["build"], "the 100th command rebuilds outright"
     _rebuilds.clear()
     _auto_maintain(101, 0)
     assert _rebuilds == [], "the 101st asks the freshness question, which says no"
 finally:
-    tai_index_mod.index_path = _real_index_path
+    tai_paths_mod.index_location = _real_index_path
     tai_maint_mod._rebuild_quietly = _real_rebuild
     os.environ["TAI_DB"] = _saved_db
 print("OK — the self-refresh: debounce, staleness, and the 100th command.")

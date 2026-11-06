@@ -6,9 +6,14 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
-from pathlib import Path
 
 from tai.paths import enabled as paths_enabled
+
+# `pathlib` is not imported at module level on purpose: this module loads on
+# the record and flush paths — once per batch the shells spool — and the type
+# is needed only by the history-import walk (`_history_files`). A module-level
+# import made every record pay pathlib's ~4ms and its urllib.parse/ipaddress
+# chain for a code path that runs on `tai refresh`, not on recording.
 
 # The longest command worth learning. A paste — a curl with its headers and
 # cookies, a heredoc — is not vocabulary: it is never retyped from memory, and
@@ -20,7 +25,21 @@ from tai.paths import enabled as paths_enabled
 MAX_CMD_LEN = 1000
 
 # A command must be safe to persist and useful to suggest before it is kept.
-_SECRET = re.compile(r"(password|secret|token|AKIA|-----BEGIN)", re.I)
+# One reject scan, not two: is_recordable runs on every row the engine builds
+# from and every frame the spool drains, and two `.search` calls per row were
+# 20k regex dispatches a build for what one alternation answers. The two rules
+# it joins, in order:
+#
+#   * a secret-shaped word — `password`, `secret`, `token`, an AWS key id,
+#     a PEM header — matched case-insensitively, scoped inside `(?i: …)` so
+#     the rest of the pattern keeps its own exact letter-cases;
+#   * a session-persistence harness envelope, matched case-sensitively.
+_REJECT = re.compile(
+    r"(?i:password|secret|token|AKIA|-----BEGIN)"
+    r"|__[A-Za-z0-9]+_(?:START|END)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{4}-[0-9a-f]{12}__"
+    r"|__[a-z0-9_]*status=\$\?"
+)
 
 # The raw-control-byte half of the filter, at C speed: this runs once per row
 # the engine builds from, and the previous per-character `any(ord(ch) < 32 …)`
@@ -73,7 +92,7 @@ def is_recordable(cmd: str) -> bool:
     # sequence's continuation bytes are all 0x80 and up.)
     if _CTRL.search(cmd):
         return False
-    return not (_SECRET.search(cmd) or _WRAPPER.search(cmd))
+    return not _REJECT.search(cmd)
 
 
 def db_path() -> Path:
@@ -371,6 +390,8 @@ def count() -> tuple[int, int]:
 
 def _history_files(home: Path) -> list[Path]:
     """Return supported history files, including a custom HISTFILE."""
+    from pathlib import Path
+
     candidates: list[Path] = []
     custom = os.environ.get("HISTFILE", "").strip()
     if custom:
@@ -418,6 +439,8 @@ def _import_rows(con: sqlite3.Connection) -> int:
     """
     imported = 0
     now = int(time.time())
+    from pathlib import Path
+
     home = Path.home()
     for f in _history_files(home):
         try:

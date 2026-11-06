@@ -140,7 +140,13 @@ def bash_index_path() -> Path:
 
 
 def _zq(value: str) -> str:
-    return "'" + str(value).replace("'", "'\\''") + "'"
+    # The apostrophe is the rare case, and the scan for it is a C-speed `in`;
+    # quoting the common case was one str.replace call per index entry — 38k
+    # of them a rebuild — for a replace that never had anything to replace.
+    value = str(value)
+    if "'" not in value:
+        return f"'{value}'"
+    return "'" + value.replace("'", "'\\''") + "'"
 
 
 def _word_value(values: list[str]) -> str:

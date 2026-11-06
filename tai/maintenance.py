@@ -7,9 +7,13 @@ eventually reclaims it — a lock that outlives its process would stop every
 future rebuild, silently, forever.
 """
 import os
-import shutil
 import time
 from pathlib import Path
+
+# `shutil` is imported by the two functions that remove things, not at module
+# level: this module loads on the record path's freshness check, and shutil
+# dragged ~1.3ms of bz2/lzma/fnmatch with it for a question that usually ends
+# in one stat.
 
 
 def _lock_path() -> Path:
@@ -63,6 +67,8 @@ def _owner_gone(lock: Path) -> bool:
             running = True       # no usable pid: assume a live holder
         if running:
             return False         # this boot, this minute, and still running
+    import shutil
+
     shutil.rmtree(lock, ignore_errors=True)
     return True
 
@@ -127,6 +133,8 @@ def _rebuild_index():
     the ones that do not go through _rebuild_quietly.
     """
     from tai.index import build
+    import shutil
+
     lock = _lock_path()
     if not _take_lock(lock):
         return None

@@ -381,14 +381,19 @@ def _auto_maintain(total: int, newest_ts: int = 0) -> None:
 def _rebuild_when_stale(newest_ts: int | None = None) -> None:
     import time
 
-    from tai.index import index_path
-    from tai.maintenance import _rebuild_quietly
+    from tai.paths import index_location
 
-    idx = index_path()
-    if not idx.exists():
+    # The index is named as a plain string and stat'd with os: importing
+    # tai.index to ask `Path.exists` pulled the engine, the knowledge loader
+    # and pathlib into every record and flush for one stat that usually says
+    # "fresh enough". The rebuild imports are inside the two branches that
+    # rebuild, so a debounce hit is one stat and one comparison.
+    idx = index_location()
+    if not os.path.exists(idx):
+        from tai.maintenance import _rebuild_quietly
         _rebuild_quietly()
         return
-    mtime = idx.stat().st_mtime
+    mtime = os.stat(idx).st_mtime
     if time.time() - mtime < _REBUILD_MIN_INTERVAL:
         return
     # The newest row's timestamp arrives from the same connection that did the
@@ -410,6 +415,7 @@ def _rebuild_when_stale(newest_ts: int | None = None) -> None:
             return
         newest = row[0] if row and row[0] else 0
     if newest and newest > mtime:
+        from tai.maintenance import _rebuild_quietly
         _rebuild_quietly()
 
 

@@ -30,7 +30,15 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from pathlib import Path
+
+# `pathlib` is deliberately NOT imported at module level. This module sits under
+# everything: the engine (which the keystroke-free one-shot path loads), the
+# store, and the spool, so a module-level import made every one of those
+# processes pay pathlib's own ~7ms — fnmatch, re and urllib.parse with it — for
+# a type only two builders of file names ever need. The functions here that
+# hand back a `Path` import it on first call instead; every other reader of
+# this module, and the warm engine-cache suggest path above all, imports
+# nothing heavier than `os`.
 
 # Verdicts. Only MISSING removes a candidate.
 EXISTS = "exists"
@@ -149,7 +157,27 @@ _UNANALYSABLE = set('$`*?[]{}<>|;&()!#\\\n\t"\'')
 
 # Cached (token, cwd) verdicts. Builds and purges ask about the same paths
 # thousands of times, and the filesystem does not change under one run.
+# Absolute and `~` tokens are cached under the empty cwd: they are true or
+# false in every directory, so one answer serves them all.
 _cache: dict[tuple[str, str], bool] = {}
+
+# Directories already judged with `os.path.isdir`, per process. `_resolve` used
+# to re-ask it for every token of every command against every recorded cwd —
+# a dozen stats per command on a build, and the same few directories every
+# time. The filesystem does not change under one run; that is the same promise
+# `_cache` above is kept under.
+_isdir: set[str] = set()
+_notdir: set[str] = set()
+
+
+def _is_dir(path: str) -> bool:
+    if path in _isdir:
+        return True
+    if path in _notdir:
+        return False
+    hit = os.path.isdir(path)
+    (_isdir if hit else _notdir).add(path)
+    return hit
 
 # Every account name on this machine, or None where they cannot be read. Read
 # once and only when a `~name` token actually turns up, because most machines
@@ -184,8 +212,36 @@ def data_dir() -> Path:
     ~/.local/share would split the install across two directories and leave
     `tai uninstall` deleting one half of it and reporting complete.
     """
+    from pathlib import Path
+
     base = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(base) / "tai"
+
+
+def data_location() -> str:
+    """`data_dir()` as a plain string, with pathlib still unpaid.
+
+    The string form of the same decision, for the processes that join file
+    names onto it and never want a `Path`: `os.path.expanduser("~")` is the
+    same home `Path.home()` reads, and the join is the same join.
+    """
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "tai")
+
+
+def db_location() -> str:
+    """`db_path()` as a plain string, with pathlib still unpaid.
+
+    The engine cache is keyed on the database file's own (size, mtime_ns), so
+    the one-shot suggest asks for this path before it can ask whether it needs
+    the store at all — and a warm cache reads neither sqlite3, re, nor
+    pathlib. Every caller that wants the type wraps this in `Path` via
+    `db_path()`; nothing else about the decision changes.
+    """
+    env = os.environ.get("TAI_DB")
+    if env:
+        return env
+    return os.path.join(data_location(), "history.db")
 
 
 def db_path() -> Path:
@@ -201,7 +257,23 @@ def db_path() -> Path:
     re-export, because the writer and every reader of the store still say
     `store.db_path`.
     """
-    return Path(os.environ.get("TAI_DB") or data_dir() / "history.db")
+    from pathlib import Path
+
+    return Path(db_location())
+
+
+def index_location() -> str:
+    """The zsh index as a plain string — `TAI_INDEX`, or beside the data.
+
+    The string twin of `tai.index.index_path`, for the readers that only stat
+    the file: the record path's rebuild debounce asks "is the index older
+    than the newest row" once per recorded batch, and importing tai.index for
+    that stat pulled the engine, the knowledge loader and pathlib into every
+    flush. The env var is read identically, so the two names stay one
+    decision.
+    """
+    return os.environ.get("TAI_INDEX") or os.path.join(
+        data_location(), "zsh-index.zsh")
 
 
 def _unquote(token: str) -> str:
@@ -210,8 +282,18 @@ def _unquote(token: str) -> str:
     return token
 
 
+@lru_cache(maxsize=8192)
 def is_path_like(token: str) -> bool:
-    """True when `token` can only be read as a filesystem path."""
+    """True when `token` can only be read as a filesystem path.
+
+    Memoised: it is a pure function of the token, and the liveness walks ask it
+    for every token of every distinct command — the same few thousand strings
+    over and over, since a history repeats its paths. Measured on a 20k-row
+    history, the per-character scan was 58% of a warm `tai suggest`'s process
+    and a quarter of `tai refresh`; the cache turns both into one C-speed dict
+    hit per distinct token. Bounded, so a long-running dashboard cannot grow
+    it without limit.
+    """
     if not token or token.startswith("-") or "=" in token:
         return False
     if any(ch in _UNANALYSABLE for ch in token):
@@ -319,10 +401,14 @@ def _resolve(token: str, cwds) -> str:
             return UNKNOWN
         return EXISTS if os.path.exists(os.path.expanduser(token)) else MISSING
     if os.path.isabs(token):
-        return EXISTS if os.path.exists(token) else MISSING
+        key = (token, "")
+        hit = _cache.get(key)
+        if hit is None:
+            hit = _cache[key] = os.path.exists(token)
+        return EXISTS if hit else MISSING
     # A relative path is only knowable from a directory it was actually run in.
     # With no such directory the honest answer is "no opinion".
-    known = [c for c in cwds if c and os.path.isdir(c)]
+    known = [c for c in cwds if c and _is_dir(c)]
     if not known:
         return UNKNOWN
     for cwd in known:

@@ -38,6 +38,14 @@ _LOG1P20 = math.log1p(20)
 # Half-life of a command's recency, in days, as `exp(-age / TAU)`.
 _TAU = 14.0
 
+# The store's longest-learned-command bound, imported from tai.store on first
+# use and kept here. `add` used to run `from tai.store import MAX_CMD_LEN`
+# on *every* call — a sys.modules lookup and attribute fetch each time, 20k
+# of them in one build_from_rows — because a module-level import would have
+# dragged sqlite3 and re into every process that loads the engine without
+# ever learning. The lazy global keeps the lazy import and pays it once.
+_MAX_CMD_LEN: int | None = None
+
 
 def hour_bucket(ts: int | None = None) -> int:
     try:
@@ -157,8 +165,11 @@ class Engine:
             return
         # The same bound is_recordable applies — imported here, where a row this
         # long is rare, rather than at module load, which every fast process pays.
-        from tai.store import MAX_CMD_LEN
-        if len(cmd) > MAX_CMD_LEN:
+        global _MAX_CMD_LEN
+        if _MAX_CMD_LEN is None:
+            from tai.store import MAX_CMD_LEN as _mcl
+            _MAX_CMD_LEN = _mcl
+        if len(cmd) > _MAX_CMD_LEN:
             return
         ts = ts if ts is not None else int(time.time())
         st = self.cmds.get(cmd)
@@ -266,10 +277,15 @@ class Engine:
                 on_path=None) -> dict:
         """Rank candidates for `prefix`.
 
-        `exclude` drops candidates before ranking. The engine itself never
-        touches the filesystem — it has to stay a sub-millisecond in-memory
-        ranker — so the caller decides policy (currently: commands whose paths
-        no longer exist) and passes the result in.
+        `exclude` drops candidates before ranking. It is read with `in` — a
+        set of names, or any per-name verdict holder such as the predictor's
+        `LazyStale`, which answers a candidate's path-liveness question the
+        first time it is consulted and remembers it — so a caller with an
+        expensive exclusion question pays it only for the names this query
+        actually walks. The engine itself never touches the filesystem — it
+        has to stay a sub-millisecond in-memory ranker — so the caller decides
+        policy (currently: commands whose paths no longer exist) and passes
+        the answer in.
 
         `on_path` is the caller's answer to one question — is this command's
         first word installed? — asked at most once per candidate, and only for

@@ -254,12 +254,26 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
     for c, bag in counts.items():
         for ch in low[c]:
             bag[ch] = bag.get(ch, 0) + 1
+    # The evidence each line carries, read once: the tuple a target must beat.
+    ev_of = {c: (eng.cmds[c].success, eng.cmds[c].freq, eng.cmds[c].last_ts)
+             for c in names}
     groups: dict[str, dict[int, list[str]]] = {}
     for c in names:
         groups.setdefault(low[c].split(" ", 1)[0], {}).setdefault(len(c), []).append(c)
     # The full-tie spelling to stand: all-lowercase first (commands are
     # lowercase; the capitalised twin is the accident), byte order otherwise.
     tkey = {c: (0, c) if low[c] == c else (1, c) for c in names}
+    # Every bucket is walked strongest-first, ties by the likelier spelling:
+    # the search can then stop at the first candidate that survives the gates,
+    # because no later one can beat it — the same evidence order the map's
+    # target rule asks for, laid out along the scan. The walk used to test the
+    # letter gates on the whole bucket and keep the best survivor; now the
+    # gates run only on the head of the bucket, the few candidates strong
+    # enough to be a target at all, which is where the map's time went.
+    for bucket_lists in groups.values():
+        for ln, members in bucket_lists.items():
+            members.sort(key=lambda c: (-ev_of[c][0], -ev_of[c][1],
+                                        -ev_of[c][2], tkey[c]))
     out: dict[str, str] = {}
     for cmd in names:
         st = eng.cmds[cmd]
@@ -270,12 +284,24 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
             continue
         s_set = sets[cmd]
         s_bag = counts[cmd]
-        ev = (st.success, st.freq, st.last_ts)
-        best: tuple[tuple[int, int, int], str] | None = None
-        for ln in range(len(cmd) - 2, len(cmd) + 3):
+        ev = ev_of[cmd]
+        len_cmd = len(cmd)
+        best: str | None = None
+        best_oev: tuple[int, int, int] | None = None
+        for ln in range(len_cmd - 2, len_cmd + 3):
             for other in buckets.get(ln, ()):
                 if other == cmd:
                     continue
+                oev = ev_of[other]
+                # The target must be the stronger spelling — or, on a full
+                # tie, the likelier spelling (the tie bullet above). Anything
+                # weaker is somebody else's shadow, not this line's habit.
+                # The bucket is ordered strongest-first, so the first candidate
+                # that fails here fails for every candidate after it too: one
+                # comparison ends the bucket, where the walk used to gate-test
+                # hundreds of lines that could never have been the target.
+                if oev < ev or (oev == ev and tkey[other] > tkey[cmd]):
+                    break
                 o_set = sets[other]
                 if len(o_set - s_set) > 2 or len(s_set - o_set) > 2:
                     continue
@@ -290,20 +316,20 @@ def shadow_map(eng, lines=None) -> dict[str, str]:
                         surplus += extra
                         if surplus > 2:
                             break
-                if surplus > 2 or surplus - (len(cmd) - len(other)) > 2:
-                    continue
-                ost = eng.cmds[other]
-                oev = (ost.success, ost.freq, ost.last_ts)
-                # The target must be the stronger spelling — or, on a full
-                # tie, the likelier spelling (the tie bullet above). Anything
-                # weaker is somebody else's shadow, not this line's habit.
-                if oev < ev or (oev == ev and tkey[other] > tkey[cmd]):
+                if surplus > 2 or surplus - (len_cmd - len(other)) > 2:
                     continue
                 if lev1(low[cmd], low[other], 2) > 2:
                     continue
-                if best is None or oev > best[0] or \
-                        (oev == best[0] and tkey[other] < tkey[best[1]]):
-                    best = (oev, other)
+                # Strongest-first order says this survivor is the best target
+                # its own bucket holds: an equal-evidence one behind it spells
+                # itself less plausibly, and a weaker one is no target at all.
+                # The five length buckets are still compared against each
+                # other — a stronger target may sit two lengths away — so the
+                # survivor is kept and the next bucket is asked.
+                if best is None or oev > best_oev or \
+                        (oev == best_oev and tkey[other] < tkey[best]):
+                    best, best_oev = other, oev
+                break
         if best is not None:
-            out[cmd] = best[1]
+            out[cmd] = best
     return out

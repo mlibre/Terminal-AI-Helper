@@ -34,8 +34,11 @@ below and by `TAI_FILE_ROOTS`, which adds roots to both.
 """
 from __future__ import annotations
 
-import glob
 import os
+
+# `glob` is deliberately not imported at module level: it drags fnmatch and re
+# (about 3ms) into every one-shot process, and only a query whose answer comes
+# from the disk ever globs. The functions below import it on first use.
 
 # How many files one root may contribute, and how many roots are read in all.
 # Both are shortlists, not truncation: the way to see more is to type more of
@@ -159,7 +162,9 @@ def _scan(pattern: str, cut: int, written: str) -> list[tuple[float, str]]:
     built from mtimes, so the cap is applied after the sort.
     """
     try:
-        names = glob.glob(pattern)
+        from glob import glob as _glob
+
+        names = _glob(pattern)
     except (OSError, ValueError):
         return []
     out: list[tuple[float, str]] = []
