@@ -769,6 +769,24 @@ _tai_menu_commit() {
   # slash from truncating what gets written.
   (( ${_TAI_MENU_Q[_TAI_MENU_IDX]} )) && { _tai_quote "$entry"; entry="$_TAI_QUOTED" }
   BUFFER="${BUFFER[1,$(( _TAI_MENU_FROM - 1 ))]}$entry${BUFFER[_TAI_MENU_TO + 1,-1]}"
+  # A completion that leaves the line one bare word is a command waiting for its
+  # arguments, and the space between them is written for the user — every
+  # shell's own completion does this, and readline's half of this plugin always
+  # did (`cat tzz_solo `). The report: choosing `nano` out of the menu put
+  # `nano` in the line, and the user typed the space by hand, once per line,
+  # every time. Three shapes write nothing after them: a directory's slash,
+  # which is the path still being typed; a whole learned line, which is the
+  # line the user ran, and whose space would ride the next Enter into the
+  # history as a row of its own; and a name that already holds a space, whose
+  # quoting is the shell word it is.
+  [[ "$entry" != */ && "$entry" != *[[:space:]]* ]] && BUFFER+=" "
+  # What the commit wrote is the line the user took. Without this, the space a
+  # bare-word commit writes is one deletion from the learned line itself, and
+  # the loose glimpse answered the very next redraw with the line just taken —
+  # `cd tzz_dir ` re-offering `cd tzz_dir` from under the cursor. The same
+  # dismiss an Up from a glimpse sets: while the text stands, the list does not
+  # spring back, and the next keystroke re-arms it.
+  _TAI_MENU_DISMISS="$BUFFER"
   CURSOR=${#BUFFER}
   _tai_menu_close
 }

@@ -224,7 +224,10 @@ rule:
   a single candidate is completed, not listed; `Tab` with nothing falls back
   to the shell's own completion. The menu: own line, prompt survival,
   reverse-video selection, directory colour on the name only, wrap-around,
-  `Enter` takes and a second runs, any other key dismisses
+  `Enter` takes and a second runs, any other key dismisses; a commit that
+  leaves the line one bare word writes the space after it — a directory's
+  slash and a whole learned line take none, and the committed line is not
+  glimpsed back (`_TAI_MENU_DISMISS`)
 - what may be shown: a non-extending learned line is never offered; a learned
   name and a same-named path are one entry; a `cd` destination must be a
   directory from here; a convention ranks below observed usage; a path-gone

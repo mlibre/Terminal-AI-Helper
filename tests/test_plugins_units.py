@@ -99,8 +99,10 @@ def test_zsh_units() -> None:
     s.write(ENTER)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
+    # The unit is one word, so the commit rule writes the space after it — the
+    # next argument (or Enter) is ready without a keystroke of preparation.
     check("Enter takes a unit over the advanced line",
-          (line, size), ("sudo systemctl restart herm.service", 0))
+          (line, size), ("sudo systemctl restart herm.service ", 0))
     s.write("\x15")
 
     # A verb still being typed is not a unit argument: `resta` may yet grow into

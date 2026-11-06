@@ -762,6 +762,12 @@ _tai_preexec() {
   # resolved in the background write instead, which also means the repo, branch
   # and cwd all describe the same moment. bash has always done it this way.
   _TAI_CMD="$1"
+  # A completion's own space rides the line into preexec (`nano ` after a menu
+  # choice), and the store strips it on the way in — but this shell's next
+  # prediction looks the last command up in the sequence table by its exact
+  # text, and the table's keys are the stored, stripped rows. Trim here, once
+  # per command, so `nano ` predicts what followed `nano`.
+  while [[ "$_TAI_CMD" == *[[:space:]] ]]; do _TAI_CMD="${_TAI_CMD%?}"; done
   # The directory the command was *run from*. A prompt-time $PWD comes after the
   # command, so for `cd src` the recorded origin was the destination — and the
   # path-liveness check judged the cd's argument against the place it had just

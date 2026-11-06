@@ -156,7 +156,7 @@ def test_file_case() -> None:
         s.send("cat down")
         s.write(TAB)
         s.settle()
-        check("bash disk answer folds case", s.line(), "cat Downloads")
+        check("bash disk answer folds case", s.line(), "cat Downloads ")
         s.close()
         check("bash disk-file clean", s.noise(), [])
 

@@ -15,6 +15,12 @@ _tai_prompt() {
   raw="${raw#"${raw%%[![:space:]]*}"}"       # drop the leading indent
   while [[ "$raw" == [0-9]* ]]; do raw="${raw#?}"; done   # drop the history number
   last_cmd="${raw#"${raw%%[![:space:]]*}"}"  # drop the space after it
+  # A completion's own space rides the line into the history (`nano ` after a
+  # menu choice), and the store strips it — but this shell's next prediction
+  # looks the last command up in the sequence table by its exact text, and the
+  # table's keys are the stored, stripped rows. Trim here, once per command,
+  # so `nano ` predicts what followed `nano` and records the same row either way.
+  while [[ "$last_cmd" == *[[:space:]] ]]; do last_cmd="${last_cmd%?}"; done
   if [[ -n "$last_cmd" && "$last_cmd" != "$_TAI_LAST" ]]; then
     _TAI_LAST="$last_cmd"
     # The unit cache pre-loads itself in the background after a command that
@@ -247,12 +253,25 @@ _tai_complete() {
 # by both loops above — once as the file that is here, once as the line the
 # history holds — and COMPREPLY holding it twice makes readline print it twice.
 _tai_reply() {
-  local c
+  local c x
   # A learned line carrying raw control bytes is not a completion it is this
   # plugin's promise to never paint: what it would write is escape bytes.
   [[ "$1" =~ [[:cntrl:]] ]] && return 0
-  for c in "${COMPREPLY[@]}"; do [[ "$c" == "$1" ]] && return 0; done
-  COMPREPLY+=("$1")
+  c="$1"
+  # A completion that leaves the line one bare word is a command waiting for
+  # its arguments, and readline's own completion would have written the space
+  # between them (`cat tzz_solo `). `-o nospace` took that append away from
+  # every entry so a directory's slash could stand alone, so the entries that
+  # want the space carry it — measured on a real shell, a match holding a
+  # trailing space is inserted verbatim, and the common prefix of matches that
+  # disagree past the space is the prefix alone. Three shapes carry none: a
+  # directory's slash, which is the path still being typed; a whole learned
+  # line, which is the line the user ran, and whose space would ride the next
+  # Enter into the history as a row of its own; and a name that already holds
+  # a space, which is more than one shell word already.
+  if [[ -n "$c" && "$c" != */ && "$c" != *[[:space:]]* ]]; then c="$c "; fi
+  for x in "${COMPREPLY[@]}"; do [[ "$x" == "$c" ]] && return 0; done
+  COMPREPLY+=("$c")
 }
 complete -o nospace -F _tai_complete tai 2>/dev/null
 # -o default is what makes Tab fall back to readline's own filename completion

@@ -40,7 +40,7 @@ exec zsh
 ✓ bash installed
 
   1. Type a few letters — tai finishes the command in grey. → takes it.
-  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.
+  2. Tab opens a menu of what fits. Enter picks, space after the command included; a second Enter runs.
   3. It learns from your history — offline, private, no account.
 
   Try it now: type "cd " and watch the grey.

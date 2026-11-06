@@ -189,7 +189,7 @@ def test_zsh_menu() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("one entry is taken even when only PATH knows it",
-          (line, size), (MENU_FAR, 0))
+          (line, size), (MENU_FAR + " ", 0))
     s.write("\x15")
 
     # A learned name and the directory of the same name are one completion, not
@@ -204,7 +204,7 @@ def test_zsh_menu() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("a learned name and the path of the same name are one entry",
-          (line, size), ("cd tzz_dir", 0))
+          (line, size), ("cd tzz_dir ", 0))
     s.write("\x15")
 
     # The same rule, and this one was reported: every `cd …` line in the history
@@ -220,7 +220,7 @@ def test_zsh_menu() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("a cd word with one live directory completes to it",
-          (line, size), ("cd tzz_dir", 0))
+          (line, size), ("cd tzz_dir ", 0))
     s.write("\x15")
     s.send("cd t")
     check("and the hint agrees on what the word can be",
@@ -252,7 +252,7 @@ def test_zsh_menu() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("and the key that takes a completion still writes it",
-          (line, size), ("cd ..", 0))
+          (line, size), ("cd .. ", 0))
     s.write("\x15")
 
     # A key that was not Tab puts the menu away: the entries belonged to a line
@@ -312,7 +312,7 @@ def test_zsh_menu() -> None:
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("one learned answer completes rather than listing",
-          (line, size), ("git pull", 0))
+          (line, size), ("git pull ", 0))
     s.write("\x15")
     s.send("git p")
     check("and the hint was completing to the same word",
@@ -351,7 +351,7 @@ def test_zsh_menu() -> None:
     s.write(ENTER)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
-    check("Enter fills in the selected entry", line, "tzz_b")
+    check("Enter fills in the selected entry", line, "tzz_b ")
     check("and closes the menu", (size, idx), (0, 0))
     check("Enter did not take the first entry", line.startswith("tzz_a"), False)
     check("and Enter did not run it", "RAN tzz_b" in s.seen, False)
@@ -379,7 +379,7 @@ def test_zsh_menu() -> None:
     s.write(ENTER)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
-    check("Down steps a normal armed menu", line, "tzz_b")
+    check("Down steps a normal armed menu", line, "tzz_b ")
     check("and nothing ran it", "RAN tzz_b" in s.seen, False)
     check("no noise while stepping", s.noise(), [])
     s.close()
@@ -1548,11 +1548,116 @@ def test_junk_first_word_key() -> None:
             s.wait_file(REPLY, "the completion list for openc")
             got = REPLY.read_text().splitlines()
             got = got[1:] if got and got[0].isdigit() else got
-            check("Tab lists the sibling's lines", "opencode" in got, True)
+            # The sibling's bare line is one word, so it carries the space the
+            # commit rule writes; the `opencode web` line is whole and does not.
+            check("Tab lists the sibling's lines", "opencode " in got, True)
             check("no noise from the bash lookups", s.noise(), [])
             s.close()
     finally:
         write_index()         # every other suite reads the default fixture
+
+
+def test_menu_commit_writes_the_space() -> None:
+    """Choosing a completion that leaves the line one bare word writes the space.
+
+    The report: choosing `nano` out of the menu put `nano` in the line, and the
+    user typed the space between a command and its arguments by hand — once per
+    line, every time. Every shell's own completion writes that space (readline's
+    half is pinned in test_bash_menu: `cat tzz_solo `), so the menu and tai's
+    bash completion write it too. `-o nospace` keeps the append per entry in
+    bash, and the entries that want it carry it — measured on a real shell:
+    a match holding a trailing space is inserted verbatim, and the common
+    prefix of matches that disagree past the space is the prefix alone.
+
+    Three boundaries keep it honest, each its own way of being wrong:
+
+      * a directory's slash is the path still being typed — `tzz_dir/` takes
+        nothing after it;
+      * a whole learned line is the line the user ran, and a space after it
+        would ride the next Enter into the history as a row of its own —
+        `go mod vendor` stays whole, and test_first_word_menu holds that half;
+      * a name that holds a space is already more than one shell word, and the
+        quoting carries it — the written form is left as it is (pinned in
+        test_zsh_menu_stem: `wombat\ book.txt`).
+    """
+    if SHELLS["zsh"]:
+        print("zsh menu commit writes the space")
+        s = Session("zsh")
+        s.run(f"cd {MENU_DIR}")
+        s.run(f"export PATH={MENU_DIR}:{MENU_BIN}:$PATH")
+        # The user's case: one word on the line, one completion for it, and the
+        # key that takes it — `far` has exactly one answer anywhere, and it is
+        # a command the menu reaches only through PATH.
+        s.send("far")
+        s.write(TAB)
+        s.settle()
+        check("zsh a lone command completion takes the space with it",
+              s.line(), MENU_FAR + " ")
+        s.write("\x15")
+        # An armed menu, Enter on a command name.
+        s.send("tzz")
+        s.write(TAB + TAB)
+        s.settle()
+        s.write(ENTER)
+        s.settle()
+        check("zsh Enter on a command name writes the space", s.line(), "tzz_b ")
+        s.write("\x15")
+        # A file: the same rule, because the next argument is the next word.
+        s.send("cat tzz_s")
+        s.write(TAB)
+        s.settle()
+        check("zsh a lone file completion takes the space with it",
+              s.line(), "cat tzz_solo ")
+        s.write("\x15")
+        # The boundary: a directory offered with its slash, and no space after
+        # it — the slash is where the path keeps going.
+        s.send("cat tzz_di")
+        s.write(TAB)
+        s.settle()
+        check("zsh a directory's slash is written, and no space after it",
+              s.line(), "cat tzz_dir/")
+        s.write("\x15")
+        check("no noise from the menu space", s.noise(), [])
+        s.close()
+
+    if SHELLS["bash"]:
+        print("bash completion writes the space")
+        s = Session("bash", env_extra={"TAI_COMPLETE_ALL": "1"})
+        s.run(f"cd {MENU_DIR}")
+        # A file: the entry carries the space, readline (told `nospace`) writes
+        # the match verbatim, and the line is ready for the next word.
+        s.send("cat tzz_s")
+        s.write(TAB)
+        s.settle()
+        check("bash a lone file completion takes the space with it",
+              s.line(), "cat tzz_solo ")
+        s.write("\x15")
+        # The boundary: a directory is offered with its slash, and no space.
+        # (`cd tzz` is the learned word's own case — the word and the directory
+        # are one completion said twice, and readline's common prefix lands on
+        # the bare name; `stem` has no learned line behind it, so the disk's
+        # slash form is the only answer.)
+        s.send("cd stem")
+        s.write(TAB)
+        s.settle()
+        check("bash a directory's slash is written, and no space after it",
+              s.line(), "cd stemroot/")
+        s.write("\x15")
+        # A whole learned line is offered whole — the match carries no trailing
+        # space, because for a first word the completion and the line are one
+        # span, and a space here would be a row of history nobody ran. The
+        # installed name beside it carries the space the rule writes.
+        REPLY.unlink(missing_ok=True)
+        s.run('COMP_LINE="g"; COMP_POINT=1; COMPREPLY=(); _tai_complete; '
+              f'printf "%s\\n" "${{COMPREPLY[@]}}" > {REPLY}')
+        s.wait_file(REPLY, "the first-word completion list")
+        got = [l for l in REPLY.read_text().splitlines() if l]
+        check("bash a whole learned line carries no trailing space",
+              [l for l in got if l == "git status"], ["git status"])
+        check("bash an installed name beside it carries the space",
+              [l for l in got if l == "git "], ["git "])
+        check("no noise from the bash space", s.noise(), [])
+        s.close()
 
 
 def main() -> int:
@@ -1562,6 +1667,7 @@ def main() -> int:
     test_zsh_menu_prefix()
     test_zsh_menu_stem()
     test_loose_menu()
+    test_menu_commit_writes_the_space()
     test_stem_never_cuts_untyped_text()
     test_loose_tiers()
     test_pasted_text_is_not_a_typo()

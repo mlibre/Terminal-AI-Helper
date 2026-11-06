@@ -190,11 +190,11 @@ def test_bash_file_arguments() -> None:
         return got[1:] if got and got[0].isdigit() else got
 
     check("the file that was just downloaded is offered",
-          f"~/Downloads/{DOWNLOADED}" in offered("chmod +x "), True)
+          f"~/Downloads/{DOWNLOADED} " in offered("chmod +x "), True)
     check("and it is offered first", offered("chmod +x ")[0],
-          f"~/Downloads/{DOWNLOADED}")
+          f"~/Downloads/{DOWNLOADED} ")
     check("while what tai learned is still offered",
-          "script" in offered("chmod +x "), True)
+          "script " in offered("chmod +x "), True)
     check("a partial word is not answered by a path from elsewhere",
           offered("chmod +x freeb"), [])
     check("nor is a line that does not end in a file",
@@ -207,7 +207,7 @@ def test_bash_file_arguments() -> None:
     (FILE_WORK / "script").write_text("#!/bin/sh\n")
     (FILE_WORK / "script").chmod(0o755)
     check("and a learned file that still exists keeps its place",
-          offered("chmod +x ")[0], "script")
+          offered("chmod +x ")[0], "script ")
 
     # Through a real Tab, so the claim is one a user would recognise. The ambiguous
     # case is the interesting one — several files, so readline draws a listing
@@ -243,7 +243,7 @@ def test_bash_file_arguments() -> None:
     # two drift apart — and the line it returns is the line that gets written.
     (FILE_WORK / "script").unlink()
     check("the arrow key is given the same answer",
-          offered("chmod +x ")[0], f"~/Downloads/{DOWNLOADED}")
+          offered("chmod +x ")[0], f"~/Downloads/{DOWNLOADED} ")
     s.send("chmod +x " + CTRL_F)
     s.settle()
     check("and accepting writes that line",
@@ -413,9 +413,10 @@ def test_the_cap_is_on_recency_in_both_shells() -> None:
                 replies = reply.read_text().splitlines()
                 check("bash offers the cap's worth", len(replies), PER_ROOT)
                 check("bash and the newest of them is first", replies[:1],
-                      ["~/Downloads/cap-09-file.txt"])
+                      ["~/Downloads/cap-09-file.txt "])
                 check("bash and the oldest is dropped",
-                      [r for r in replies if r.endswith("cap-00-file.txt")], [])
+                      [r for r in replies
+                       if r.rstrip().endswith("cap-00-file.txt")], [])
             check("no noise", listed.noise(), [])
         finally:
             listed.close()
