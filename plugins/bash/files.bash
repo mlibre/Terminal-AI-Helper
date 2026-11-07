@@ -248,6 +248,54 @@ _tai_keep_root() {
   done < <(shopt -s nocaseglob; ls -t -1 --zero -N -- ${pattern}* 2>/dev/null)
 }
 
+# The index's file-argument key for a line, into _TAI_FILE_KEY. A line that ends
+# in a file is marked with the line without its last word — `chmod +x` from
+# `chmod +x script` — trailing spaces trimmed, one wrapper transparent, and the
+# mark is the index saying what the *command means*: the word after that key is
+# a path. It used to live inside _tai_file_answer alone, and the file-word rule
+# (below) needed the same question asked about the same line from the ghost and
+# the completion: two copies of a key computation is how the answers drift apart.
+_tai_file_key() {
+  local line="$1" before key
+  _TAI_FILE_KEY=""
+  [[ "$line" == *" "* ]] || return 1
+  before="${line% *}"
+  # Trimmed by expansion, not by a loop. A loop over `while [[ "$key" == *" " ]]`
+  # never terminates: that pattern matches a space *anywhere*, so `chmod +x` —
+  # which has one in the middle — entered it and `${key% }` shortened nothing.
+  key="${before%"${before##*[![:space:]]}"}"
+  # A key of nothing but spaces — a line typed as `    ` — is no lookup at all,
+  # and bash treats an empty associative-array subscript as a hard error rather
+  # than a miss.
+  [[ -n "$key" ]] || return 1
+  # A wrapper runs the command behind it, so it is transparent to the file too:
+  # `sudo cat ` is a path argument exactly as `cat ` is.
+  if [[ " ${_TAI_WRAPPERS} " == *" ${before%% *} "* ]]; then key="${key#* }"; fi
+  [[ -n "${_TAI_FILE[$key]:-}" ]] || return 1
+  _TAI_FILE_KEY="$key"
+  return 0
+}
+
+# 0 when the line's file word is fit to offer, 1 when the index marks the line
+# as ending in a file and that word is not here. The mark is a fact about the
+# command, so a word in that slot is unambiguously a path — the same standing a
+# _TAI_LIVE word has — and a path is offered where it exists. A word the shell
+# cannot resolve statically keeps its no-opinion: `$f`, `*.py`, `"a b"` are
+# shell text, not names, and a flag is never the file. `_TAI_LIVE` cannot carry
+# this for the same reason the shape test passes bare words over: `Modelfile`
+# is a file in the line that recorded it and a subcommand in any other, so the
+# judgement rides on the line, where the meaning is known.
+_tai_file_line_dead() {
+  local line="$1" w real
+  _tai_file_key "$line" || return 1
+  w="${line##* }"
+  [[ -n "$w" && "$w" != -* ]] || return 1
+  [[ "$w" == *[!~A-Za-z0-9._/@%^+=,:-]* ]] && return 1
+  real="${w/#\~/$HOME}"
+  [[ -e "$real" ]] && return 1
+  return 0
+}
+
 # The files a path argument could be, and whether what tai learned for this line
 # is still one of them.
 #
@@ -258,7 +306,7 @@ _tai_keep_root() {
 # stdout is the terminal, and the old print-then-capture round trip was a fork
 # per answer on a keypress.
 _tai_file_answer() {
-  local line="$1" before word key last
+  local line="$1" before word last
   local -a kept
   _TAI_FILES=(); _TAI_FILES_Q=()
   # `*" "*` — a space *anywhere* — and not `*' '`, which is a space at the end.
@@ -267,17 +315,10 @@ _tai_file_answer() {
   # turned away before it was ever looked up.
   [[ "$line" == *" "* ]] || return 1
   if [[ "$line" == *" " ]]; then before="${line% *}"; word=""; else word="${line##* }"; before="${line%"$word"}"; fi
-  # Trimmed by expansion, not by a loop. A loop over `while [[ "$key" == *" " ]]`
-  # never terminates: that pattern matches a space *anywhere*, so `chmod +x` —
-  # which has one in the middle — entered it and `${key% }` shortened nothing.
-  key="$before"
-  key="${key%"${key##*[![:space:]]}"}"
-  # A key of nothing but spaces — a line typed as `    ` — is no lookup at all,
-  # and bash treats an empty associative-array subscript as a hard error rather
-  # than a miss. zsh has no such distinction, which is why only bash needs this.
-  [[ -n "$key" ]] || return 1
-  if [[ " ${_TAI_WRAPPERS} " == *" ${before%% *} "* ]]; then key="${key#* }"; fi
-  [[ -n "${_TAI_FILE[$key]:-}" ]] || return 1
+  # The key the index marks a file argument with is the line without its last
+  # word — the same question the ghost and the completion ask about a line they
+  # are about to offer, answered by the one function that computes it.
+  _tai_file_key "$line" || return 1
   _tai_fresh_files "$word"
   # A completion has to extend the word being typed, and a file found through a
   # glob does not always: `chmod +x freeb` matches `~/Downloads/freebuff…` in
@@ -294,7 +335,7 @@ _tai_file_answer() {
   # `cat ~/notes/todo.txt` with whatever was touched last. It is already the
   # text the user ran, so its flag is 0; everything that came off the disk is
   # raw text and travels with a 1.
-  _tai_best "${_TAI_WORD[$key]:-}" "$line"
+  _tai_best "${_TAI_WORD[$_TAI_FILE_KEY]:-}" "$line"
   last="${_TAI_BEST_LINE##* }"
   if [[ -n "$last" && "${last,,}" == "${word,,}"* && -e "${last/#\~/$HOME}" ]]; then
     _TAI_FILES+=( "$last" ); _TAI_FILES_Q+=( 0 )

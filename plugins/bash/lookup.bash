@@ -376,6 +376,16 @@ _tai_query() {
   if [[ -z "$out" && "$prefix" == *' '* ]]; then
     _tai_wrapped "$prefix" && out="$_TAI_WRAPPED_OUT"
   fi
+  # The word a file-argument line adds is unambiguously a path — the index
+  # marked the line from what the command means — and a path is offered where
+  # it exists. `cat .zh` on a history holding `cat .zhistory` used to be given
+  # back in every directory, including the one where the user had just read
+  # "No such file or directory" from it: the dot word is judged through
+  # _TAI_LIVE, but a bare name like `nano`'s learned `Modelfile` is the same
+  # error in a word the shape test passes over. The command's own meaning is
+  # the missing half, and the same judgement the completion makes, so the
+  # accept key and Tab cannot disagree about a name that is gone.
+  if [[ -n "$out" ]] && _tai_file_line_dead "$out"; then out=""; fi
   # A path argument is answered by the filesystem, and the same rule as
   # _tai_complete, so accepting with the arrow and completing with Tab cannot
   # disagree about `chmod +x `. The answer is a *word*, so it replaces the word

@@ -274,8 +274,13 @@ _tai_menu_first_lines() {
     # A whole line is committed whole, so every marked word in it is judged —
     # the same question the ghost asks about the line it hints, answered the
     # same way, so Tab and the grey text cannot disagree about what works here.
-    _tai_line_here "${m[10,-1]}" 0 || continue
-    _TAI_MENU_LEARNED+=( "${m[10,-1]}" )
+    # A line that ends in a file is judged by its file word too: committing
+    # `nano Modelfile` onto `nano` writes a name the disk may not have, and
+    # the mark the index wrote for the line says it is a name.
+    line="${m[10,-1]}"
+    _tai_line_here "$line" 0 || continue
+    _tai_file_line_dead "$line" && continue
+    _TAI_MENU_LEARNED+=( "$line" )
   done
   (( ${#_TAI_MENU_LEARNED[@]} ))
 }
@@ -377,6 +382,14 @@ _tai_menu_open() {
     # are never marked; the file and glob sources below are the disk itself.
     [[ -n "$c" ]] || continue
     _tai_here "$c" || continue
+    # And when the candidate's own line ends in a file, the word it offers in
+    # this span *is* that file — the index marked the line from what the
+    # command means — so it is judged the way a marked word is. `nano mo` on a
+    # history holding `nano Modelfile` used to list the file it was recorded
+    # with beside the one that is actually here. A candidate whose span word
+    # is not its last word is offering something else (a flag of its own), and
+    # keeps the no-opinion the file word alone would not.
+    [[ "$c" == "${rest##* }" ]] && _tai_file_line_dead "$rest" && continue
     out+=( "$c" ); outq+=( 0 )
   done
 

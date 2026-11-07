@@ -1,25 +1,19 @@
 # Path arguments, answered by the filesystem rather than by the history: what
 # you are about to use is by definition not in the history yet.
 
-# A global rather than a return value for the same reason as _TAI_LINES: this runs
-# on every keystroke and cannot afford a subshell.
-_tai_file_answer() {
-  local line="$1" before word key last real
-  local -a kept
-  _TAI_FILES=(); _TAI_FILES_Q=()
-  # Only once the word being typed is not the command name. `cat` on its own is a
-  # command tai is completing, not a path.
+# The index's file-argument key for a line, into _TAI_FILE_KEY. A line that ends
+# in a file is marked with the line without its last word — `chmod +x` from
+# `chmod +x script` — trailing spaces trimmed, one wrapper transparent, and the
+# mark is the index saying what the *command means*: the word after that key is
+# a path. It used to live inside _tai_file_answer alone, and the file-word rule
+# (below) needed the same question asked about the same line from the ghost, the
+# menu and the glimpse: two copies of a key computation is how the three answers
+# drift apart.
+_tai_file_key() {
+  local line="$1" before key
+  _TAI_FILE_KEY=""
   [[ "$line" == *' '* ]] || return 1
-  if [[ "$line" == *' ' ]]; then
-    before="${line% *}"; word=""; _TAI_FILE_JOIN="$line"
-  else
-    word="${line##* }"; before="${line%"$word"}"; _TAI_FILE_JOIN="$before"
-  fi
-  # The key the index marks a file argument with is the line without its last
-  # word, which is exactly `before` once the cursor's word is removed. Trailing
-  # spaces are trimmed because a word boundary is one space however many there
-  # are.
-  #
+  before="${line% *}"
   # Trimmed by expansion, not by a loop. A loop over `while [[ "$key" == *" " ]]`
   # never terminates: that pattern matches a space *anywhere*, so `chmod +x` —
   # which has one in the middle — entered it and `${key% }` shortened nothing.
@@ -34,6 +28,48 @@ _tai_file_answer() {
   # `sudo cat ` is a path argument exactly as `cat ` is.
   if (( ${_TAI_WRAPPERS[(I)${before%% *}]} )); then key="${key#* }"; fi
   (( ${_TAI_FILE[$key]:-0} )) || return 1
+  _TAI_FILE_KEY="$key"
+  return 0
+}
+
+# 0 when the line's file word is fit to offer, 1 when the index marks the line
+# as ending in a file and that word is not here. The mark is a fact about the
+# command, so a word in that slot is unambiguously a path — the same standing a
+# _TAI_LIVE word has — and a path is offered where it exists. A word the shell
+# cannot resolve statically keeps its no-opinion: `$f`, `*.py`, `"a b"` are
+# shell text, not names, and a flag is never the file. `_TAI_LIVE` cannot carry
+# this for the same reason the shape test passes bare words over: `Modelfile`
+# is a file in the line that recorded it and a subcommand in any other, so the
+# judgement rides on the line, where the meaning is known.
+_tai_file_line_dead() {
+  local line="$1" w real
+  _tai_file_key "$line" || return 1
+  w="${line##* }"
+  [[ -n "$w" && "$w" != -* ]] || return 1
+  [[ "$w" == *[^~A-Za-z0-9._/@%^+=,:-]* ]] && return 1
+  real="${w/#\~/$HOME}"
+  [[ -e "$real" ]] && return 1
+  return 0
+}
+
+# A global rather than a return value for the same reason as _TAI_LINES: this runs
+# on every keystroke and cannot afford a subshell.
+_tai_file_answer() {
+  local line="$1" before word last real
+  local -a kept
+  _TAI_FILES=(); _TAI_FILES_Q=()
+  # Only once the word being typed is not the command name. `cat` on its own is a
+  # command tai is completing, not a path.
+  [[ "$line" == *' '* ]] || return 1
+  if [[ "$line" == *' ' ]]; then
+    before="${line% *}"; word=""; _TAI_FILE_JOIN="$line"
+  else
+    word="${line##* }"; before="${line%"$word"}"; _TAI_FILE_JOIN="$before"
+  fi
+  # The key the index marks a file argument with is the line without its last
+  # word — the same question the ghost, the menu and the glimpse ask about a
+  # line they are about to offer, answered by the one function that computes it.
+  _tai_file_key "$line" || return 1
   _tai_fresh_files "$word"
   # A completion has to extend the word being typed, and a file found through a
   # glob does not always: `chmod +x freeb` matches `~/Downloads/freebuff…` in

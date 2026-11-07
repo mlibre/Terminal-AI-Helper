@@ -106,16 +106,21 @@ def test_zsh_file_arguments() -> None:
     line, drawn, size, idx = s.menu()
     check("the arrow completes it", line, f"chmod +x ~/Downloads/{DOWNLOADED}")
 
-    # The list shows the files *and* what tai learned, files first, so a learned
-    # name is never hidden — it is demoted, which is the honest way to say it is
-    # less likely than a file that exists right now.
+    # The list shows the files and what tai learned — but only the learned
+    # names that are still files here. `script` was unlinked above: a file slot
+    # is a path slot, and a name the history remembers is not offered where
+    # taking it would read "No such file or directory". The alive learned file
+    # kept its place at the top of this test; this is the other half of the
+    # same rule, the one `nano mo` listing a `Modelfile` that was not there
+    # was reported about.
     s.send("chmod +x ")
     s.write(LIST)
     s.settle()
     line, drawn, size, idx = s.menu(clear=False)
     check("the list puts the real file first",
           menu_entries(drawn)[0], f"~/Downloads/{DOWNLOADED}")
-    check("and still offers what tai learned", "script" in menu_entries(drawn), True)
+    check("and a learned name that is gone is not offered",
+          "script" in menu_entries(drawn), False)
     check("leaving the line alone", line, "chmod +x ")
     s.write("\x15")
 
@@ -193,8 +198,8 @@ def test_bash_file_arguments() -> None:
           f"~/Downloads/{DOWNLOADED} " in offered("chmod +x "), True)
     check("and it is offered first", offered("chmod +x ")[0],
           f"~/Downloads/{DOWNLOADED} ")
-    check("while what tai learned is still offered",
-          "script " in offered("chmod +x "), True)
+    check("while a learned name that is gone is not offered",
+          "script " in offered("chmod +x "), False)
     check("a partial word is not answered by a path from elsewhere",
           offered("chmod +x freeb"), [])
     check("nor is a line that does not end in a file",
@@ -257,6 +262,99 @@ def test_bash_file_arguments() -> None:
     s.close()
 
 
+
+
+def test_learned_file_words_are_judged() -> None:
+    """A file slot's learned word is judged where it is offered, both shells.
+
+    Two reported shapes, one rule. `cat .zh` hinted `cat .zhistory` in the
+    directory where the user had just read "No such file or directory" from
+    that exact line — a hidden file is unambiguously a path, the index marks
+    it, and the per-directory judgement has to reach it. `nano mo` listed
+    `Modelfile` beside the file that was actually there — a bare word the
+    shape test passes over, but the line it was recorded with ends in a file,
+    and that meaning is the judgement. The ghost, the menu and the completion
+    ask the same question about the same word, so the three answer together.
+    """
+    for shell in SHELLS:
+        if not SHELLS[shell]:
+            continue
+        print(f"{shell} judges a file slot's learned word")
+        setup_files()
+        # FILE_WORK holds notes.txt and no `.zshrc`: the fixture's `cat .zshrc`
+        # was recorded somewhere it existed, and this is somewhere it does not.
+        s = Session(shell, env_extra={"HOME": str(FILE_HOME),
+                                      "TAI_FILE_ROOTS": str(FILE_DOWNLOADS)})
+        s.run(f"cd {FILE_WORK}")
+
+        def offered(line: str) -> list[str]:
+            """COMPREPLY for `line`, the list readline would draw (bash only)."""
+            REPLY.unlink(missing_ok=True)
+            s.run(f'COMP_LINE={line!r}; COMP_POINT={len(line)}; COMPREPLY=(); '
+                  f'_tai_complete; printf "%s\\n" "${{#COMPREPLY[@]}}" '
+                  f'"${{COMPREPLY[@]}}" > {REPLY}')
+            s.wait_file(REPLY, f"the completion list for {line!r}")
+            got = REPLY.read_text().splitlines()
+            return got[1:] if got and got[0].isdigit() else got
+
+        if shell == "zsh":
+            s.send("cat .zsh")
+            check("a hidden file that is not here is not hinted",
+                  s.suggestion().split(" PD=")[0], "SUG=[]")
+            # Reading the suggestion abandons the line (the dump widget clears
+            # it), so the menu is asked for on a line sent for it.
+            s.send("cat .zsh")
+            s.write(LIST)
+            s.settle()
+            line, drawn, size, idx = s.menu(clear=False)
+            check("and not listed either",
+                  [e for e in menu_entries(drawn) if ".zshrc" in e], [])
+            s.write("\x15")
+            s.send("cat .zsh")
+            s.write(RIGHT)
+            s.settle()
+            check("and the arrow takes nothing", s.line(), "cat .zsh")
+        else:
+            check("a hidden file that is not here is not offered by Tab",
+                  [c for c in offered("cat .zsh") if ".zshrc" in c], [])
+            s.send("cat .zsh" + CTRL_F)
+            s.settle()
+            check("and the accept key takes nothing", s.line(), "cat .zsh")
+
+        # The other half of the rule, so the fix cannot be "never offer": where
+        # the file exists, the same line is offered by every door. A second
+        # hidden file makes the menu a list — a lone candidate is committed,
+        # which is the one-entry promise, and is asserted right after. Their
+        # mtimes are set explicitly, because the accept key answers with the
+        # newest file when the learned one is not what the lookup ranks first,
+        # and "newest" has to be a fact about the fixture and not about how
+        # fast the machine wrote two files in one second.
+        (FILE_WORK / ".zshenv").write_text("env\n")
+        (FILE_WORK / ".zshrc").write_text("history\n")
+        _now = time.time()
+        os.utime(FILE_WORK / ".zshenv", (_now - 60, _now - 60))
+        os.utime(FILE_WORK / ".zshrc", (_now, _now))
+        if shell == "zsh":
+            s.send("cat .zsh")
+            check("where it exists, the hidden file is hinted",
+                  s.suggestion().split(" PD=")[0], "SUG=[rc]")
+            s.send("cat .zsh")
+            s.write(LIST)
+            s.settle()
+            line, drawn, size, idx = s.menu(clear=False)
+            check("and listed", [e for e in menu_entries(drawn)
+                                 if e == ".zshrc"], [".zshrc"])
+            s.write("\x15")
+        else:
+            check("where it exists, Tab offers it",
+                  [c for c in offered("cat .zsh") if c.startswith(".zshrc")],
+                  [".zshrc "])
+            s.send("cat .zsh" + CTRL_F)
+            s.settle()
+            check("and the accept key writes it", s.line(), "cat .zshrc")
+
+        check("no noise from the file-word judgement", s.noise(), [])
+        s.close()
 
 
 def test_quoted_names() -> None:
@@ -428,6 +526,7 @@ def main() -> int:
     setup()
     test_zsh_file_arguments()
     test_bash_file_arguments()
+    test_learned_file_words_are_judged()
     test_quoted_names()
     test_the_three_implementations_hold_the_same_limits()
     test_the_cap_is_on_recency_in_both_shells()

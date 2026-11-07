@@ -281,6 +281,17 @@ from tai.paths import is_home_ref, is_path_like
 assert is_home_ref("~") and is_home_ref("~/x"), "~ and ~/x are home references"
 for tok in ("~main", "~HEAD", "~origin/main"):
     assert not is_path_like(tok), f"{tok!r} must not be read as a path"
+# A leading dot is a hidden file's shape, and a hidden file is unambiguously a
+# relative path: no flag, command name or URL is spelled with one. The report:
+# `cat .zh` hinted `cat .zhistory` in the very directory where the user had
+# just read "No such file or directory" from that exact line — the word
+# carries no slash, so the shape test passed it over, nothing ever marked it,
+# and no directory ever judged it.
+for tok in (".zhistory", ".env", ".gitignore", ".zshrc", ".config/fastfetch"):
+    assert is_path_like(tok), f"{tok!r} names a hidden file, not a command"
+# A tail of nothing but dots and digits is a number or a shape, not a name.
+for tok in (".5", "...", "..5"):
+    assert not is_path_like(tok), f"{tok!r} must not be read as a path"
 assert stale_commands([("code nope/missing.py", set())], REPO) != set(), \
     "and the same fallback condemns one that is not — the risk being managed"
 # The row stays in SQLite and only leaves the index, which is why the rule can be
@@ -289,6 +300,24 @@ assert stale_commands([("cd ter", {REPO})], REPO) == {"cd ter"}, \
     "a cd to a directory that was never there is not a suggestion for its prefix"
 assert stale_commands([("cd ter", set())], REPO) != set(), \
     "with no recorded directory a guess is all there is, and a guess only hides"
+# The dot rule reaches every judge the same way: the per-directory marking, the
+# build-time stale set, and the one-shot answer for the directory it is asked in.
+from tai.paths import relative_word_set, alive_in  # noqa: E402
+_dot_dir = pathlib.Path("/tmp/tai/tai_dot_live")
+_dot_dir.mkdir(parents=True, exist_ok=True)
+(_dot_dir / ".zhistory").write_text("history\n")
+assert ".zhistory" in relative_word_set(["cat .zhistory"]), \
+    "a hidden file is marked for the per-directory question"
+assert "script" not in relative_word_set(["chmod +x script"]), \
+    "a bare word without a dot or a slash stays ambiguous"
+assert stale_commands([("cat .zhistory", {str(_dot_dir)})]) == set(), \
+    "where the hidden file exists, the recorded directory keeps the row"
+assert stale_commands([("cat .zhistory", {REPO})], REPO) == {"cat .zhistory"}, \
+    "and where it does not, the recorded directory condemns it"
+assert alive_in("cat .zhistory", cwd=str(_dot_dir)), \
+    "the one-shot answer offers the line where it is true"
+assert not alive_in("cat .zhistory", cwd=str(REPO)), \
+    "and hides it in the directory the user just watched it fail in"
 print(f"OK — path liveness: {len(VERDICTS)} verdicts, unknown never rejects.")
 
 # Which lines end in a file, by what the command means. This is the fact the

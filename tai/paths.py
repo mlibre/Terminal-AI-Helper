@@ -320,6 +320,18 @@ def is_path_like(token: str) -> bool:
     # function already returns for everything it cannot read statically.
     if token.startswith("~"):
         return is_home_ref(token)
+    if token.startswith("."):
+        # A leading dot is a hidden file's shape, and a hidden file is
+        # unambiguously a relative path: no flag, command name or URL is
+        # spelled with one. `.zhistory`, `.env` and `.gitignore` are paths the
+        # way `src/util.py` is, and offered where they do not exist they are
+        # the error the user reads the moment they take them — the reported
+        # case was `cat .zh` hinting the very `cat .zhistory` the user had
+        # just watched answer "No such file or directory". `.` and `..` were
+        # answered above; a tail of nothing but dots and digits is a number
+        # (`.5`) or a shape nothing on disk answers to (`...`), and keeps the
+        # no-opinion those deserve.
+        return not set(token.lstrip(".")) <= set("0123456789.")
     if "/" not in token:
         return False
     # A first component made only of digits and version punctuation is a date, a

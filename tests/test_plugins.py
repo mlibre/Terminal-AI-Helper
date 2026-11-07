@@ -179,7 +179,12 @@ def test_half_typed_command() -> None:
     print("a command name that is still being typed (zsh ghost text)")
     s = Session("zsh")
     # An empty directory, so nothing can answer from the filesystem and every
-    # answer below is the index's or nothing's.
+    # answer below is the index's or nothing's. The one file here is the one
+    # the fixture's `cat tzz_d` names: a file-argument line is judged where it
+    # is offered now, and this test is about the name scan, not the judgement —
+    # the judgement has its own suite (test_plugins_files). Put the file where
+    # the test stands, and the scan is all that is under test.
+    (EMPTY_DIR / "tzz_d").write_text("")
     s.run(f"cd {EMPTY_DIR}")
     for prefix, want in (("doc", "ker ps"),        # the `god` case
                          ("gi", "t pull --rebase"),
@@ -192,6 +197,7 @@ def test_half_typed_command() -> None:
         s.send(prefix)
         check(f"zsh {prefix!r} hints", s.suggestion().split(" PD=")[0],
               f"SUG=[{want}]")
+    (EMPTY_DIR / "tzz_d").unlink()
     # The arrow takes what the hint says, which is the point of it being a hint.
     s.send("doc")
     s.write(RIGHT)

@@ -82,7 +82,10 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
   unambiguously a relative path (`_TAI_LIVE`, written at build) is judged in
   the directory it is offered in — ghost, menu, glimpse and completion, both
   shells — and stays offered in the directories that have it. Flags are never
-  judged; `~`-paths and absolutes were judged at build.
+  judged; `~`-paths and absolutes were judged at build. A hidden file
+  (`.zhistory`) is unambiguous by its shape and is marked; the word a line
+  that ends in a file offers is unambiguous by what the command means, and is
+  judged from the line, wherever it is offered.
 - A directory argument is answered by directories that exist here — in the
   ghost, the menu, the loose glimpse, and the completion, in both shells.
 - A buffer that arrived from the history is not typed.

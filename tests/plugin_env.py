@@ -212,7 +212,12 @@ def setup_files() -> None:
 # a name and itself.
 COMMANDS = ["git pull --rebase", "git status", "docker ps", "ls -la", "ls -l",
             "cd tzz_dir", "cd /tmp", "cd ..", "cd -", "chmod +x script",
-            "cat tzz_d"]
+            "cat tzz_d", "cat .zshrc"]
+# `cat .zshrc` sits last, so its score is the lowest and it is the best answer
+# for no prefix the other entries answer: the tests that read a best answer are
+# untouched, and the line exists so the file-word rule has a hidden file to
+# judge — in PREFIX_DIR, where `.zshrc` is on the disk, and everywhere else,
+# where it is not.
 # The generator's own limits, imported rather than restated. The fixture writes
 # the file every plugin test reads, so a limit copied here is a second copy that
 # drifts — and when it drifted, in the direction of *more* permissive than the
@@ -313,12 +318,23 @@ def _index_rows() -> list[tuple[str, str, str]]:
         rows.append(("SEQ", key, "\n".join(values)))
     # The file-argument marks, from the same `takes_file` the generator uses, so
     # the fixture cannot claim a line ends in a file when the builder would not.
+    # Head keys are a set, as the builder's are: two lines can mark one head.
     from tai.paths import takes_file
+    file_heads: set[str] = set()
     for cmd in COMMANDS:
         if takes_file(cmd):
             head = cmd.rsplit(" ", 1)[0]
             if head:
-                rows.append(("FILE", head, "1"))
+                file_heads.add(head)
+    for head in sorted(file_heads):
+        rows.append(("FILE", head, "1"))
+    # The relative-path words, from the same `relative_word_set` the generator
+    # uses — the other map the shells judge a candidate by. The fixture used to
+    # write none, which made every plugin test run in a world where nothing was
+    # ever judged: exactly the blindness the `cat .zh` report was about.
+    from tai.paths import relative_word_set
+    for word in sorted(relative_word_set(COMMANDS)):
+        rows.append(("LIVE", word, "1"))
     return rows
 
 
@@ -343,13 +359,13 @@ def write_index(commands: list[str] | None = None,
     # is safe but costs a shell function call per entry, which on a real history
     # was 572ms of shell startup.
     zsh = ["# tai zsh index; test fixture, not generated",
-           "typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE"]
+           "typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE"]
     for kind, key, value in rows:
         zsh.append(f"_TAI_{kind}+=({_zq(key)} {_zq(value)})")
     ZSH_INDEX.write_text("\n".join(zsh) + "\n", encoding="utf-8")
 
     bash = ["# tai bash index; test fixture, not generated",
-            "declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE"]
+            "declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE"]
     for kind, key, value in rows:
         bash.append(f"_TAI_{kind}[{_zq(key)}]={_zq(value)}")
     BASH_INDEX.write_text("\n".join(bash) + "\n", encoding="utf-8")

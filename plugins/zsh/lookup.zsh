@@ -473,6 +473,15 @@ _tai_query_do() {
   fi
   _tai_lines "$prefix"
   _tai_best "$prefix"
+  # The word a file-argument line adds is unambiguously a path — the index
+  # marked the line from what the command means — and a path is offered where
+  # it exists. `cat .zh` on a history holding `cat .zhistory` used to hint the
+  # line back in every directory, including the one where the user had just
+  # read "No such file or directory" from it: the dot word is judged through
+  # _TAI_LIVE, but a bare name like `nano`'s learned `Modelfile` is the same
+  # error in a word the shape test passes over. The command's own meaning is
+  # the missing half, and the same judgement the menu and the glimpse make.
+  _tai_file_line_dead "$_TAI_BEST" && _TAI_BEST=""
   # A path argument is answered by the filesystem, not by the history. The
   # reported case: `chmod +x ` on a history holding only `chmod +x script`, where
   # `script` is not a file here and the file you just downloaded is the one you
@@ -538,7 +547,13 @@ _tai_query_do() {
     local gline
     here_l=()
     for gline in "${_TAI_LOOSE_LINES[@]}"; do
-      _tai_line_here "$gline" 0 && here_l+=( "$gline" )
+      _tai_line_here "$gline" 0 || continue
+      # A whole line is offered whole here, so its file word is judged like
+      # every marked word in it — the same rule the ghost applies to the line
+      # it hints, in the same breath. A name the history remembers that the
+      # disk does not is an error to hand over, however well it matched.
+      _tai_file_line_dead "$gline" && continue
+      here_l+=( "$gline" )
     done
     _TAI_LOOSE_LINES=( "${here_l[@]}" )
   fi

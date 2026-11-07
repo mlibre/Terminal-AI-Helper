@@ -1143,9 +1143,17 @@ def test_loose_tiers() -> None:
     print("zsh loose glimpse tiers")
     junk = ("aria2c -x 15 https://files.example.com/"
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    # The forest line is a `cd` to a relative path, and a relative path is
+    # judged where it is offered — the fixture writes `_TAI_LIVE` now, so the
+    # line is only offerable from a directory that has the tree. The test is
+    # about the tiers, not the judgement, so the tree exists where the shell
+    # stands and the line is alive while the matchers are under test.
+    forest = MENU_DIR / "tmp" / "fun-game" / "beauty-forest"
+    forest.mkdir(parents=True, exist_ok=True)
     try:
         write_index(commands=COMMANDS + ["cd tmp/fun-game/beauty-forest", junk])
         s = Session("zsh")
+        s.run(f"cd {MENU_DIR}")
 
         # A typo of a word the history holds: the one-edit tier answers with
         # the forest line, and the scatter matcher is not allowed to argue.
@@ -1175,6 +1183,7 @@ def test_loose_tiers() -> None:
         check("no noise from the tiers", s.noise(), [])
         s.close()
     finally:
+        shutil.rmtree(MENU_DIR / "tmp", ignore_errors=True)
         write_index()
 
 

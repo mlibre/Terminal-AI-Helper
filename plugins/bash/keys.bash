@@ -210,8 +210,12 @@ _tai_complete() {
         [[ "${c,,}" == "${line,,}"* ]] || continue
         # A whole learned line is committed whole, so every word in it that the
         # index marked as a relative path has to resolve here — the same
-        # question the ghost asks about the line it hints.
+        # question the ghost asks about the line it hints. A line that ends in
+        # a file is judged by its file word too: committing `nano Modelfile`
+        # onto `nano` writes a name the disk may not have, and the mark the
+        # index wrote for the line says it is a name.
         _tai_line_here "$c" 0 || continue
+        _tai_file_line_dead "$c" && continue
         _tai_reply "$c"
       done
     fi
@@ -230,6 +234,12 @@ _tai_complete() {
     # Flags and bare words are never marked; the file and directory sources
     # above read the disk itself.
     _tai_here "$stem" || continue
+    # And when the candidate's own line ends in a file, the stem *is* that
+    # file — the index marked the line from what the command means — so it is
+    # judged the way a marked word is. `nano mo` on a history holding
+    # `nano Modelfile` used to list the file it was recorded with beside the
+    # one that is actually here.
+    _tai_file_line_dead "$c" && continue
     _tai_reply "$stem"
   done <<< "$values"
   if (( dir_arg )); then

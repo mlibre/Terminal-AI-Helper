@@ -156,7 +156,10 @@ suggestion is shown: the index writes the unambiguously relative paths into
 `ls Data/INI` learned in the directory that has it is not offered two
 directories away, where Enter reads "no such file or directory". Flags are
 never paths; `~`-paths and absolutes are the same in every directory and were
-judged at build.
+judged at build. A hidden file (`.zhistory`) is unambiguous by its shape and
+is marked like any relative path; a bare name (`Modelfile`) is judged from the
+line it was recorded with, where the command's own meaning says the word is a
+file.
 
 ## Three implementations of one rule
 
