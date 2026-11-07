@@ -111,7 +111,10 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
 - The key that fills in a completion must not also run it: `Enter` takes, a
   second `Enter` runs. It was asked for after it shipped the other way — do
   not "fix" it back without being asked.
-- One key, one question; one completion is not a list.
+- One key, one question; one completion is not a list. A loose line — the
+  history mentioning the typed letters, not a word extending them — is a list
+  even when it is one row: `Tab` arms it, `Enter` takes it, and `Tab` never
+  writes one over the line by itself.
 - A suggestion has to be reachable by the key, in the mode the terminal is in
   — a key nobody can find is a feature nobody has.
 - The gray line on a fresh prompt is a prophecy, and it is learned or it is

@@ -403,7 +403,10 @@ zle -N tai-tab
 #
 # One entry is not a list — nothing to look at, nothing to choose between — so
 # a single candidate is committed, which is what `cd t<Tab>` does when the
-# only thing starting with `t` is one directory.
+# only thing starting with `t` is one directory. A candidate, though: a word
+# that extends the word being typed. The loose list's rows are whole lines the
+# history merely mentions the typed letters in, and those are never written by
+# this key — see the commit gate below.
 tai-menu() {
   _TAI_ISEARCH=0
   # The index is keyed on whole lines, so there is no history behind a word in
@@ -434,10 +437,22 @@ tai-menu() {
     return
   fi
   # One entry is not a list — nothing to look at, nothing to choose between — so
-  # the key takes it, which is what every shell does with an unambiguous
-  # completion. It also reaches the loose list: a glimpse of exactly one learned
-  # line is answered, not dangled.
-  if (( ${#_TAI_MENU} == 1 )); then
+  # a single candidate is committed, which is what `cd t<Tab>` does when the
+  # only thing starting with `t` is one directory. A candidate, though: a word
+  # that extends the word being typed, which is what every source above answers
+  # in. The loose list is the fallback for the line nothing extends, and its
+  # rows are whole lines the history merely *mentions the typed letters in* —
+  # `cat z` answered by `cat tzz_d` for the z inside the name, `nano m` in a
+  # home holding `nano .npmrc` by the m of npm, `nano q` by the q inside
+  # `--rawsequences` — and every one of them replaces the whole typed line.
+  # Writing one over the line on the same press that asked "what completes
+  # this word?" is the menu answering a question nobody asked, which is the
+  # report in full. So the one-entry rule keeps its old reach and no further:
+  # it is the completion's rule, not the guess's. The loose list — one row or
+  # sixteen — stands armed, exactly as it already did when it had several:
+  # Enter is the press that means a row, the next Tab moves along it, and any
+  # edit puts the list away with the line untouched.
+  if (( ${#_TAI_MENU} == 1 )) && (( ! _TAI_MENU_LOOSE )); then
     _tai_menu_commit
     return
   fi

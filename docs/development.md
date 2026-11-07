@@ -221,7 +221,10 @@ rule:
 - the hint keys: `→` takes the hint in **both** cursor-key modes and still
   moves mid-line; one word on `Alt-F`/`Ctrl-Right`; nothing invented when no
   hint exists; `Tab` never takes the hint but opens and cycles the list;
-  a single candidate is completed, not listed; `Tab` with nothing falls back
+  a single candidate is completed, not listed — a single *loose* row never
+  is: the key arms it instead, `Enter` takes it, because a loose row replaces
+  the whole line and is not a completion of the word (`cat z` keeps
+  `cat tzz_d` a choice); `Tab` with nothing falls back
   to the shell's own completion. The menu: own line, prompt survival,
   reverse-video selection, directory colour on the name only, wrap-around,
   `Enter` takes and a second runs, any other key dismisses; a commit that

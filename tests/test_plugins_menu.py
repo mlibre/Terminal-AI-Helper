@@ -655,6 +655,43 @@ def test_loose_menu() -> None:
     check("and the menu closed", got[2], "MENU=[] N=[0] IDX=[0]")
     s.close()
 
+    # Tab never writes a loose row, however few of them there are. The loose
+    # list answers the line nothing completes with the lines the history
+    # merely mentions the typed letters in — `cat z` by `cat tzz_d`, for the z
+    # inside the name — and every one of its rows replaces the whole typed
+    # line. The report: `nano m` in a home holding `nano .npmrc` put the line
+    # on the prompt on the very Tab that asked what completes m, because a
+    # single entry was committed rather than listed. A completion is a word
+    # that extends the word being typed (`git p` above commits in one press);
+    # a loose row is not one, so the key arms the row it finds instead of
+    # writing it, and Enter is the press that means it.
+    s = Session("zsh")
+    s.run(f"cd {MENU_DIR}")
+    s.send("cat z")
+    s.settle()
+    got = s._dump(clear=False)
+    check("a loose line the letters merely reach is glimpsed", got[2],
+          "MENU=[\\n  cat tzz_d] N=[1] IDX=[1]")
+    check("a preview is drawn unmarked", "standout" in got[1], False)
+    s.write(TAB)
+    s.settle()
+    got = s._dump(clear=False)
+    check("Tab leaves the typed line alone", got[0], "cat z")
+    check("Tab arms the row instead of writing it", "standout" in got[1], True)
+    check("and the list still holds the row", got[2],
+          "MENU=[\\n  cat tzz_d] N=[1] IDX=[1]")
+    s.write(TAB)
+    s.settle()
+    got = s._dump(clear=False)
+    check("the next Tab cycles, still nothing written", got[0], "cat z")
+    s.write(ENTER)
+    s.settle()
+    got = s._dump(clear=False)
+    check("Enter takes the armed row", got[0], "cat tzz_d")
+    check("and the menu closed with it", got[2], "MENU=[] N=[0] IDX=[0]")
+    check("and one Enter did not run it", "RAN " in s.seen, False)
+    s.close()
+
     # Same glimpse in the key mode the terminal actually uses once it has
     # emitted smkx: application cursor keys.
     s = Session("zsh")

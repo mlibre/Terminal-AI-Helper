@@ -137,7 +137,9 @@ memory, an array hit in microseconds.
   held in the shell.
 - **A typo is answered by what it is a typo of.** When nothing extends the
   line, the learned lines that hold every word you typed appear; the one-off
-  typo ranks below the habit it shadows, in the index itself.
+  typo ranks below the habit it shadows, in the index itself. They appear as
+  a list to choose from — `Tab` arms it, `Enter` takes a row — never written
+  over your line by the `Tab` that asked for a completion.
 - **A word the shell refused is not a suggestion** — exit 127 is the shell
   refusing a word, not a command failing — and an installed tool outranks a
   word that resolves to nothing: `opencode` beats `opencoe` because it

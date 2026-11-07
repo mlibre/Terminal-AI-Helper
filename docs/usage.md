@@ -72,7 +72,9 @@ whatever is on screen, and tai never overwrites a hint it did not draw.
   friends complete as if the wrapper were not there.
 - **A typo is answered by what it is a typo of.** When nothing extends the
   line, the learned lines that hold every word you typed appear; a one-off
-  typo ranks below the habit it shadows, in the index itself.
+  typo ranks below the habit it shadows, in the index itself. They appear as
+  a list to choose from — `Tab` arms it, `Enter` takes a row — never written
+  over your line by the `Tab` that asked for a completion.
 - **`systemctl` is answered by the machine's own unit list.**
   `systemctl restart her` cycles `nginx.service` and friends — read once,
   held in the shell.
