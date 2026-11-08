@@ -674,13 +674,32 @@ _tai_word_re() {
 # `forestt` loses its doubled t and reads across every line that mentions
 # `forest`; a three-letter witness matches half a history, and a match that
 # wide says nothing.
+#
+# The alternation this builds is the *loop's* test, run over at most
+# _TAI_LOOSE_FLOOD lines. It used to be the *filter's* pattern too — one glob
+# alternation of every variant, C-level, over the whole index — and that was
+# the freeze: the variants share their head, so on a line that begins with the
+# typed word the matcher walks each variant deep into the word before it can
+# reject it, a cost that multiplies by every position and every alternative.
+# The report: `DSH_DELETE_SESSIONS_DEBUG=1` — twenty-seven letters, nothing in
+# the history holds it, so the one-edit filter ran with twenty-seven
+# near-identical alternatives over megabytes of index, on every keystroke, and
+# the prompt stood still for seconds at a stretch. The filter is a necessary
+# condition, not the test, so it can be *any* condition every surviving line
+# must meet — and the cheap one is the word's own bigrams: a line holding a
+# one-deletion spelling of the word holds at least one of the word's
+# two-letter pairs whole (a deletion can shorten the chunks around it, never
+# break a pair that sits inside one of them, and a word long enough for this
+# tier always leaves a chunk of two). Two characters per alternative rejects
+# on the first letter almost everywhere, so the filter is one linear pass —
+# and the loop below still applies the full variant regex to what survives.
 _tai_word_variants_re() {
-  local w="$1" re="" v c esc ge=""
+  local w="$1" re="" v c esc
   local -i i j
   local -A seen
-  # The word itself, escaped once, opens both outputs: the regex alternation
-  # is the tier's own second test, and the glob alternation is the necessary
-  # condition the filter before the loop reads — see the pass below.
+  # The word itself, escaped once, opens the regex: the alternation is the
+  # tier's own second test. The filter's pattern is built separately below —
+  # see the pass below for why it is not this alternation.
   for (( j = 1; j <= ${#w}; j++ )); do
     c="${w[j]}"
     case "$c" in
@@ -689,7 +708,7 @@ _tai_word_variants_re() {
     esac
     esc+="$c"
   done
-  re="$esc"; ge="$esc"
+  re="$esc"
   for (( i = 1; i <= ${#w}; i++ )); do
     v="${w[1,i-1]}${w[i+1,-1]}"
     [[ -n "$v" && ${#v} -ge 4 && -z "${seen[$v]}" ]] || continue
@@ -705,16 +724,46 @@ _tai_word_variants_re() {
     done
     [[ -n "$re" ]] && re+="|"
     re+="$esc"
-    ge+="|$esc"
   done
   _TAI_RE_OUT="$re"
-  # The same list as a glob alternation — parenthesised, because a glob's `|`
-  # means alternation only inside them — and it is what a line must hold to
-  # have any chance with the tier at all: the word, or one of its one-edit
-  # spellings, as plain text. Backslash escaping means the same thing in a
-  # glob as in a regex alternation of literals, so one enumeration serves
-  # both.
-  _TAI_GLOB_OUT="($ge)"
+  # The filter's glob is a different, deliberately weaker question than the
+  # loop's regex, and the weaker one is the point. The variant alternation as
+  # a filter was the freeze: the variants share their head, so a line that
+  # begins with the typed word makes the matcher walk every alternative deep
+  # into the word before it can reject it — a cost that multiplies by every
+  # position and every alternative, paid over the whole index. The report:
+  # `DSH_DELETE_SESSIONS_DEBUG=1` — twenty-seven letters, nothing in the
+  # history holds it or anything near its spellings, so the filter ran with
+  # twenty-seven near-identical alternatives over megabytes of index on every
+  # keystroke, and the prompt stood still for seconds at a stretch.
+  #
+  # A filter is a necessary condition, not the test, so it may be any
+  # condition every surviving line must meet. The cheapest such condition a
+  # zsh glob can ask is a *literal* between stars — one pass, C speed — and
+  # every one-deletion spelling of the word holds at least one of exactly two
+  # literals whole: the word's first letter pair, or its last. A deletion in
+  # the last two letters leaves the first pair intact; a deletion anywhere
+  # else leaves the last pair intact (the chunk behind a deletion of the
+  # first two letters is still at least three letters long, which holds the
+  # final pair, because a word this tier takes is five letters or more). Two
+  # alternatives of two letters reject almost everywhere on the first, so
+  # the filter is one linear pass over the index however long the word is,
+  # and the flood-capped loop below still applies the full variant regex to
+  # what survives.
+  local a="${w[1,2]}" b="${w[-2,-1]}" ea="" eb="" ch
+  for ch in ${(s::)a}; do
+    case "$ch" in
+      [a-z0-9_-]) ea+="$ch" ;;
+      *) ea+="\\$ch" ;;
+    esac
+  done
+  for ch in ${(s::)b}; do
+    case "$ch" in
+      [a-z0-9_-]) eb+="$ch" ;;
+      *) eb+="\\$ch" ;;
+    esac
+  done
+  [[ "$ea" == "$eb" ]] && _TAI_GLOB_OUT="*$ea*" || _TAI_GLOB_OUT="($ea|$eb)"
 }
 
 # The gap tier's necessary condition, as one glob: every letter of the word,
@@ -842,21 +891,23 @@ _tai_loose() {
   done
   # Lowercase of every learned line, built once per index load and not once per
   # keystroke: measured, it was the bulk of each loose pass itself. The scan
-  # runs on the lowercase copy — the query is lowercased to meet it — and the
-  # map back to the line the user actually ran is built beside it, once, for
-  # the ranked answer to read.
+  # runs on the lowercase copy — the query is lowercased to meet it. The whole
+  # copy is three C-level expansions — one join, one lowercase flag over the
+  # joined text, one split — where the previous per-line shell loop paid a
+  # parameter expansion and an array append per line, most of a millisecond on
+  # a real index, on the first query of every generation.
   if (( _TAI_LOOSE_SNAP != _TAI_LOOSE_GEN )); then
     _TAI_LOOSE_KEYS=( "${(@k)_TAI_SCORE[@]}" )
     _TAI_LOOSE_LOW=()
-    local line2
-    for line2 in "${_TAI_LOOSE_KEYS[@]}"; do
-      _TAI_LOOSE_LOW+=( "${line2:l}" )
-    done
+    if (( ${#_TAI_LOOSE_KEYS[@]} )); then
+      _TAI_LOOSE_LOW=( "${(f)${(L)${(pj:\n:)_TAI_LOOSE_KEYS[@]}}}" )
+    fi
+    # The map back to the line the user actually ran is *lazy* now: it is one
+    # shell loop over every line, and the ranked answer reads it only when a
+    # tier actually found something — most redraws find nothing, and the
+    # early ones never paid for the map at all until this made that the rule.
     _TAI_LOOSE_LINE_OF=()
-    local -i _i
-    for (( _i = 1; _i <= ${#_TAI_LOOSE_KEYS}; _i++ )); do
-      _TAI_LOOSE_LINE_OF[${_TAI_LOOSE_LOW[_i]}]=${_TAI_LOOSE_KEYS[_i]}
-    done
+    _TAI_LOOSE_LINE_OF_GEN=-1
     _TAI_LOOSE_SNAP=$_TAI_LOOSE_GEN
     _TAI_LOOSE_PAR=""
     _TAI_LOOSE_PAR_LOW=()
@@ -958,7 +1009,20 @@ _tai_loose() {
   # serve. With the tiers above it silent, what it finds is the closest thing
   # to a memory the typed letters have — and with them silent, the pass has
   # nothing to be ranked under, so nothing is lost by its caution.
-  if (( n_exact == 0 && ${#var_lw[@]} == 0 && ${#rest3[@]} > 0 )); then
+  #
+  # The pass is also the one whose matcher grows with the word: the letters-in-
+  # order glob below carries one star per letter, and a star is a scan forward
+  # per line — a twenty-six-letter word made it twenty-six scans over every
+  # line that survived to here. Past _TAI_LOOSE_MAX_GAP_WORD letters that is
+  # arithmetic again — the report's own line was twenty-seven — and the
+  # verbatim and one-edit tiers above it are the memory worth offering for a
+  # word that long. The cap is the whole change: shorter words keep every
+  # answer they ever had.
+  local -i gap_ok=1
+  for w in "${want[@]}"; do
+    (( ${#w} > _TAI_LOOSE_MAX_GAP_WORD )) && { gap_ok=0; break }
+  done
+  if (( gap_ok && n_exact == 0 && ${#var_lw[@]} == 0 && ${#rest3[@]} > 0 )); then
     typeset -gA _TAI_LOOSE_CLAIMED
     _TAI_LOOSE_CLAIMED=()
     for ll in "${exact_lw[@]}"; do _TAI_LOOSE_CLAIMED[$ll]=1; done
@@ -1010,7 +1074,18 @@ _tai_loose() {
   # into a list that is bounded, so the cost stays constant. Exact lines fill
   # the list first; the edit tier comes second; the scatter tier only ever
   # reaches the tail.
+  # The map back from the lowercase scan copy is built here and only here —
+  # once per generation, and only when a tier actually found something for it
+  # to translate (see the snapshot note above for the laziness, and the
+  # measured cost of paying it on every pass that answered nothing).
   hits_lw=( "${exact_lw[@]}" "${var_lw[@]}" "${fuzz_lw[@]}" )
+  if (( ${#hits_lw[@]} )) && (( _TAI_LOOSE_LINE_OF_GEN != _TAI_LOOSE_GEN )); then
+    local -i _i
+    for (( _i = 1; _i <= ${#_TAI_LOOSE_KEYS}; _i++ )); do
+      _TAI_LOOSE_LINE_OF[${_TAI_LOOSE_LOW[_i]}]=${_TAI_LOOSE_KEYS[_i]}
+    done
+    _TAI_LOOSE_LINE_OF_GEN=$_TAI_LOOSE_GEN
+  fi
   _TAI_RANKED=()
   for ll in "${exact_lw[@]}"; do
     line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
@@ -1035,6 +1110,19 @@ _tai_loose() {
   local c
   _TAI_LOOSE_LINES=()
   for c in "${ranked[@]}"; do _tai_clean "$c" && _TAI_LOOSE_LINES+=( "$c" ); done
+  # The parent scan set is capped, and the cap is what bounds the memo's
+  # memory as well as the next scan's work. The set rides along for the prefix
+  # that extends this one, and a flood-level word's set was the whole index —
+  # thousands of lines joined into a string per memo slot, sixteen slots deep,
+  # every one of them rescanned by the next letter. Two thousand is an order
+  # of magnitude past the cap of answers the tiers return and an order of
+  # magnitude below a real index, and the lines it keeps are the best-ranked
+  # ones (the keys iterate in the index's own score order, so the head of this
+  # list is the head of the ranking): a line the cap cuts was behind two
+  # thousand better lines, which is the same arithmetic-coincidence class the
+  # flood cap already answers at sixteen.
+  (( ${#hits_lw[@]} > _TAI_LOOSE_PAR_MAX )) && \
+    hits_lw=( "${hits_lw[@]:0:_TAI_LOOSE_PAR_MAX}" )
   _TAI_LOOSE_PAR="$prefix"
   _TAI_LOOSE_PAR_GEN="$_TAI_LOOSE_GEN"
   _TAI_LOOSE_PAR_LOW=( "${hits_lw[@]}" )
@@ -1152,9 +1240,24 @@ typeset -ga _TAI_LOOSE_PAR_LOW=()
 # lowercase scan copy: the scan runs on the lowercase copy, and the ranked
 # answer has to be the text the history holds.
 typeset -gA _TAI_LOOSE_LINE_OF=()
+# The generation that map was built for. Lazy: a snapshot that answers nothing
+# never builds it, and a reload invalidates it the way it invalidates every
+# other answer this file keeps.
+typeset -gi _TAI_LOOSE_LINE_OF_GEN=-1
 # How many characters one fuzzy-tier letter may sit from the previous one. The
 # bound is what keeps the scatter tier honest: letters scattered across a long
 # URL are arithmetic, not memory. Three covers a transposition and a doubled
 # keystroke; a URL's gaps do not survive it.
 typeset -gi _TAI_LOOSE_MAX_GAP=3
+# The longest word the scatter tier will still walk its letters-in-order glob
+# for: one star per letter, and a star is a forward scan per line. Past this
+# many letters the pass is arithmetic by the tier's own standard — the report
+# that found the freeze typed twenty-seven of them — and the verbatim and
+# one-edit tiers above it are the memory worth offering for a word that long.
+typeset -gi _TAI_LOOSE_MAX_GAP_WORD=16
+# The most lines a scan hands the prefix that extends it. The set rides in the
+# memo as one joined string per slot, so a flood-level word's whole-index set
+# was megabytes per slot and a full rescan for the next letter; capped, it is
+# the best-ranked two thousand — everything above the arithmetic tail.
+typeset -gi _TAI_LOOSE_PAR_MAX=2000
 

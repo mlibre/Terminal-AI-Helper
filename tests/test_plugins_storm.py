@@ -170,11 +170,48 @@ def test_flood_bound_keeps_the_answer() -> None:
     s.close()
 
 
+def test_reported_dead_line_is_bounded() -> None:
+    if not SHELLS["zsh"]:
+        return
+    print("zsh: the reported dead line answers nothing, and pays one bounded pass")
+    s = Session("zsh")
+    # The report: typing `DSH_DELETE_SESSIONS_DEBUG=1` stood the prompt still.
+    # Twenty-seven letters, nothing in the history holds them, so every fuzzy
+    # tier ran its widest filter over the whole index on every keystroke. The
+    # answer is still nothing — the line is dead and must stay dead — and the
+    # mechanism pin is on the two bounds that keep it cheap: the one-edit
+    # filter is the word's own first and last letter pair (two literals, one
+    # pass, however long the word), and a word past the gap cap never builds
+    # the letters-in-order filter at all.
+    s.run(
+        'local out="" g="";'
+        ' _tai_word_variants_re "dsh_delete_sessions_debug=1";'
+        ' g="$_TAI_GLOB_OUT";'
+        ' _tai_loose "dsh_delete_sessions_debug=1";'
+        f' print -r -- "LOOSE=[${{#_TAI_LOOSE_LINES}}] GLOB=[$g]" > "{STATE}"')
+    text = STATE.read_text()
+    check("the dead line stays dead", re.search(r"LOOSE=\[(\d+)\]", text).group(1), "0")
+    check("one-edit filter is the edge pair, not the variant alternation",
+          re.search(r"GLOB=\[(.*)\]", text).group(1), "(ds|\\=1)")
+    # And a flood-level prefix cannot hand the next letter more than the cap:
+    # the parent set is what a delete run and the next keystroke rescan.
+    s.run(
+        'local n=0; _tai_loose "s";'
+        f' print -r -- "PARLOW=[${{#_TAI_LOOSE_PAR_LOW}}] MAX=[${{_TAI_LOOSE_PAR_MAX}}]"'
+        f' > "{STATE}"')
+    text = STATE.read_text()
+    parlow = int(re.search(r"PARLOW=\[(\d+)\]", text).group(1))
+    parmax = int(re.search(r"MAX=\[(\d+)\]", text).group(1))
+    check("parent scan set is capped", parlow <= parmax, True)
+    s.close()
+
+
 def main() -> int:
     setup()
     test_delete_storm_answers_from_the_memo()
     test_memo_is_bounded()
     test_flood_bound_keeps_the_answer()
+    test_reported_dead_line_is_bounded()
     check_fixture_intact("the run")
     print("\nOK — the rapid-edit storm: memo hits, bounded ring, flood bound."
           if not failures else f"\nFAILED ({len(failures)}): {', '.join(failures)}")

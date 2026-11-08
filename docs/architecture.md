@@ -38,6 +38,21 @@ So every rebuild replaces it atomically and each prompt compares mtimes, and
 the shell you are sitting in picks up a rebuild at the next prompt with nothing
 to restart.
 
+The same arithmetic bounds everything the keystroke path can ever be asked to
+scan. A press must not wait inside a child — when a `systemctl` cache went
+stale, the unit loader sat *in* Tab for as long as systemd took to answer, and
+on a loaded machine that read as the shell freezing; the loader is split now,
+and a press that finds only a stale cache starts one detached load and answers
+from what it can read. And no scan may carry a filter whose cost grows with
+the shape of what was typed: the glimpse's typo tiers filter with single
+literals and two-letter edge pairs — one linear pass over the index, however
+long the word — because a filter built from twenty-seven near-identical
+alternatives (the word a user typed, minus one letter, twenty-six ways) walked
+every position of a real index deeply into the word before rejecting it, and
+typing that word once stood the prompt still for seconds. The tiers keep every
+answer they ever gave; what changed is that the answer costs a pass instead of
+a product.
+
 ## The index
 
 Six maps, written as text. `tai/index.py` owns the format.

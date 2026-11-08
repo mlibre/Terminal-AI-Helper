@@ -16,28 +16,64 @@ _tai_units_cache() {
   if (( $1 )); then _TAI_UNITS_FILE="$base/units-user.txt"; else _TAI_UNITS_FILE="$base/units-system.txt"; fi
 }
 
-# The cached unit list for one scope, into _TAI_UNITS or _TAI_UNITS_USER.
-# Reads the cache file when it is fresh; forks the one `systemctl` call and
-# rewrites the cache when it is not. Never fails loudly.
-_tai_units_load() {
+# The cached unit list for one scope, read-only, into _TAI_UNITS or
+# _TAI_UNITS_USER. Answers 0 only when a fresh cache file was read — the
+# fork-free half of the loader, and the half a completion press is allowed to
+# call: a press must never sit inside a child process waiting for systemctl,
+# which is what the combined loader did when the array was empty and the cache
+# had gone stale. On a machine whose systemd answers slowly — a loaded box, a
+# container host with a few hundred units — that wait was seconds long and the
+# report that found it read as the shell freezing. A press that finds nothing
+# gets the kick below instead: the load starts detached, and the next press
+# answers from the array it filled.
+_tai_units_read() {
   local -i user=$1
   local file list line
   _tai_units_cache "$user"
   file="$_TAI_UNITS_FILE"
   # The stamp and the first unit are read together, because a file with a
   # stamp and nothing under it is not a cache that answered — it is a torn
-  # or truncated one, and "zero units" would stick for the TTL. The zsh
-  # loader has always required both lines; this one matches it now.
+  # or truncated one, and "zero units" would stick for the TTL.
   local epoch="" first=""
   if [[ -r "$file" ]]; then
     { read -r epoch; read -r first; true; } < "$file" 2>/dev/null
   fi
-  if [[ "$epoch" =~ ^[0-9]+$ && -n "$first" ]] && (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )); then
-    list=()
-    while IFS= read -r line; do [[ -n "$line" ]] && list+=( "$line" ); done < <(tail -n +2 "$file" 2>/dev/null)
-    if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi
-    return 0
+  [[ "$epoch" =~ ^[0-9]+$ && -n "$first" ]] || return 1
+  (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )) || return 1
+  list=()
+  # One builtin read of the file, no `tail` process: the reader runs on the
+  # completion press, where a fork is the one cost this half exists to avoid.
+  while IFS= read -r line; do [[ -n "$line" ]] && list+=( "$line" ); done < "$file"
+  list=( "${list[@]:1}" )
+  if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi
+  return 0
+}
+
+# The one detached fork that may fill the cache. Guarded per scope, so a burst
+# of presses starts one child and not one per press.
+_TAI_UNITS_KICKED=0
+_TAI_UNITS_KICKED_USER=0
+_tai_units_kick() {
+  local -i user=$1
+  if (( user )); then
+    (( _TAI_UNITS_KICKED_USER )) && return 0
+    _TAI_UNITS_KICKED_USER=1
+  else
+    (( _TAI_UNITS_KICKED )) && return 0
+    _TAI_UNITS_KICKED=1
   fi
+  ( _tai_units_load "$user" >/dev/null 2>&1 & )
+  return 0
+}
+
+# The forked half: read the cache, and only when it cannot answer, fork the
+# one `systemctl` call and rewrite the cache. Callers of this are background
+# (the prompt hook's preload and the kick above) — never a completion press in
+# the foreground. Never fails loudly.
+_tai_units_load() {
+  local -i user=$1
+  local file list line
+  _tai_units_read "$user" && return 0
   if (( user )); then
     list=()
     while IFS= read -r line; do list+=( "$line" ); done < <(systemctl --user list-unit-files --no-legend --plain 2>/dev/null)
@@ -52,6 +88,8 @@ _tai_units_load() {
     [[ "$w" == *.* ]] && names+=( "$w" )
   done
   if (( ${#names[@]} )); then
+    _tai_units_cache "$user"
+    file="$_TAI_UNITS_FILE"
     mkdir -p "${file%/*}" 2>/dev/null
     { printf '%s\n' "$EPOCHSECONDS"; printf '%s\n' "${names[@]}"; } >| "$file" 2>/dev/null
   fi
@@ -102,17 +140,20 @@ _tai_unit_word() {
   return 1
 }
 
-# The units the typed word could be, into _TAI_UNIT_MS. Loads the cache on
-# first use — the one fork a completion press pays, once.
+# The units the typed word could be, into _TAI_UNIT_MS. Served from the
+# arrays, then from the cache file — both fork-free. When neither can answer,
+# the load is kicked detached and this press answers nothing: the one fork a
+# unit completion needs is off the press path, and the press after this one
+# finds the array filled.
 _tai_unit_matches() {
   local word="$1" u
   _TAI_UNIT_MS=()
   if [[ "${_TAI_UNIT_SCOPE:-0}" == "1" ]]; then
-    (( ${#_TAI_UNITS_USER[@]} )) || _tai_units_load 1
+    (( ${#_TAI_UNITS_USER[@]} )) || _tai_units_read 1 || _tai_units_kick 1
     # Folded, like every lookup: `Net` reaches NetworkManager.service.
     for u in "${_TAI_UNITS_USER[@]}"; do [[ "${u,,}" == "${word,,}"* ]] && _TAI_UNIT_MS+=( "$u" ); done
   else
-    (( ${#_TAI_UNITS[@]} )) || _tai_units_load 0
+    (( ${#_TAI_UNITS[@]} )) || _tai_units_read 0 || _tai_units_kick 0
     for u in "${_TAI_UNITS[@]}"; do [[ "${u,,}" == "${word,,}"* ]] && _TAI_UNIT_MS+=( "$u" ); done
   fi
   (( ${#_TAI_UNIT_MS[@]} > 0 ))

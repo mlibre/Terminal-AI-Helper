@@ -36,27 +36,60 @@ _tai_units_cache() {
   fi
 }
 
-# The cached unit list for one scope, into the module's array. Reads the cache
-# file when it is fresh; forks the one `systemctl` call and rewrites the cache
-# when it is not, or when there has never been one. Answers with the array it
-# has — an empty list on a machine without systemd — and never raises: a
-# completion must not be able to fail loudly.
-_tai_units_load() {
+# The cached unit list for one scope, read-only, into the module's array.
+# Answers 0 only when a fresh cache file was read — the fork-free half of the
+# loader, and the half a widget is allowed to call: a completion press must
+# never sit inside a child process waiting for systemctl, which is what the
+# combined loader did when the array was empty and the cache had gone stale.
+# On a machine whose systemd is slow to answer — a loaded box, a container
+# host with a few hundred units — that wait was seconds long, and the report
+# that found it read as the shell freezing on Tab. What a press that finds
+# nothing gets instead is the kick below: the load starts detached, and the
+# next press answers from the array it filled.
+_tai_units_read() {
   local -i user=$1
-  local file list tmp
+  local file list
   _tai_units_cache "$user"
   file="$REPLY"
   local epoch="" first=""
   if [[ -r "$file" ]]; then
     { read -r epoch; read -r first; true; } < "$file" 2>/dev/null
   fi
-  if [[ "$epoch" == <-> && -n "$first" ]] && \
-     (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )); then
-    list=( "${(@f)$(<"$file")}" )
-    list=( "${list[@]:1}" )
-    if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi
-    return 0
+  [[ "$epoch" == <-> && -n "$first" ]] || return 1
+  (( EPOCHSECONDS - epoch < _TAI_UNITS_TTL && EPOCHSECONDS >= epoch )) || return 1
+  list=( "${(@f)$(<"$file")}" )
+  list=( "${list[@]:1}" )
+  if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi
+  return 0
+}
+
+# The one detached fork that may fill the cache. Guarded per scope, so a burst
+# of presses starts one child and not one per press.
+typeset -gi _TAI_UNITS_KICKED=0
+typeset -gi _TAI_UNITS_KICKED_USER=0
+_tai_units_kick() {
+  local -i user=$1
+  if (( user )); then
+    (( _TAI_UNITS_KICKED_USER )) && return 0
+    _TAI_UNITS_KICKED_USER=1
+  else
+    (( _TAI_UNITS_KICKED )) && return 0
+    _TAI_UNITS_KICKED=1
   fi
+  ( ( _tai_units_load "$user" >/dev/null 2>&1 ) & )
+  return 0
+}
+
+# The forked half: read the cache, and only when it cannot answer, fork the
+# one `systemctl` call and rewrite the cache. Callers of this are background
+# (the prompt hook's preload and the kick above) — never a widget in the
+# foreground. Answers with the array it has — an empty list on a machine
+# without systemd — and never raises: a completion must not be able to fail
+# loudly.
+_tai_units_load() {
+  local -i user=$1
+  local file list tmp
+  _tai_units_read "$user" && return 0
   # One fork, only when the cache cannot answer. `--no-legend --plain` keeps
   # the output one unit per line; the first field of each is the name.
   if (( user )); then
@@ -68,6 +101,8 @@ _tai_units_load() {
   list=( "${list[@]%% *}" )
   list=( "${(@M)list:#*.*}" )
   if (( ${#list[@]} )); then
+    _tai_units_cache "$user"
+    file="$REPLY"
     mkdir -p "${file:h}" 2>/dev/null
     tmp="$file.tmp.$$"
     { print -r -- "$EPOCHSECONDS"; print -r -l -- "${list[@]}"; } >| "$tmp" 2>/dev/null && \
@@ -119,16 +154,19 @@ _tai_unit_word() {
   return 1
 }
 
-# The units the typed word could be, into _TAI_UNIT_MS. Loads the cache on
-# first use — that is the one fork a Tab pays, once.
+# The units the typed word could be, into _TAI_UNIT_MS. Served from the
+# arrays, then from the cache file — both fork-free. When neither can answer,
+# the load is kicked detached and this press answers nothing: the one fork a
+# unit completion needs is off the keystroke path, and the press after this
+# one finds the array filled.
 _tai_unit_matches() {
   local word="$1" list
   _TAI_UNIT_MS=()
   if (( REPLY_USER )); then
-    (( ${#_TAI_UNITS_USER} )) || _tai_units_load 1
+    (( ${#_TAI_UNITS_USER} )) || _tai_units_read 1 || _tai_units_kick 1
     list=( "${_TAI_UNITS_USER[@]}" )
   else
-    (( ${#_TAI_UNITS} )) || _tai_units_load 0
+    (( ${#_TAI_UNITS} )) || _tai_units_read 0 || _tai_units_kick 0
     list=( "${_TAI_UNITS[@]}" )
   fi
   (( ${#list[@]} )) || return 1

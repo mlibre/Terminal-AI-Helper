@@ -248,7 +248,13 @@ _tai_menu_first_lines() {
   # than "begins with the word".
   [[ "$word" != *[\*\?\[]* ]] || return 1
   merged=()
-  for k in "${(@k)_TAI_FIRST[(I)${word}*]}"; do
+  # The scan is case-insensitive — the same answer _tai_first_values gives the
+  # ghost for the same word, which is the whole point: `LS` typed reaches the
+  # `ls` key's learned lines here exactly as it does one redrawing over. `(#i)`
+  # needs extendedglob and localoptions hands the shell its own options back;
+  # ${(b)word} keeps a `^` or `~` in the word a literal and not glob syntax.
+  setopt localoptions extendedglob
+  for k in "${(@k)_TAI_FIRST[(I)(#i)${(b)word}*]}"; do
     values="${_TAI_FIRST[$k]}"
     # Peel, don't split: a key's whole list is split nowhere else on the
     # keystroke path, and `git` holds thousands of lines when the first three

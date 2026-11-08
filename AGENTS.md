@@ -31,6 +31,13 @@ Build **simple, fast, smart, delightful software** that works immediately.
   web`: launched by the user, bound to 127.0.0.1, GET-only, read-only,
   answering through the same engine as the prompt — never on the keystroke
   path, never started by the plugins.
+- **The keystroke path never forks, and never waits inside a child.** A press
+  that needs data it does not have answers from the cache it can read and
+  starts one detached loader — the unit list works this way after a cache
+  went stale and a `systemctl` child sat on Tab for seconds while the shell
+  stood still. Every scan on the same path is bounded: a filter is a
+  necessary condition answered in one linear pass, and no filter may carry a
+  per-letter alternative whose cost grows with the word.
 - SQLite for durable local data; generated native shell indexes for lookup.
 - Rebuild indexes atomically; never leave the shell with a partial index.
 - A lock must record its holder and be reclaimable when that holder is gone:
