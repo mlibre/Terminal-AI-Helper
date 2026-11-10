@@ -10,3 +10,4 @@ target/
 dist/
 *.zwc
 weights.json
+bin/tai

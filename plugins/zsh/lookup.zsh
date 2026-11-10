@@ -793,9 +793,12 @@ _tai_word_order_glob() {
 
 _tai_loose() {
   local prefix="${1:l}"
-  local -a want rxs_c exact_lw var_lw fuzz_lw rest3 hits_lw scan_ll
-  local w line ll rxc rxb ok
+  local -a want rxs_c exact_l var_l fuzz_l rest3 hits_lw scan_ll
+  local w line ll ll_l rxc rxb ok
   local -i k n_exact=0
+  # The (#i) glob flags the three tier filters carry need extendedglob;
+  # localoptions hands this shell its own options back on return.
+  setopt localoptions extendedglob
   # A pasted command is not a half-remembered one. Checked before the cache key
   # and before any line is read, so the answer is nothing and the cost is one
   # comparison.
@@ -889,26 +892,25 @@ _tai_loose() {
       rxs_b+=( "" )
     fi
   done
-  # Lowercase of every learned line, built once per index load and not once per
-  # keystroke: measured, it was the bulk of each loose pass itself. The scan
-  # runs on the lowercase copy — the query is lowercased to meet it. The whole
-  # copy is three C-level expansions — one join, one lowercase flag over the
-  # joined text, one split — where the previous per-line shell loop paid a
-  # parameter expansion and an array append per line, most of a millisecond on
-  # a real index, on the first query of every generation.
-  if (( _TAI_LOOSE_SNAP != _TAI_LOOSE_GEN )); then
-    _TAI_LOOSE_KEYS=( "${(@k)_TAI_SCORE[@]}" )
-    _TAI_LOOSE_LOW=()
-    if (( ${#_TAI_LOOSE_KEYS[@]} )); then
-      _TAI_LOOSE_LOW=( "${(f)${(L)${(pj:\n:)_TAI_LOOSE_KEYS[@]}}}" )
-    fi
-    # The map back to the line the user actually ran is *lazy* now: it is one
-    # shell loop over every line, and the ranked answer reads it only when a
-    # tier actually found something — most redraws find nothing, and the
-    # early ones never paid for the map at all until this made that the rule.
-    _TAI_LOOSE_LINE_OF=()
-    _TAI_LOOSE_LINE_OF_GEN=-1
-    _TAI_LOOSE_SNAP=$_TAI_LOOSE_GEN
+  # The scan set: the top-ranked lines the index holds, capped. Two measured
+  # facts shaped this. The old design lowercased every learned line once per
+  # generation — one join, one lowercase, one split — and at 50k rows that
+  # pipeline alone cost 2.7 seconds, paid by the first loose query of every
+  # generation: the first keystroke after every reload, which is exactly the
+  # keystroke a paste deferred (the report: a paste of a systemctl line took
+  # 10s, and the first keystroke after it 10s more). And per dead prefix, the
+  # old filters ran over every line the index holds, when the glimpse answers
+  # at most _TAI_LOOSE_CAP of them and the index writes its keys best-first.
+  # So the scan walks a capped copy of the best-ranked lines, built once per
+  # generation (one C-level key expansion — 31ms at 50k rows), and the
+  # matching is case-insensitive through the (#i) glob flag on the real
+  # lines — no lowercase copy to build, no map back from it, and the answers
+  # are the lines the history holds verbatim.
+  if (( _TAI_LOOSE_SCAN_GEN != _TAI_LOOSE_GEN )); then
+    _TAI_LOOSE_SCAN=( "${(@k)_TAI_SCORE[@]}" )
+    (( ${#_TAI_LOOSE_SCAN[@]} > _TAI_LOOSE_SCAN_MAX )) && \
+      _TAI_LOOSE_SCAN=( "${_TAI_LOOSE_SCAN[@]:0:_TAI_LOOSE_SCAN_MAX}" )
+    _TAI_LOOSE_SCAN_GEN=$_TAI_LOOSE_GEN
     _TAI_LOOSE_PAR=""
     _TAI_LOOSE_PAR_LOW=()
   fi
@@ -927,7 +929,7 @@ _tai_loose() {
         && "$prefix" != "$_TAI_LOOSE_PAR" && "$prefix" == "$_TAI_LOOSE_PAR"* ]]; then
     scan_ll=( "${_TAI_LOOSE_PAR_LOW[@]}" )
   else
-    scan_ll=( "${_TAI_LOOSE_LOW[@]}" )
+    scan_ll=( "${_TAI_LOOSE_SCAN[@]}" )
   fi
   # Pass one — verbatim, one C-level filter per word over the whole set, and no
   # shell loop at all. This is the tier the glimpse answers from on an ordinary
@@ -935,13 +937,13 @@ _tai_loose() {
   # word, the filter does the same work inside parameter expansion. The words
   # are pattern-escaped, so a typed `foo[bar` is a literal substring and not a
   # broken class.
-  local -a exact_lw var_lw fuzz_lw rest3
-  exact_lw=( "${scan_ll[@]}" )
+  local -a exact_l var_l fuzz_l rest3
+  exact_l=( "${scan_ll[@]}" )
   for w in "${want[@]}"; do
-    (( ${#exact_lw[@]} )) || break
-    exact_lw=( "${(@M)exact_lw:#*${(b)w}*}" )
+    (( ${#exact_l[@]} )) || break
+    exact_l=( "${(@M)exact_l:#*(#i)${(b)w}*}" )
   done
-  n_exact=${#exact_lw[@]}
+  n_exact=${#exact_l[@]}
   # Pass two — the one-edit tier, over the lines pass one rejected, and only
   # when verbatim answered nothing at all: a word the history holds verbatim is
   # the answer, and a second tier of guesses under it is noise, not memory.
@@ -975,7 +977,7 @@ _tai_loose() {
     cand_l=( "${scan_ll[@]}" )
     for (( k = 1; k <= ${#want}; k++ )); do
       (( ${#cand_l[@]} )) || break
-      cand_l=( "${(@M)cand_l:#*${~rxs_g[k]}*}" )
+      cand_l=( "${(@M)cand_l:#*(#i)${~rxs_g[k]}*}" )
     done
     # The flood bound. A word the history holds near-spelled can leave hundreds
     # of candidates holding a one-edit spelling, and the loop below regex-tests
@@ -987,22 +989,23 @@ _tai_loose() {
     (( ${#cand_l[@]} > _TAI_LOOSE_FLOOD )) && \
       cand_l=( "${cand_l[@]:0:_TAI_LOOSE_FLOOD}" )
     for ll in "${cand_l[@]}"; do
-      (( ${#var_lw[@]} >= _TAI_LOOSE_CAP )) && break
+      (( ${#var_l[@]} >= _TAI_LOOSE_CAP )) && break
+      ll_l="${ll:l}"
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
         w=$want[k]; rxb=$rxs_b[k]
         (( ${#w} > ${#ll} )) && { ok=0; break }
-        [[ "$ll" == *"$w"* ]] && continue
-        [[ -n "$rxb" && "$ll" =~ $rxb ]] && continue
+        [[ "$ll_l" == *"$w"* ]] && continue
+        [[ -n "$rxb" && "$ll_l" =~ $rxb ]] && continue
         ok=0; break
       done
-      (( ok )) && var_lw+=( "$ll" )
+      (( ok )) && var_l+=( "$ll" )
     done
   fi
   # Everything the one-edit tier did not accept is what the gap tier reads —
   # one array subtraction, the same set the old loop built as it rejected,
   # and the whole set when the tier never ran or accepted nothing.
-  rest3=( "${(@)scan_ll:|var_lw}" )
+  rest3=( "${(@)scan_ll:|var_l}" )
   # Pass three — the bounded-gap tier. It only speaks when nothing else did:
   # a line the verbatim or one-edit tier answered is the answer, and lines of
   # letters-scattered arithmetic under it were the junk this tier existed to
@@ -1022,10 +1025,10 @@ _tai_loose() {
   for w in "${want[@]}"; do
     (( ${#w} > _TAI_LOOSE_MAX_GAP_WORD )) && { gap_ok=0; break }
   done
-  if (( gap_ok && n_exact == 0 && ${#var_lw[@]} == 0 && ${#rest3[@]} > 0 )); then
+  if (( gap_ok && n_exact == 0 && ${#var_l[@]} == 0 && ${#rest3[@]} > 0 )); then
     typeset -gA _TAI_LOOSE_CLAIMED
     _TAI_LOOSE_CLAIMED=()
-    for ll in "${exact_lw[@]}"; do _TAI_LOOSE_CLAIMED[$ll]=1; done
+    for ll in "${exact_l[@]}"; do _TAI_LOOSE_CLAIMED[$ll]=1; done
     # The same rule the one-edit tier got, with the condition this tier's own
     # matcher implies: a line the gap matcher accepts holds every letter of
     # every word in order, so the letters-in-order glob per word is one
@@ -1037,7 +1040,7 @@ _tai_loose() {
     for (( k = 1; k <= ${#want}; k++ )); do
       (( ${#gap_l[@]} )) || break
       _tai_word_order_glob "${want[k]}"
-      gap_l=( "${(@M)gap_l:#*${~_TAI_RE_OUT}*}" )
+      gap_l=( "${(@M)gap_l:#*(#i)${~_TAI_RE_OUT}*}" )
     done
     # The same flood bound the one-edit tier got, and for the same measured
     # reason: a word whose letters sit in order across hundreds of long lines
@@ -1050,17 +1053,18 @@ _tai_loose() {
     (( ${#gap_l[@]} > _TAI_LOOSE_FLOOD )) && \
       gap_l=( "${gap_l[@]:0:_TAI_LOOSE_FLOOD}" )
     for ll in "${gap_l[@]}"; do
-      (( ${#fuzz_lw[@]} >= _TAI_LOOSE_CAP )) && break
+      (( ${#fuzz_l[@]} >= _TAI_LOOSE_CAP )) && break
       [[ -z "${_TAI_LOOSE_CLAIMED[$ll]:-}" ]] || continue
+      ll_l="${ll:l}"
       ok=1
       for (( k = 1; k <= ${#want}; k++ )); do
         w=$want[k]; rxc=$rxs_c[k]
         (( ${#w} > ${#ll} )) && { ok=0; break }
-        [[ "$ll" == *"$w"* ]] && continue
-        [[ -n "$rxc" && "$ll" =~ $rxc ]] && continue
+        [[ "$ll_l" == *"$w"* ]] && continue
+        [[ -n "$rxc" && "$ll_l" =~ $rxc ]] && continue
         ok=0; break
       done
-      (( ok )) && fuzz_lw+=( "$ll" )
+      (( ok )) && fuzz_l+=( "$ll" )
     done
   fi
   # Every tier's matches, back into the lines the user ran, ranked best first
@@ -1074,34 +1078,23 @@ _tai_loose() {
   # into a list that is bounded, so the cost stays constant. Exact lines fill
   # the list first; the edit tier comes second; the scatter tier only ever
   # reaches the tail.
-  # The map back from the lowercase scan copy is built here and only here —
-  # once per generation, and only when a tier actually found something for it
-  # to translate (see the snapshot note above for the laziness, and the
-  # measured cost of paying it on every pass that answered nothing).
-  hits_lw=( "${exact_lw[@]}" "${var_lw[@]}" "${fuzz_lw[@]}" )
-  if (( ${#hits_lw[@]} )) && (( _TAI_LOOSE_LINE_OF_GEN != _TAI_LOOSE_GEN )); then
-    local -i _i
-    for (( _i = 1; _i <= ${#_TAI_LOOSE_KEYS}; _i++ )); do
-      _TAI_LOOSE_LINE_OF[${_TAI_LOOSE_LOW[_i]}]=${_TAI_LOOSE_KEYS[_i]}
-    done
-    _TAI_LOOSE_LINE_OF_GEN=$_TAI_LOOSE_GEN
-  fi
+  # The tiers' matches are the lines the history holds — the (#i) filters ran
+  # on the real lines, so there is no lowercase copy and no map back from one,
+  # and the ranking reads each score straight off the matched line.
+  hits_lw=( "${exact_l[@]}" "${var_l[@]}" "${fuzz_l[@]}" )
   _TAI_RANKED=()
-  for ll in "${exact_lw[@]}"; do
-    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
-    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  for ll in "${exact_l[@]}"; do
+    _TAI_RANK_LINE="$ll"; _tai_ranked_insert
   done
   _TAI_RANKED_EXACT=( "${_TAI_RANKED[@]}" )
   _TAI_RANKED=()
-  for ll in "${var_lw[@]}"; do
-    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
-    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  for ll in "${var_l[@]}"; do
+    _TAI_RANK_LINE="$ll"; _tai_ranked_insert
   done
   _TAI_RANKED_VAR=( "${_TAI_RANKED[@]}" )
   _TAI_RANKED=()
-  for ll in "${fuzz_lw[@]}"; do
-    line="${_TAI_LOOSE_LINE_OF[$ll]:-}"
-    [[ -n "$line" ]] && { _TAI_RANK_LINE="$line"; _tai_ranked_insert; }
+  for ll in "${fuzz_l[@]}"; do
+    _TAI_RANK_LINE="$ll"; _tai_ranked_insert
   done
   local -a ranked
   ranked=( "${_TAI_RANKED_EXACT[@]}" "${_TAI_RANKED_VAR[@]}" "${_TAI_RANKED[@]}" )
@@ -1220,13 +1213,19 @@ _tai_loose_memo_put() {
   _TAI_LOOSE_MEM_VALS[_TAI_LOOSE_MEM_I]="$_TAI_MEM_PUT_VAL"
   _TAI_LOOSE_MEM_LOWS[_TAI_LOOSE_MEM_I]="$_TAI_MEM_PUT_LOW"
 }
-# The lowercase scan copy is rebuilt when the generation moves on, and not
-# before: the first redraw after a reload pays for it.
-typeset -gi _TAI_LOOSE_SNAP=-1
-typeset -ga _TAI_LOOSE_KEYS=()
-typeset -ga _TAI_LOOSE_LOW=()
-# Every line's position in the scan copy, built with it: what a scan walks when
-# no narrower scan set applies.
+# The capped scan set the tiers walk, and the generation it was built for.
+# One C-level key expansion per generation — the index writes its keys
+# best-first, so the head of the expansion is the head of the ranking, and
+# the cap keeps every filter pass bounded however long the history grows.
+typeset -ga _TAI_LOOSE_SCAN=()
+typeset -gi _TAI_LOOSE_SCAN_GEN=-1
+# How many of the best-ranked lines the glimpse will scan at all. The answer
+# is at most _TAI_LOOSE_CAP rows and the tiers rank within what they scan, so
+# the cap is a shortlist, not a ceiling on what can be found. Measured at 50k
+# rows, the old whole-index lowercase snapshot cost 2.7s on the first
+# keystroke of a generation and each whole-index filter pass 40-90ms; capped,
+# the build is one ~30ms key expansion and each pass a few milliseconds.
+typeset -gi _TAI_LOOSE_SCAN_MAX=8192
 # The parent state: the prefix the last scan answered, the generation it was
 # scanned under, and the lowercase lines it matched. A prefix that extends the
 # parent's scans the parent's matches instead of every line — every match tier
@@ -1236,14 +1235,6 @@ typeset -ga _TAI_LOOSE_LOW=()
 typeset -g _TAI_LOOSE_PAR=""
 typeset -gi _TAI_LOOSE_PAR_GEN=-1
 typeset -ga _TAI_LOOSE_PAR_LOW=()
-# The lowercase line back to the line the user actually ran, built beside the
-# lowercase scan copy: the scan runs on the lowercase copy, and the ranked
-# answer has to be the text the history holds.
-typeset -gA _TAI_LOOSE_LINE_OF=()
-# The generation that map was built for. Lazy: a snapshot that answers nothing
-# never builds it, and a reload invalidates it the way it invalidates every
-# other answer this file keeps.
-typeset -gi _TAI_LOOSE_LINE_OF_GEN=-1
 # How many characters one fuzzy-tier letter may sit from the previous one. The
 # bound is what keeps the scatter tier honest: letters scattered across a long
 # URL are arithmetic, not memory. Three covers a transposition and a doubled
