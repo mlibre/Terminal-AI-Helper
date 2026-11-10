@@ -42,6 +42,10 @@ jobs:
             if [ "$arch" = "aarch64" ]; then
               sudo apt-get install -y gcc-aarch64-linux-gnu
               rustup target add aarch64-unknown-linux-gnu
+              # The cross link goes through the aarch64 gcc, which knows the
+              # cortex-a53 fix its own linker arguments carry; the host's cc
+              # reads the flag and refuses it.
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
               cargo build --release --quiet --target aarch64-unknown-linux-gnu
               bin=target/aarch64-unknown-linux-gnu/release/tai
             else
