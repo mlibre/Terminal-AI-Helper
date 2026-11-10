@@ -403,6 +403,29 @@ fn import_rows(con: &Connection) -> i64 {
     let mut imported = 0i64;
     let now = now_epoch();
     let home = paths::home_dir();
+    // The (cmd, ts) pairs and bare cmds already stored, read once: the dedup
+    // below used to ask the store once per line, and on a 50k-line history
+    // that walk was most of `tai refresh` — the pairs query has no index on
+    // (cmd, ts), so every ask was a table scan of everything read so far.
+    // The sets are bounded by what the store holds, which this import is
+    // about to grow by the same order.
+    let mut known_pairs: HashSet<(String, i64)> = HashSet::new();
+    let mut known_cmds: HashSet<String> = HashSet::new();
+    {
+        let Ok(mut stmt) = con.prepare("SELECT cmd, ts FROM commands") else {
+            return 0;
+        };
+        let collected: Vec<(String, i64)> = match stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        }) {
+            Ok(rows) => rows.filter_map(Result::ok).collect(),
+            Err(_) => Vec::new(),
+        };
+        for (cmd, ts) in collected {
+            known_pairs.insert((cmd.clone(), ts));
+            known_cmds.insert(cmd);
+        }
+    }
     for f in history_files() {
         let stat = match fs_meta(&f) {
             Some(s) => s,
@@ -470,30 +493,14 @@ fn import_rows(con: &Connection) -> i64 {
                 if plain_seen.contains(&cmd) {
                     continue;
                 }
-                let probe = cmd.chars().take(MAX_CMD_LEN).collect::<String>();
-                let exists: Option<i64> = con
-                    .query_row(
-                        "SELECT 1 FROM commands WHERE cmd=?1 LIMIT 1",
-                        params![probe],
-                        |r| r.get(0),
-                    )
-                    .ok();
-                if exists.is_some() {
+                if known_cmds.contains(cmd.as_str()) {
                     continue;
                 }
                 plain_seen.insert(cmd.clone());
                 ts = Some(now);
             } else if first_import {
                 // Avoid duplicating rows created before the cursor table existed.
-                let probe = cmd.chars().take(MAX_CMD_LEN).collect::<String>();
-                let exists: Option<i64> = con
-                    .query_row(
-                        "SELECT 1 FROM commands WHERE cmd=?1 AND ts=?2 LIMIT 1",
-                        params![probe, ts],
-                        |r| r.get(0),
-                    )
-                    .ok();
-                if exists.is_some() {
+                if known_pairs.contains(&(cmd.clone(), ts.unwrap_or(0))) {
                     continue;
                 }
             }
