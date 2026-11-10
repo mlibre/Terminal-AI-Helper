@@ -150,6 +150,7 @@ _tai_accept_or_right() {
 _tai_complete() {
   local line="${COMP_LINE:0:$COMP_POINT}" first word values="" c
   local -i first_word=0
+  local -A _TAI_SEEN=()
   if [[ "$line" == *' '* ]]; then
     # Same rule as _tai_query: the last complete word is the key, so `ls -l`
     # also offers `ls -la` — and a key with no space in it is the command name,
@@ -219,9 +220,13 @@ _tai_complete() {
         _tai_reply "$c"
       done
     fi
-    local -i names=0
-    while IFS= read -r c && (( names < 100 )); do
-      [[ -n "$c" ]] && { _tai_reply "$c"; (( ++names )); }
+    # The installed names, read whole: a reply cap here truncated by PATH
+    # order, and on a machine whose PATH holds a few hundred g* commands the
+    # name beside the learned row was exactly the one dropped. The dedup is a
+    # hash now, so the read costs one lookup per name, and the bound the menu
+    # cares about is the rows it shows, not the list readline holds.
+    while IFS= read -r c; do
+      [[ -n "$c" ]] && _tai_reply "$c"
     done < <(compgen -c -- "$line")
   fi
   local stem x
@@ -280,7 +285,8 @@ _tai_reply() {
   # Enter into the history as a row of its own; and a name that already holds
   # a space, which is more than one shell word already.
   if [[ -n "$c" && "$c" != */ && "$c" != *[[:space:]]* ]]; then c="$c "; fi
-  for x in "${COMPREPLY[@]}"; do [[ "$x" == "$c" ]] && return 0; done
+  [[ -n "${_TAI_SEEN[$c]:-}" ]] && return 0
+  _TAI_SEEN[$c]=1
   COMPREPLY+=("$c")
 }
 complete -o nospace -F _tai_complete tai 2>/dev/null
