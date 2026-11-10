@@ -470,18 +470,16 @@ fn backdate(path: &Path) {
     // `-nt` compares whole seconds in both shells, so "the file moved on" has
     // to be more than a second apart to be visible: the index keeps its natural
     // "just written" mtime and the stamp is moved into the past.
+    // `File::set_times`, not `utimes(2)`: the raw call has been seen to fail
+    // silently, and a backdate that did not happen is a test that sleeps.
+    use std::fs::FileTimes;
     if !path.exists() {
         std::fs::write(path, "").unwrap();
     }
-    let old = now_secs() - 30;
-    let times = [
-        libc::timeval { tv_sec: old, tv_usec: 0 },
-        libc::timeval { tv_sec: old, tv_usec: 0 },
-    ];
-    let c = path.to_string_lossy().into_owned();
-    unsafe {
-        libc::utimes(c.as_ptr() as _, times.as_ptr());
-    }
+    let old = std::time::UNIX_EPOCH
+        + std::time::Duration::from_secs((now_secs() - 30).max(0) as u64);
+    let f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    f.set_times(FileTimes::new().set_accessed(old).set_modified(old)).unwrap();
 }
 
 fn now_secs() -> i64 {

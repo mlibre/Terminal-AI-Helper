@@ -124,16 +124,15 @@ fn reverse_block(screen: &Screen, row: usize) -> Vec<usize> {
 }
 
 /// Backdate/forward-date a file the way `os.utime(path, (ts, ts))` did, so the
-/// filesystem answer has a defined order.
+/// filesystem answer has a defined order. `File::set_times`, not `utimes(2)`:
+/// the raw call has been seen to fail silently — an unchecked ENOENT that
+/// left every file at its creation mtime and the "newest first" order to
+/// readdir's whim — and the checked std API cannot fail that way.
 fn set_mtime(path: &PathBuf, ts: i64) {
-    let times = [
-        libc::timeval { tv_sec: ts, tv_usec: 0 },
-        libc::timeval { tv_sec: ts, tv_usec: 0 },
-    ];
-    let c = path.to_string_lossy().into_owned();
-    unsafe {
-        libc::utimes(c.as_ptr() as _, times.as_ptr());
-    }
+    use std::fs::FileTimes;
+    let f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts.max(0) as u64);
+    f.set_times(FileTimes::new().set_modified(t)).unwrap();
 }
 
 /// The reverse-video block covers the whole selected name — and stops short of
