@@ -6,3 +6,7 @@ plugins/zsh/*.zwc
 node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+target/
+dist/
+*.zwc
+weights.json

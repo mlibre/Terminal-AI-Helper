@@ -3,8 +3,9 @@
 ![tai](assets/tai.png)
 
 **TAI learns the commands you actually run and suggests them as you type.**
-Native zsh and bash — no server, no daemon, no Python on your keystrokes;
-everything runs on your machine, offline, stdlib only.
+Native zsh and bash — no server, no daemon, nothing on your keystrokes;
+one compiled Rust binary your shell never has to wait for, everything on
+your machine, offline.
 
 Type `systemctl` and a grey hint appears: `restart nginx`. `→` takes it. Press
 `Tab` and your own history answers what usually comes next. It is

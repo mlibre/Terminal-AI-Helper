@@ -222,7 +222,7 @@ COMMANDS = ["git pull --rebase", "git status", "docker ps", "ls -la", "ls -l",
 # the file every plugin test reads, so a limit copied here is a second copy that
 # drifts — and when it drifted, in the direction of *more* permissive than the
 # product, every plugin test passed against an index nothing ever loads.
-from tai.index import WORD_CANDIDATE_CAP, WORD_KEY_MAX_DEPTH  # noqa: E402
+from fixture_rules import WORD_CANDIDATE_CAP, WORD_KEY_MAX_DEPTH  # noqa: E402
 # A command that exists on any Linux and appears in no fixture entry, so the
 # "installed but unknown" path can be exercised without inventing a binary.
 INSTALLED = "true"
@@ -319,7 +319,7 @@ def _index_rows() -> list[tuple[str, str, str]]:
     # The file-argument marks, from the same `takes_file` the generator uses, so
     # the fixture cannot claim a line ends in a file when the builder would not.
     # Head keys are a set, as the builder's are: two lines can mark one head.
-    from tai.paths import takes_file
+    from fixture_rules import takes_file
     file_heads: set[str] = set()
     for cmd in COMMANDS:
         if takes_file(cmd):
@@ -332,7 +332,7 @@ def _index_rows() -> list[tuple[str, str, str]]:
     # uses — the other map the shells judge a candidate by. The fixture used to
     # write none, which made every plugin test run in a world where nothing was
     # ever judged: exactly the blindness the `cat .zh` report was about.
-    from tai.paths import relative_word_set
+    from fixture_rules import relative_word_set
     for word in sorted(relative_word_set(COMMANDS)):
         rows.append(("LIVE", word, "1"))
     return rows

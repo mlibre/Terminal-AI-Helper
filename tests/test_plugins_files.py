@@ -21,7 +21,7 @@ from plugin_env import *  # noqa: F401,F403  (constants, fixture writers, setup)
 from plugin_screen import *  # noqa: F401,F403  (Screen and the styled-menu helpers)
 from plugin_pty import *  # noqa: F401,F403  (Session, Ghosts, check, probe, failures)
 
-from tai.fresh import MAX_ROOTS, PER_ROOT  # noqa: E402  (the numbers the three must share)
+from fixture_rules import MAX_ROOTS, PER_ROOT  # noqa: E402  (the numbers the three must share)
 
 
 def test_zsh_file_arguments() -> None:

@@ -1,6 +1,6 @@
 {
   "name": "terminal-ai-helper",
-  "version": "2.3.7",
+  "version": "3.0.0",
   "description": "The terminal that knows your next command Bash/Zsh suggestions that learn from your own history Offline and private with no account required",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,6 @@
   ],
   "files": [
     "bin",
-    "tai",
     "plugins",
     "install.sh",
     "VERSION",
@@ -31,7 +30,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "postinstall": "bash bin/npm-postinstall",
-    "prepublishOnly": "find plugins -name '*.zwc' -delete && find . -name __pycache__ -type d -prune -exec rm -rf {} +"
+    "prepublishOnly": "find plugins -name '*.zwc' -delete && find . -name '*.zwc' -not -path './node_modules/*' -delete"
   },
   "devDependencies": {
     "vitepress": "^1.6.3"

@@ -4,7 +4,7 @@
 # A path argument is answered by the filesystem, not by the history. The reported
 # case: `chmod +x ` on a history holding only `chmod +x script`, where `script` is
 # not a file here and the file just downloaded is the one wanted. The same limits
-# and the same roots as plugins/tai.zsh and tai/fresh.py, because this is one
+# and the same roots as plugins/tai.zsh and src/fresh.rs, because this is one
 # rule in three places and they have to read the same.
 _TAI_FILE_PER_ROOT=8
 _TAI_FILE_ROOTS_MAX=8

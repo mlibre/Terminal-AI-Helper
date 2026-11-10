@@ -45,7 +45,13 @@ class Session:
                                 f"_{Session._next_buf}.txt")
         env = dict(os.environ, TAI_DB=str(DB), PS1="P> ", TERM="xterm-256color",
                    TAI_TEST_DUMP=str(self.buf),
-                   TAI_BIN=f"python3 {REPO / 'tai' / 'cli.py'}", EDITOR=str(EDITOR),
+                   # The compiled program: the build the suite runs after has
+                   # already made it, so the flush the plugin asks for is the
+                   # binary the tests are about.
+                   TAI_BIN=str(REPO / "target" / "release" / "tai")
+                   if (REPO / "target" / "release" / "tai").exists()
+                   else str(REPO / "target" / "debug" / "tai"),
+                   EDITOR=str(EDITOR),
                    # Keep the run hermetic: no real history file, and the fixed
                    # fixture index instead of the developer's built one.
                    HISTFILE=str(HISTFILE), TAI_INDEX=str(ZSH_INDEX),

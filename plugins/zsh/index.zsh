@@ -28,7 +28,7 @@ typeset -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE
 #
 # One builtin read, no fork: the writer's own first line, plus the shape of the
 # first data line. It is not proof the body is sound — nothing short of parsing it
-# is — and it does not need to be: `tai/index.py` writes a temporary file and
+# is — and it does not need to be: `src/index.rs` writes a temporary file and
 # `os.replace`s it, so a torn index cannot exist, and the failures this catches
 # are the ones that *can* happen.
 _tai_index_readable() {
@@ -108,14 +108,15 @@ _tai_load_index
 [[ -n "${HISTFILE:-}" && -z "${TAI_HISTORY_FILES:-}" ]] && export TAI_HISTORY_FILES="$HISTFILE"
 
 # An explicit TAI_BIN is used as given. Otherwise prefer the installed `tai`,
-# and fall back to the in-repo CLI so a source checkout works uninstalled.
-# ${(z)_TAI_BIN} splits on shell words, so "python3 <cli>" stays two words.
+# and fall back to the binary a build of this checkout leaves beside it, so a
+# source checkout works uninstalled. ${(z)_TAI_BIN} splits on shell words, so
+# an argv with spaces stays multiple words.
 _TAI_BIN="${TAI_BIN:-}"
 if [[ -z "$_TAI_BIN" ]]; then
   _TAI_BIN="tai"
   if ! command -v tai >/dev/null 2>&1; then
-    _TAI_CLI="${0:A:h}/../tai/cli.py"
-    [[ -r "$_TAI_CLI" ]] && _TAI_BIN="python3 -S -E $_TAI_CLI"
+    _TAI_SRC="${0:A:h}/../../target/release/tai"
+    [[ -x "$_TAI_SRC" ]] && _TAI_BIN="$_TAI_SRC"
   fi
 fi
 
@@ -130,7 +131,7 @@ fi
 #   TAI_SPOOL_SECONDS  idle seconds that force one (default 3)
 _tai_spool_file="${TAI_SPOOL:-}"
 if [[ -z "$_tai_spool_file" && -n "${TAI_DB:-}" ]]; then
-  # The spool lives beside the database, the same rule tai/spool.py applies;
+  # The spool lives beside the database, the same rule src/spool.rs applies;
   # a relative TAI_DB is the current directory in both.
   [[ "$TAI_DB" == */* ]] && _tai_spool_file="${TAI_DB%/*}/spool.log" || _tai_spool_file="spool.log"
 fi
@@ -186,7 +187,7 @@ _TAI_CMD=""
 # what it learns; this one guards the draw against what older stores still hold.
 : ${_TAI_GHOST_MAX:=200}
 # Rows of files a path argument is answered from, and how much of each place is
-# read. The same four numbers live in tai/fresh.py for the one-shot path, and one
+# read. The same four numbers live in src/fresh.rs for the one-shot path, and one
 # variable — TAI_FILE_ROOTS, colon separated — adds roots to both, because the
 # shell and `tai suggest` have to look in the same places to answer the same
 # question. Every one of them is a shortlist rather than a limit: typing more of

@@ -4,6 +4,14 @@
 # is the whole install — the same steps, the same welcome, the same report
 # as the other two doors.
 #
+# The program is a compiled binary, so this hook has one job the Python
+# package never had: put a `tai` executable in the package. Three sources,
+# first that works:
+#   1. a binary the platform package shipped beside this one (bin/tai-<os>-<arch>),
+#   2. a release tarball from GitHub — the registry package stays
+#      architecture-neutral, so the download is how most machines get theirs,
+#   3. cargo build from the checkout the user cloned, which carries the source.
+#
 # Two guards stand before the installer:
 #   * only a *global* install reaches it. npm hands every script the config as
 #     npm_config_* environment, so npm_config_global tells a `-g` install from
@@ -14,24 +22,75 @@
 #     the files on disk only.
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-
 global=""
 case "${npm_config_global:-}" in
-  true | 1 | yes) global=1 ;;
+true | 1 | yes) global=1 ;;
 esac
 if [ -z "$global" ]; then
-  case "$here" in */node_modules/*) global=1 ;; esac
+case "$here" in */node_modules/*) global=1 ;; esac
 fi
 [ -n "$global" ] || exit 0
 [ "${TAI_SKIP_POSTINSTALL:-0}" = "1" ] && exit 0
+
+arch="$(uname -s)-$(uname -m)"
+case "$arch" in
+Linux-x86_64) rarch="x86_64" ;;
+Linux-aarch64 | Linux-arm64) rarch="aarch64" ;;
+*) rarch="" ;;
+esac
+
+staged=""
+for cand in "$here/bin/tai-linux-$rarch" "$here/bin/tai"; do
+  if [ -x "$cand" ]; then
+    staged="$cand"
+    break
+  fi
+done
+
+if [ -z "$staged" ] && [ -n "$rarch" ]; then
+  version="$(tr -d '[:space:]' < "$here/VERSION" 2>/dev/null || echo latest)"
+  url="https://github.com/mlibre/Terminal-AI-Helper/releases/download/v${version}/tai-linux-${rarch}.tar.gz"
+  [ "$version" = "latest" ] && url="https://github.com/mlibre/Terminal-AI-Helper/releases/latest/download/tai-linux-${rarch}.tar.gz"
+  echo "tai: fetching the binary for linux-$rarch…"
+  tarball="$here/bin/tai.tar.gz"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tarball" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tarball" "$url" 2>/dev/null || true
+  fi
+  if [ -s "$tarball" ]; then
+    tar -xzf "$tarball" -C "$here/bin" 2>/dev/null && staged="$here/bin/tai"
+    rm -f "$tarball"
+  fi
+fi
+
+if [ -z "$staged" ] && [ -f "$here/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+  echo "tai: no prebuilt binary available — building from source…"
+  (cd "$here" && cargo build --release --quiet) && staged="$here/target/release/tai"
+fi
+
+if [ -z "$staged" ] || [ ! -x "$staged" ]; then
+  # The package itself is on disk; a binary that could not be fetched or
+  # built must not fail the npm install over it — that would roll the
+  # package back and leave nothing at all. Say what the machine needs.
+  echo "tai: could not fetch or build the binary (no prebuilt for $arch, no cargo)." >&2
+  echo "     install Rust from https://rustup.rs and re-run: bash \"$here/install.sh\"" >&2
+  exit 0
+fi
+
+# The binary the rest of the installer runs, in the package: install.sh's own
+# first source, so the rc wiring and the refresh below run this build.
+if [ "$staged" != "$here/bin/tai" ]; then
+  install -m 755 "$staged" "$here/bin/tai"
+fi
 
 if TAI_INSTALL_METHOD=npm bash "$here/install.sh"; then
   exit 0
 fi
 status=$?
-# The package itself is on disk; an installer that could not finish (no
-# writable rc file, an odd HOME) must not fail the npm install over it — that
-# would roll the package back and leave nothing at all. The retry is the same
-# installer, named by its path in the package npm just unpacked.
+# An installer that could not finish (no writable rc file, an odd HOME) must
+# not fail the npm install over it — that would roll the package back and
+# leave nothing at all. The retry is the same installer, named by its path in
+# the package npm just unpacked.
 echo "tai: automatic setup did not finish (exit $status) — finish with: bash \"$here/install.sh\"" >&2
 exit 0

@@ -135,7 +135,7 @@ _tai_globable() {
 
 # The head of the line, behind one wrapper: is this a command that takes a
 # directory and nothing else? `cd` and `pushd` are the whole closed list — the
-# same list tai/paths.py judges destinations with, and the reason the menu and
+# same list src/paths.rs judges destinations with, and the reason the menu and
 # the ghost must never offer a file after `cd`: the shell would answer
 # "not a directory", and a suggestion the shell refuses is not a suggestion.
 # Three callers (ghost, menu, loose glimpse) ask once per line, so the answer

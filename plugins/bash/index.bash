@@ -7,7 +7,7 @@
 # TAI_INDEX names the *zsh* index — the same variable the index builder and
 # plugins/tai.zsh read, so there is one decision about where the indexes live
 # rather than two that can disagree. This file is one name away from it, which is
-# the same rule tai/index.py applies when it writes the pair. It used to read
+# the same rule src/index.rs applies when it writes the pair. It used to read
 # TAI_INDEX as if it named *this* file, so with TAI_INDEX set the bash shell
 # sourced the zsh snapshot and bash-index.bash was written twice a day and read
 # by nobody.
@@ -36,7 +36,7 @@ declare -gA _TAI_SCORE _TAI_FIRST _TAI_WORD _TAI_SEQ _TAI_FILE _TAI_LIVE
 # start, from a file the user never touched.
 #
 # One builtin read, no fork: the writer's own first line. It is not proof the body
-# is sound, and it does not need to be — `tai/index.py` writes a temporary file
+# is sound, and it does not need to be — `src/index.rs` writes a temporary file
 # and `os.replace`s it, so a torn index cannot exist, and this catches the
 # failures that can: the wrong TAI_INDEX, an empty file, a truncated download.
 _tai_index_readable() {
@@ -125,15 +125,17 @@ _tai_load_index
 # only when the user has not already said it themselves.
 [[ -n "${HISTFILE:-}" && -z "${TAI_HISTORY_FILES:-}" ]] && export TAI_HISTORY_FILES="$HISTFILE"
 
-# TAI_BIN may be more than one word (the fallback below is "python3 <cli>"), so
-# keep an argv array. Expanding "$_TAI_BIN" would look for a single file whose
-# name contains a space, which is why recording failed when tai was not on PATH.
+# TAI_BIN may be more than one word, so keep an argv array. Expanding
+# "$_TAI_BIN" would look for a single file whose name contains a space, which
+# is why recording failed when tai was not on PATH. Prefer the installed
+# `tai`, and fall back to the binary a build of this checkout leaves beside
+# it, so a source checkout works uninstalled.
 read -r -a _TAI_ARGV <<< "${TAI_BIN:-}"
 if [[ ${#_TAI_ARGV[@]} -eq 0 ]]; then
   _TAI_ARGV=(tai)
   if ! command -v tai >/dev/null 2>&1; then
-    _TAI_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../tai/cli.py"
-    [[ -r "$_TAI_CLI" ]] && _TAI_ARGV=(python3 -S -E "$_TAI_CLI")
+    _TAI_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/target/release/tai"
+    [[ -x "$_TAI_SRC" ]] && _TAI_ARGV=("$_TAI_SRC")
   fi
 fi
 
@@ -148,7 +150,7 @@ fi
 #   TAI_SPOOL_SECONDS  idle seconds that force one (default 3)
 _TAI_SPOOL_FILE="${TAI_SPOOL:-}"
 if [[ -z "$_TAI_SPOOL_FILE" && -n "${TAI_DB:-}" ]]; then
-  # The spool lives beside the database, the same rule tai/spool.py applies;
+  # The spool lives beside the database, the same rule src/spool.rs applies;
   # a relative TAI_DB is the current directory in both.
   [[ "$TAI_DB" == */* ]] && _TAI_SPOOL_FILE="${TAI_DB%/*}/spool.log" || _TAI_SPOOL_FILE="spool.log"
 fi

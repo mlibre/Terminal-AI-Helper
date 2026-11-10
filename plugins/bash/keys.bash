@@ -47,7 +47,7 @@ if [[ "${PROMPT_COMMAND:-}" != *"_tai_prompt"* ]]; then PROMPT_COMMAND="_tai_pro
 
 # The record path: one builtin append per command, one interpreter per batch.
 #
-# The frame is `ts US exit US cwd US cmd RS` — the exact bytes tai/spool.py
+# The frame is `ts US exit US cwd US cmd RS` — the exact bytes src/spool.rs
 # parses. US and RS (\x1f and \x1e) are the frame's own separators, so a
 # command that carries them would corrupt the framing: they are stripped the
 # way the flush strips control bytes, and a command with a newline survives

@@ -70,7 +70,7 @@ typeset -gi _TAI_PREFIX_KEYS=64
 # `~/.ollama` is true wherever this machine stands; `Data/INI` was true where it
 # was recorded and may exist nowhere else, and offered from another directory it
 # is the error the user reads the moment they take it. The shape test that
-# decided what gets marked lives in tai/paths.py and is deliberately not
+# decided what gets marked lives in src/paths.rs and is deliberately not
 # re-implemented here — the shell only asks the one question left to it: does
 # the word resolve where the user stands. One builtin stat, paid only on a word
 # the index marked, on the paths that offer it.
@@ -307,7 +307,7 @@ _tai_lines() {
   [[ -n "$key" ]] || return
   # The same lookup the branch above makes, and for the same reason. A key with
   # no space in it is the command name itself, and the index keeps that list
-  # once, in _TAI_FIRST — `tai/index.py` writes _TAI_WORD keys from two words on,
+  # once, in _TAI_FIRST — `src/index.rs` writes _TAI_WORD keys from two words on,
   # so reading a one-word key there is a miss against every real index and
   # wrapper transparency silently answered nothing at all.
   if [[ "$key" == *" "* ]]; then

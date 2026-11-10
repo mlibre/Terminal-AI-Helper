@@ -6,7 +6,7 @@ description: TAI — a shell plugin for bash and zsh that learns the commands yo
 hero:
   name: "TAI"
   text: "Terminal AI Helper"
-  tagline: A shell plugin for bash and zsh that learns the commands you actually run and suggests them as you type — no server, no daemon, no Python on your keystrokes. Everything runs on your machine, offline, stdlib only.
+  tagline: A shell plugin for bash and zsh that learns the commands you actually run and suggests them as you type — no server, no daemon, nothing on your keystrokes. One compiled binary; everything runs on your machine, offline.
   actions:
     - theme: brand
       text: Install in one command

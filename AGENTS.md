@@ -27,7 +27,7 @@ Build **simple, fast, smart, delightful software** that works immediately.
 ## Architecture rules
 
 - Keep the normal autocomplete path embedded and process-free. No daemon,
-  socket, server, or per-keystroke Python process. The one server is `tai
+  socket, server, or per-keystroke process. The one server is `tai
   web`: launched by the user, bound to 127.0.0.1, GET-only, read-only,
   answering through the same engine as the prompt — never on the keystroke
   path, never started by the plugins.
@@ -134,7 +134,7 @@ The line here is the promise; a test somewhere under `tests/` is the proof.
 
 ## Craft the suites cannot assert
 
-- The shell plugin and the Python path are three implementations of one rule
+- The shell plugin and the engine path are three implementations of one rule
   set: change them together, keep a case in both suites. A fourth copy of a
   rule is a test that runs the other three.
 - One decision, one function — and a shared environment variable means one

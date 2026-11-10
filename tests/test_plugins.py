@@ -255,7 +255,7 @@ def test_fixture_matches_generator() -> None:
     rest of the suite mean anything.
     """
     print("the fixture is the generator")
-    from tai.index import WORD_KEY_MAX_DEPTH as DEPTH
+    from fixture_rules import WORD_KEY_MAX_DEPTH as DEPTH
 
     real_words: dict[str, list[str]] = {}
     for cmd in COMMANDS:

@@ -13,7 +13,7 @@ command → shell spool (builtin append)  →  tai flush  →  SQLite  →  tai 
 `$XDG_DATA_HOME/tai/zsh-index.zsh` and `bash-index.bash` beside it; the
 plugins load them into associative arrays at startup and do everything else
 with shell builtins. There is no server component on the autocomplete path —
-and no Python process on the *recording* path either: a command is one
+and no process on the *recording* path either: a command is one
 `print`/`printf` append to a spool file, and `tai flush` ingests batches of
 them into the store when the batch is worth a process (eight records or three
 idle seconds, whichever comes first). The store's `is_recordable` gate —
@@ -55,7 +55,7 @@ a product.
 
 ## The index
 
-Six maps, written as text. `tai/index.py` owns the format.
+Six maps, written as text. `src/index.rs` owns the format.
 
 | map                  | key                              | value                                        |
 | -------------------- | -------------------------------- | -------------------------------------------- |
@@ -101,8 +101,9 @@ the history's own answer and nothing else: seeds and generated vocabulary
 never enter it, so a shell that has run nothing says nothing.
 
 The ranking signal, as an integer, is what makes the shell compare natively.
-`tai/engine.py` writes it; `tai tune` searches the weights and writes them back
-into `tai/engine.py`, so what the plugins read is what was tuned.
+`src/engine.rs` writes it; `tai tune` searches the weights and writes the best
+ones to a weights file the engine applies at startup, so what the plugins read
+is what was tuned.
 
 **The file is shell code, so the shell is told whose it is.** The plugin
 *sources* the snapshot rather than parsing it — that is what makes startup an
@@ -116,14 +117,14 @@ torn file: the generator `os.replace`s a temporary one, so one cannot exist.
 
 ## Ranking
 
-`tai/engine.py`. Eight signals read from SQLite at build time:
+`src/engine.rs`. Eight signals read from SQLite at build time:
 
 ```text
 freq · recency · cwd · repo · branch · hour-of-day · exit code · what ran before
 ```
 
 plus a token bigram/trigram for flags (`logs -f --tail 50`) and typo tolerance
-on the first word (`tai/typo.py`). A ninth — is the command's first word
+on the first word (`src/typo.rs`). A ninth — is the command's first word
 installed — is a property of the machine, not the history, so the engine never
 reads it: the caller answers `on_path` (one cached `which` per word; the index
 resolves its whole vocabulary at rebuild time), and a line whose tool exists
@@ -139,9 +140,9 @@ frequencies, timestamps and exit codes tie, and whether the two spellings
 disagree about case — a full tie falls to the all-lowercase spelling. The
 full weight list lives at the
 top of
-`tai/engine.py`, and the built engine is marshaled beside the store for the
+`src/engine.rs`, and the built engine is snapshotted beside the store for the
 one-shot paths, keyed on the store file itself — a new row invalidates it
-(`tai/engcache.py`); the keystroke path never touches it.
+(`src/engcache.rs`); the keystroke path never touches it.
 
 The length penalty is the one term the index bakes. Its difference between
 two candidates is the same whatever prefix the engine is asked with, so
@@ -154,7 +155,7 @@ before — stay per-query: a snapshot cannot carry them, and the dashboard's
 `why` panel names them when a rank surprises.
 
 Three rules are about what may be *ranked* rather than how, and they live in
-`tai/paths.py` because they are about whether a candidate still exists. Each
+`src/paths.rs` because they are about whether a candidate still exists. Each
 is a promise in [AGENTS.md](https://github.com/mlibre/Terminal-AI-Helper/blob/main/AGENTS.md) and a check in the suites: path
 liveness (a command whose path is gone is not suggested; unknown never removes
 anything), `cd`
@@ -178,16 +179,16 @@ file.
 
 ## Three implementations of one rule
 
-`plugins/zsh/files.zsh`, `plugins/bash/files.bash` and `tai/fresh.py` all
+`plugins/zsh/files.zsh`, `plugins/bash/files.bash` and `src/fresh.rs` all
 answer the same question — where do we look for a file argument — and all
-three have to agree. The shell ones may not import the Python one, because no
+three have to agree. The shell ones may not call the engine binary, because no
 process may touch the keystroke path. The limits are named in each and the
 roots are one variable (`TAI_FILE_ROOTS`) for all three; a fourth copy of a
 rule should be a test that runs the other three.
 
 ## Learning from installed tools
 
-`tai/knowledge.py` reads `--help`, `man`, and the `__complete` protocol from
+`src/knowledge.rs` reads `--help`, `man`, and the `__complete` protocol from
 tools the history has not seen, in a throwaway directory, in parallel, and
 caches the result in the `cli_tools` table. Nothing suggested is ever executed.
 
@@ -203,7 +204,7 @@ real built scores in the suites.
 
 ## The optional model layer
 
-`tai/jev.py` and `tai/decisions.py`. Off by default, and deliberately: the
+`src/jev.rs` and `src/decisions.rs`. Off by default, and deliberately: the
 embedded path is local, fast and private, and stays that way.
 
 When `--jev` is used, the model is a *judge*, never a generator: it is shown

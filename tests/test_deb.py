@@ -1,83 +1,73 @@
-"""The .deb package: one build, then the assertions.
+"""The .deb: what it carries, and that it is the compiled program.
 
     python3 tests/test_deb.py
 
-dpkg-deb is present on every Debian-family machine — which is the only place a
-.deb matters — and the machine that runs this suite does not need root: the
-package is built with --root-owner-group and inspected by extraction, never by
-installation. What the assertions buy is a release that cannot ship a package
-whose wrapper or plugin tree is broken, because CI builds it on every push and
-attaches the artifact to the release.
+`scripts/build_deb.sh` compiles the release binary and packages it with the
+shell plugins. The package is architecture-keyed now, not "all": the binary
+inside is the machine this built on. dpkg-deb is the floor; without it the
+suite says so and passes, the way the pty suite treats a missing zsh.
 """
-import os
 import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from smoke_env import REPO  # noqa: E402  (repo root + the tai modules on sys.path)
+REPO = pathlib.Path(__file__).resolve().parent.parent
+VERSION = (REPO / "VERSION").read_text().strip()
 
-
-def main() -> int:
-    if not shutil.which("dpkg-deb"):
-        print("SKIP — dpkg-deb is not on this machine; the .deb ships from CI.")
-        return 0
-    version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
-    out = tempfile.mkdtemp(prefix="tai-deb-")
-    stage = tempfile.mkdtemp(prefix="tai-deb-inspect-")
-    try:
-        built = subprocess.run(["scripts/build_deb.sh"], cwd=REPO,
-                               env=dict(os.environ, TAI_DEB_OUT=out),
-                               capture_output=True, text=True, timeout=300)
-        # The script writes next to the checkout; the suite copies nothing,
-        # it only asserts the artifact exists for the right version.
-        pkg = REPO / "dist" / f"tai_{version}_all.deb"
-        assert built.returncode == 0, built.stderr
-        assert pkg.exists(), f"the build did not produce {pkg}"
-        info = subprocess.run(["dpkg-deb", "-I", str(pkg)],
-                              capture_output=True, text=True, check=True).stdout
-        assert f"Version: {version}" in info, info
-        assert "Package: tai" in info and "Architecture: all" in info, info
-        # Extract (no root needed) and run the packaged CLI for real.
-        subprocess.run(["dpkg-deb", "-x", str(pkg), stage], check=True)
-        root = pathlib.Path(stage)
-        cli = root / "usr/lib/tai/tai/cli.py"
-        assert cli.is_file(), "the Python package is missing from the package"
-        wrapper = (root / "usr/bin/tai").read_text()
-        assert "python3 -S -E /usr/lib/tai/tai/cli.py" in wrapper, wrapper
-        env = dict(os.environ, TAI_DB=str(root / "scratch.db"))
-        got = subprocess.run([sys.executable, str(cli), "version"], env=env,
-                             capture_output=True, text=True, timeout=60)
-        # The release line, then the wiring report: this extract wires no
-        # shell, and the packaged CLI says so rather than printing a bare
-        # number a user could read as "everything is set up".
-        assert got.stdout.splitlines() == [
-            f"tai {version}", "zsh plugin not wired",
-            "bash plugin not wired"], got.stdout
-        # Both plugins are present and parse, since the shell integration is
-        # what a package install is actually for.
-        zsh = REPO / "tests" / "bin" / "zsh"
-        if zsh.is_file() and os.access(zsh, os.X_OK):
-            check = subprocess.run(
-                [str(zsh), "-f", "-c",
-                 f"source {root}/usr/lib/tai/plugins/tai.zsh && print ZSH-PLUGIN-OK"],
-                env=dict(env, FPATH=str(REPO / "tests/bin/zsh-functions")),
-                capture_output=True, text=True, timeout=60)
-            assert "ZSH-PLUGIN-OK" in check.stdout, check.stderr
-        bash = subprocess.run(
-            ["bash", "-c",
-             f"source {root}/usr/lib/tai/plugins/tai.bash && echo BASH-PLUGIN-OK"],
-            env=env, capture_output=True, text=True, timeout=60)
-        assert "BASH-PLUGIN-OK" in bash.stdout, bash.stderr
-        print(f"OK — the .deb builds, installs its tree, and runs: tai_{version}_all.deb")
-    finally:
-        shutil.rmtree(out, ignore_errors=True)
-        shutil.rmtree(stage, ignore_errors=True)
-        shutil.rmtree(REPO / "dist", ignore_errors=True)
-    return 0
+failures: list[str] = []
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def check(what: str, got, want) -> None:
+    if got == want:
+        print(f"  ok   {what}: {got!r}")
+    else:
+        print(f"  FAIL {what}:\n         got  {got!r}\n         want {want!r}")
+        failures.append(what)
+
+
+if not shutil.which("dpkg-deb"):
+    print("dpkg-deb is not installed — the deb checks are skipped")
+    sys.exit(0)
+
+got = subprocess.run(["bash", str(REPO / "scripts" / "build_deb.sh")],
+                     cwd=REPO, capture_output=True, text=True, timeout=900)
+check("build exits 0", got.returncode, 0)
+arch = subprocess.run(["dpkg", "--print-architecture"], capture_output=True,
+                      text=True).stdout.strip() or "amd64"
+deb = REPO / "dist" / f"tai_{VERSION}_{arch}.deb"
+check("the deb is named for version and architecture", deb.exists(), True)
+
+listing = subprocess.run(["dpkg-deb", "-c", str(deb)], capture_output=True,
+                         text=True).stdout
+paths = {line.split(maxsplit=5)[-1].removeprefix("./") for line in listing.splitlines() if line.strip()}
+check("the binary is /usr/bin/tai", "usr/bin/tai" in paths, True)
+check("the zsh plugin ships", "usr/lib/tai/plugins/tai.zsh" in paths, True)
+check("the bash plugin ships", "usr/lib/tai/plugins/tai.bash" in paths, True)
+check("no Python ships", not any(p.endswith(".py") for p in paths), True)
+
+control = subprocess.run(["dpkg-deb", "-f", str(deb), "Architecture"],
+                         capture_output=True, text=True).stdout.strip()
+check("architecture is the build machine's", control, arch)
+depends = subprocess.run(["dpkg-deb", "-f", str(deb), "Depends"],
+                         capture_output=True, text=True).stdout
+check("no python3 dependency", "python3" not in depends, True)
+
+# The binary inside runs, and says the release it is.
+extract = pathlib.Path(f"/tmp/tai/tai_deb_{VERSION}")
+shutil.rmtree(extract, ignore_errors=True)
+extract.mkdir(parents=True)
+subprocess.run(["dpkg-deb", "-x", str(deb), str(extract)], check=True)
+got = subprocess.run([str(extract / "usr" / "bin" / "tai"), "version"],
+                     capture_output=True, text=True, timeout=60,
+                     env={"HOME": str(extract)})
+check("the packaged binary answers", got.stdout.startswith(f"tai {VERSION}"), True)
+shutil.rmtree(extract, ignore_errors=True)
+
+print()
+if failures:
+    print(f"FAILED ({len(failures)}) — fix and re-run")
+    for f in failures:
+        print("  -", f)
+    sys.exit(1)
+print("OK — the deb carries the compiled program and the shell integration.")

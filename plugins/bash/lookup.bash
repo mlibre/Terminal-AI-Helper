@@ -208,7 +208,7 @@ _TAI_WRAPPERS=" sudo doas nohup time nice ionice stdbuf command "
 
 # The head of the line, behind one wrapper: is this a command that takes a
 # directory and nothing else? `cd` and `pushd` are the whole closed list — the
-# same list tai/paths.py judges destinations with, and the reason no file is
+# same list src/paths.rs judges destinations with, and the reason no file is
 # ever offered after `cd`: the shell answers "not a directory", and a
 # suggestion the shell refuses is not a suggestion.
 _tai_dirarg() {
@@ -237,7 +237,7 @@ _tai_destination_live() {
 # `~/.ollama` is true wherever this machine stands; `Data/INI` was true where it
 # was recorded and may exist nowhere else, and offered from another directory it
 # is the error the user reads the moment they take it. The shape test that
-# decided what gets marked lives in tai/paths.py and is deliberately not
+# decided what gets marked lives in src/paths.rs and is deliberately not
 # re-implemented here — the shell only asks the one question left to it: does
 # the word resolve where the user stands. One builtin stat, paid only on a word
 # the index marked, on the paths that offer it.
@@ -293,7 +293,7 @@ _tai_wrapped() {
   [[ -n "$key" ]] || return 0
   # The same lookup _tai_query makes, and for the same reason: a key with no
   # space in it is the command name itself, and the index keeps that list once,
-  # in _TAI_FIRST. `tai/index.py` writes _TAI_WORD keys from two words on, so
+  # in _TAI_FIRST. `src/index.rs` writes _TAI_WORD keys from two words on, so
   # reading a one-word key there is a miss against every real index — which is
   # what made `sudo git ` answer nothing, and a test fixture built the other way
   # round hid it.

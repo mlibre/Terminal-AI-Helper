@@ -3,10 +3,11 @@
 # One main branch drives everything: each push that turns green gets its own
 # tag and a GitHub release marking the tree it shipped from. Tests run first;
 # a red tree never becomes a release. The tag comes from the VERSION file at
-# the repo root — `v1.0.0`, not a date-with-a-hash — and when the same version
-# ships more than once, a build number is appended (`v1.0.0-2`), so a push is
+# the repo root — `v3.0.0`, not a date-with-a-hash — and when the same version
+# ships more than once, a build number is appended (`v3.0.0-2`), so a push is
 # never held up by a tag that already exists. Every release carries a ready to
-# install .deb built from exactly the tree that passed the tests.
+# install .deb and prebuilt binaries for the architectures the installer and
+# the npm postinstall fetch.
 name: release
 
 on:
@@ -33,6 +34,23 @@ jobs:
       - name: Build the .deb package
         run: scripts/build_deb.sh
 
+      - name: Build the release tarballs
+        run: |
+          cargo build --release --quiet
+          mkdir -p dist
+          for arch in x86_64 aarch64; do
+            if [ "$arch" = "aarch64" ]; then
+              sudo apt-get install -y gcc-aarch64-linux-gnu
+              cargo build --release --quiet --target aarch64-unknown-linux-gnu
+              bin=target/aarch64-unknown-linux-gnu/release/tai
+            else
+              bin=target/release/tai
+            fi
+            stage="tai-linux-$arch"; mkdir -p "$stage"
+            install -m 755 "$bin" "$stage/tai"
+            tar -czf "dist/tai-linux-$arch.tar.gz" "$stage"
+          done
+
       - name: Create and push tag
         id: tag
         run: |
@@ -53,7 +71,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "${{ steps.tag.outputs.tag }}"
-          files: dist/*.deb
+          files: |
+            dist/*.deb
+            dist/*.tar.gz
           generate_release_notes: true
 
   # The registry rides the same green tree the tag marks. It lives inside this
@@ -61,7 +81,7 @@ jobs:
   # pushed by GITHUB_TOKEN starts no other workflow — the recursion guard — so
   # a tag-only trigger would never fire for the tags this workflow cuts. The
   # publish is a no-op when the version is already out, which is exactly what
-  # the build-number tags are: v1.3.1-2 carries a VERSION that is already on
+  # the build-number tags are: v3.0.1-2 carries a VERSION that is already on
   # the registry, and the job goes green without pretending it shipped again.
   npm-publish:
     runs-on: ubuntu-latest

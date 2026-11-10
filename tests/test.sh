@@ -5,15 +5,11 @@
 #     ./tests/test.sh              all suites
 #     ./tests/test.sh --fast       skip the pty suite, which is nearly all the time
 #
-# Every suite is a script of assertions that prints what it found, and each has a
-# `main()` nothing calls except this. The smoke scripts and the pty entry points
-# share their setup through tests/smoke_env.py and tests/plugin_*.py, so a
-# fixture or a key name is written once.
-#
-# Nearly all of the runtime is the pty suite driving real bash and zsh. It used
-# to be much worse, and for the same reason twice: `time.sleep` where a wait was
-# owed, and a `close()` that never closed anything. See the module docstring in
-# tests/plugin_pty.py.
+# The program is Rust now: the engine, the store, the typo tolerance, the CLI
+# conversation, the dashboard and the golden index are `cargo test`, and the
+# shell plugins are driven through a real pty by the Python suites below — the
+# harness, not the product, is what Python does here. Each suite prints what it
+# found and fails loudly.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,20 +17,22 @@ fast=0
 for arg in "$@"; do
   case "$arg" in
     --fast)    fast=1 ;;
-    -h|--help) sed -n '2,10p' "$0" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | cut -c3-; exit 0 ;;
     *) printf 'unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
 
 fail=0
+# The toolchain is where rustup puts it when the shell has not been handed it.
+command -v cargo >/dev/null 2>&1 || export PATH="$HOME/.cargo/bin:$PATH"
 step() {
   local name="$1"; shift
-  printf '\n\033[1m%s\033[0m\n' "$name"
+  printf '\n\033%s\033\n' "$name"
   if "$@"; then
     return 0
   fi
   fail=1
-  printf '\033[31m%s failed\033[0m\n' "$name"
+  printf '\033%s failed\033\n' "$name"
   return 1
 }
 
@@ -43,7 +41,6 @@ step() {
 # pty suite treats a missing shell as something to skip, and dying here on a
 # bash-only machine would contradict that.
 syntax_check() {
-  python3 -m py_compile tai/*.py tests/*.py &&
   bash -n plugins/tai.bash &&
   for f in plugins/bash/*.bash; do bash -n "$f" || return 1; done &&
   # The bundled zsh in tests/bin is the floor: a machine with no system zsh
@@ -52,25 +49,20 @@ syntax_check() {
   if [[ -n "$zsh_bin" ]]; then
     "$zsh_bin" -n plugins/tai.zsh &&
     for f in plugins/zsh/*.zsh; do "$zsh_bin" -n "$f" || return 1; done &&
-    echo "  ok   python, zsh and bash parse"
+    echo "  ok   the shell plugins parse"
   else
-    echo "  ok   python and bash parse (zsh absent, its checks are skipped)"
+    echo "  ok   the shell plugins parse (zsh absent, its checks are skipped)"
   fi
 }
 step "syntax"        syntax_check
 
-step "smoke"         python3 tests/test_smoke.py
-step "smoke cli"     python3 tests/test_smoke_cli.py
-step "spool"         python3 tests/test_spool.py
-step "cli"           python3 tests/test_cli.py
-step "smoke install" python3 tests/test_smoke_install.py
+# The compiled program: store, engine, typo, index goldens, CLI conversation,
+# dashboard. This also builds the release binary the later suites drive.
+step "cargo"         cargo test --release
+
+step "install"       python3 tests/test_smoke_install.py
 step "npm"           python3 tests/test_npm.py
 step "deb"           python3 tests/test_deb.py
-step "jev"           python3 tests/test_jev.py
-step "typo"          python3 tests/test_typo.py
-step "engcache"      python3 tests/test_engcache.py
-step "web"           python3 tests/test_web.py
-step "rules"         python3 tests/test_rules.py
 if (( ! fast )); then
   # One entry point per theme, all sharing plugin_env/plugin_screen/plugin_pty.
   # Order is cheapest-first: plain lookups, then the case rules and the menu,
@@ -87,7 +79,7 @@ fi
 
 printf '\n'
 if (( fail )); then
-  printf '\033[31mFAILED\033[0m — fix and re-run; ./tests/test.sh --fast skips the pty suite.\n'
+  printf '\033FAILED\033 — fix and re-run; ./tests/test.sh --fast skips the pty suite.\n'
   exit 1
 fi
-printf '\033[32mall suites passed\033[0m\n'
+printf '\033all suites passed\033\n'

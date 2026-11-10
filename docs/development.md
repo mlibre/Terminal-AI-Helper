@@ -6,94 +6,46 @@ for the rules that came out of reported failures, read
 
 ## Layout
 
+The program is one Rust binary (`cargo build --release`); the shell plugins
+stay shell, because ZLE and readline cannot be anything else.
+
 ```text
-tai/engine.py       ranker; the W_* weights live at the top and `tai tune` rewrites them;
-                    `explain` names the factors behind one candidate's score, pinned to
-                    suggest's totals by the web suite
-tai/typo.py         typo tolerance for the first word: `dokcer` is `docker`;
+src/main.rs         the entry: argv in, exit code out
+src/cli.rs          the verbs: suggest | record | flush | refresh | update | version |
+                    discover | purge | forget | uninstall | bench | tune | doctor |
+                    web | eval | jev, and the installer's two rc-editing verbs
+src/engine.rs       ranker; the W_* weights live at the top, `tai tune` writes the best
+                    ones to weights.json and every startup applies them
+src/typo.rs         typo tolerance for the first word: `dokcer` is `docker`;
                     `shadow_map` ranks a rare near-duplicate line under its stronger
                     twin, case folded into the comparison
-tai/store.py        SQLite log (WAL), schema, oldest-first loader, history import
-tai/paths.py        path liveness, `cd` destinations, "does this line end in a file"
-tai/fresh.py        the files a path argument could be — the one-shot half
-tai/web.py          the read-only localhost dashboard: one page, three GET routes
+src/store.rs        SQLite log (WAL), schema, oldest-first loader, history import
+src/paths.rs        path liveness, `cd` destinations, "does this line end in a file"
+src/fresh.rs        the files a path argument could be — the one-shot half
+src/web.rs          the read-only localhost dashboard: one page, three GET routes
                     (state, suggest, explain)
-tai/knowledge.py    read-only CLI discovery from --help / man / __complete
-tai/helptext.py     what a tool's help text is read into: verbs, flags, one probe
-tai/maintenance.py  the rebuild lock, reclaimable by pid, boot id and age
-tai/index.py        generates the two shell indexes
-tai/seed.py         the universal cold-start corpus
-tai/decisions.py    bounded Choice decision contract and the safety gate
-tai/jev.py          optional hosted Jev adapter (batched; never generates)
-tai/predictor.py    one-shot suggest: engine plus the path-liveness policy
-tai/spool.py        the shells' batched write side: framed spool, drain, flush
-tai/engcache.py     the built engine on disk for one-shot paths, keyed on the store
-tai/cli.py          suggest | jev | record | flush | refresh | update | upgrade | version
-                    | discover | purge | forget | uninstall | bench | tune | web
-                    | doctor | eval | eval-jev
-tai/bench.py        latency, memory, index and stale-path diagnostics
-tai/tune.py         coordinate search over the weights (writes engine.py)
-tai/evaluate.py     labeled candidate evaluation (+ evaluate_jev.py, hosted)
-tai/__init__.py     nothing: a package root that re-exported its modules once cost
-                    a circular import, so every caller names the module it wants
+src/knowledge.rs    read-only CLI discovery from --help / man / __complete
+src/helptext.rs     what a tool's help text is read into: verbs, flags, one probe
+src/maintenance.rs  the rebuild lock, reclaimable by pid, boot id and age
+src/index.rs        generates the two shell indexes
+src/seed.rs         the universal cold-start corpus
+src/decisions.rs    bounded Choice decision contract and the safety gate
+src/jev.rs          optional hosted Jev adapter (batched; never generates)
+src/predictor.rs    one-shot suggest: engine plus the path-liveness policy
+src/spool.rs        the shells' batched write side: framed spool, drain, flush
+src/engcache.rs     the built engine on disk for one-shot paths, keyed on the store
+src/bench.rs        latency, memory, index and stale-path diagnostics
+src/tune.rs         coordinate search over the weights (writes weights.json)
+src/evaluate.rs     labeled candidate evaluation (+ evaluate_jev.rs, hosted)
+build.rs            bakes the VERSION file into the binary's own name
 
-plugins/tai.zsh     loader for the zsh plugin: index, lookup, files, units, menu, widgets
-plugins/tai.bash    loader for the bash plugin: index, lookup, files, units, keys
-
-bin/npm-postinstall npm's postinstall hook: a global install runs install.sh from
-                    the unpacked package, so `npm i -g` with scripts allowed
-                    is the whole install (TAI_SKIP_POSTINSTALL=1 opts out)
-install.sh          wrapper, rc lines, plugin zcompile, autosuggestions pause
-scripts/build_deb.sh the .deb package CI attaches to every release
-docs/               the website: VitePress sources (config in docs/.vitepress/),
-                    built by .github/workflows/docs.yml onto GitHub Pages —
-                    npm run docs:build; the toolchain is package.json (vitepress
-                    only, dev-time, never on the product path)
-scripts/make_demo_gif.py the readme demo, re-recorded from a real zsh on a pty:
-                    a scratch world, the four beats keystroke by keystroke, and
-                    a GitHub-dark renderer with the keycap strip — `pip install
-                    pyte pillow` and it runs anywhere the test suite runs
-VERSION             the release version; the release workflow tags v<VERSION>
-tests/smoke_env.py          the scratch database, index and imports they share
-tests/test_smoke.py         engine, store, path policy, ranking, fresh files
-tests/test_smoke_cli.py     learn-on-use, discovery, wrappers, refresh, the index scores
-tests/test_cli.py           every verb's conversation: what it prints, what it refuses
-tests/test_spool.py         the spool: framed records, drain, flush, learning bounds
-tests/test_smoke_install.py sequence table, history files, safety, lock, install
-tests/test_npm.py           the npm door: postinstall guard, update from a node_modules tree
-tests/test_deb.py           the package: builds, installs its tree, runs
-tests/test_jev.py           the decision contract
-tests/test_typo.py          the banded distance against a reference, gates, shadows
-tests/test_engcache.py      the engine cache: round-trip identity, every fall-back
-tests/test_web.py           the dashboard: routes, binding, engine agreement
-tests/test_rules.py         the suggestion rules, one by one, both rankers
-tests/plugin_env.py         paths, key names and the index fixture the pty tests share
-tests/plugin_pty.py         a real shell on a pty, plus check/probe/Ghosts
-tests/plugin_screen.py      a terminal-screen model, so "which cell is selected" is askable
-tests/test_plugins.py       lookups: completions, wrappers, per-shell index
-tests/test_plugins_case.py  case-insensitive answers: the ghost, the menu, the disk, the unit list
-tests/test_plugins_menu.py  the Tab menu: entries, selection, the stem, the shared head
-tests/test_plugins_storm.py the rapid-edit storm: the loose memo, its bound, the flood bound
-tests/test_plugins_draw.py  what is drawn: ghost text, hints, colours, load order
-tests/test_plugins_isearch.py the ^R search: tai answers nothing inside it, blind hooks included
-tests/test_plugins_files.py a line ending in a file, its caps and roots agreement
-tests/test_plugins_wide.py  double-width file names, drawn and highlighted right
-tests/test_plugins_index.py a rebuild an open shell picks up, and recording
-tests/test_plugins_units.py systemctl units: the cache, its corruption, the quiet preload
-tests/bin/zsh               a compiled zsh for machines with none: TAI_ZSH, then
-                            the system's, then this — the pty suite runs anywhere
-```
-
-Twenty-two entry points, each a script of assertions that prints what it found,
-and each runnable on its own; `./tests/test.sh` runs them all. Seven share
-`smoke_env.py` and ten share the `plugin_*` modules, so a scratch database, a
-fixture or a key name is written once. Two consequences: **a test function no
-`main()` calls is not a test** — adding a test means adding the call — and
-**the shared modules are the only copy**: a test that defines its own fixture,
-key names or `Session` is a second answer to a question the harness already
-answers, and the two will disagree.
-
-### Code style
+plugins/tai.zsh     the zsh entry: sources the parts in plugins/zsh/
+plugins/tai.bash    the bash entry: sources the parts in plugins/bash/
+bin/npm-postinstall stages the binary (platform package, release download,
+                    or cargo build), then hands over to install.sh
+install.sh          the three doors, one install; builds or fetches the binary
+scripts/build_deb.sh  compiles and packages /usr/bin/tai + the plugins
+## Code style
 
 Standard-library Python, small composable modules, no hidden global state, no
 speculative abstractions, no dependencies without a clear and substantial
@@ -101,36 +53,39 @@ benefit. Cache expensive discovery, keep invalidation obvious, never silently
 swallow important errors, and keep security-sensitive behavior deterministic
 in code.
 
-## Tests
+## The suites
 
-```sh
-./tests/test.sh          # everything, on the order of a minute
-./tests/test.sh --fast   # skips the pty suite, a fraction of that
+```text
+tests/test.sh               every suite, fastest-failing first (--fast skips the pty)
+tests/golden/               the index bytes the Python builder wrote against the
+                            migration fixture; the Rust builder must match them
+tests/golden_index.rs       the fixture, rebuilt and byte-compared to the goldens
+tests/cli_conversation.rs   every verb's conversation: what it prints, what it refuses
+tests/web_server.rs         the dashboard: routes, binding, read-only
+tests/test_smoke_install.py install, wiring, retarget, autosuggest, uninstall,
+                            the sequence rules, the JEV gate against a hostile model
+tests/test_npm.py           the npm door: what ships, the postinstall guards, the
+                            whole hook with the binary staged
+tests/test_deb.py           the package: architecture, contents, the binary runs
+tests/fixture_rules.py      the fixture writer's copy of the two builder rules
+tests/plugin_env.py         paths, key names and the index fixture the pty tests share
+tests/plugin_pty.py         a real shell on a pty, plus check/probe/Ghosts
+tests/plugin_screen.py      a terminal-screen model, so "which cell is selected" is askable
+tests/test_plugins*.py      the pty suites, one per theme (lookups, case, menu, draw,
+                            isearch, storm, files, wide, index, units)
+tests/fakebin/              the PATH the golden and install tests pin, so the
+                            installed-command bonus is decided by tools this
+                            checkout carries and the bytes are the same everywhere
+scripts/parity_check.py     (kept in history) the migration harness that proved the
+                            Rust port against the Python implementation, byte for byte
 ```
 
-The pty suite is roughly half the runtime and it is the one that matters for
-anything touching `plugins/`: it drives real interactive bash and zsh and
-asserts on what the terminal actually shows, because calling a plugin's
-functions from a non-interactive shell silently skips key bindings, the
-readline contract, and prompt-time recording.
-
-The zsh the pty suite runs is resolved by `tests/plugin_env.zsh_bin()`: the
-`TAI_ZSH` variable, then the system's, then `tests/bin/zsh` — a compiled,
-statically-linked zsh committed to the repo, so a machine with no zsh and no
-network still runs the whole suite. The system zsh wins when there is one.
-Each entry point also runs on its own (`python3 tests/test_smoke.py`, …). The
-tests find the repository from `__file__`, always use a scratch `TAI_DB` under
-`/tmp/tai`, record nothing by default, and assert the index fixture is intact
-at the end.
-
-`tests/plugin_screen.py` is a terminal as a grid of columns, because a menu
-test has to ask which *cell* is selected rather than which bytes were written.
-A character in a double-width script takes two columns, the second a
-continuation that `lines()` drops; and only the escapes a zsh redraw actually
-emits are handled, so an unhandled sequence shows up as a wrong screen instead
-of quietly passing.
-
-### Writing a pty assertion
+Rust unit tests live beside the code they hold (`src/typo.rs`, `src/paths.rs`,
+`src/store.rs`, `src/engine.rs`, `src/spool.rs`, `src/decisions.rs`,
+`src/helptext.rs`): the banded distance against a textbook matrix over four
+thousand pairs, the recordable gate, the import cursors, the spool framing,
+the shadow gates, the help-text shapes the Python regexes read.
+## Writing a pty assertion
 
 Every wait must end on something observable — a marker the shell printed, a
 file the editor wrote, output that stopped. Never `time.sleep`.
@@ -170,7 +125,7 @@ bash pays one `ls -t -1 --zero -N` per root, and that is the most it should
 ever pay.
 
 **A rule lives in three places and a test runs all three.** The file-root rule
-is `plugins/zsh/files.zsh`, `plugins/bash/files.bash`, `tai/fresh.py`; change
+is `plugins/zsh/files.zsh`, `plugins/bash/files.bash`, `src/fresh.rs`; change
 one, change all three, and keep cases in `test_plugins_files.py` and the smoke
 suites.
 
@@ -263,19 +218,19 @@ CLI and installer changes:
 
 ## Performance
 
-Diagnostics: `python3 tai/cli.py bench` (load time, suggest latency, RSS),
+Diagnostics: `tai bench` (load time, suggest latency, RSS),
 `eval` (candidate coverage), `doctor` (what is indexed and what is held back).
 
 Two costs dominate and both are worth checking after a change:
 
 - **Index size is a startup cost**, paid at every shell start. After touching
-  `tai/index.py`, compare `ls -l` on the snapshot and time a `source` of it.
+  `src/index.rs`, compare `ls -l` on the snapshot and time a `source` of it.
 - **The keystroke path** must stay fork-free in zsh and fork-light in bash.
   A change that adds a process there is a regression even if it is fast,
   because it is the only part of the product a user feels on every character.
 
 The one-shot paths (`tai suggest`, `tai web`) load the engine from a disk
-cache beside the store (`tai/engcache.py`), keyed on the store's size and
+cache beside the store (`src/engcache.rs`), keyed on the store's size and
 mtime — a new row invalidates it within the same write. `TAI_NO_ENGINE_CACHE=1`
 turns it off. **The record path is a spool, not a process per command**: the
 plugins append one framed line with `print`/`printf` (measured ~0.01ms) and

