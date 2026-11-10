@@ -41,6 +41,7 @@ jobs:
           for arch in x86_64 aarch64; do
             if [ "$arch" = "aarch64" ]; then
               sudo apt-get install -y gcc-aarch64-linux-gnu
+              rustup target add aarch64-unknown-linux-gnu
               cargo build --release --quiet --target aarch64-unknown-linux-gnu
               bin=target/aarch64-unknown-linux-gnu/release/tai
             else
