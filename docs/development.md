@@ -47,7 +47,7 @@ install.sh          the three doors, one install; builds or fetches the binary
 scripts/build_deb.sh  compiles and packages /usr/bin/tai + the plugins
 ## Code style
 
-Standard-library Python, small composable modules, no hidden global state, no
+Idiomatic Rust, small composable modules, no hidden global state, no
 speculative abstractions, no dependencies without a clear and substantial
 benefit. Cache expensive discovery, keep invalidation obvious, never silently
 swallow important errors, and keep security-sensitive behavior deterministic
@@ -62,35 +62,32 @@ tests/golden/               the index bytes the Python builder wrote against the
 tests/golden_index.rs       the fixture, rebuilt and byte-compared to the goldens
 tests/cli_conversation.rs   every verb's conversation: what it prints, what it refuses
 tests/web_server.rs         the dashboard: routes, binding, read-only
-tests/test_smoke_install.py install, wiring, retarget, autosuggest, uninstall,
+tests/install_smoke.rs      install, wiring, retarget, autosuggest, uninstall,
                             the sequence rules, the JEV gate against a hostile model
-tests/test_npm.py           the npm door: what ships, the postinstall guards, the
+tests/pkg_npm.rs            the npm door: what ships, the postinstall guards, the
                             whole hook with the binary staged
-tests/test_deb.py           the package: architecture, contents, the binary runs
-tests/fixture_rules.py      the fixture writer's copy of the two builder rules
-tests/plugin_env.py         paths, key names and the index fixture the pty tests share
-tests/plugin_pty.py         a real shell on a pty, plus check/probe/Ghosts
-tests/plugin_screen.py      a terminal-screen model, so "which cell is selected" is askable
-tests/test_plugins*.py      the pty suites, one per theme (lookups, case, menu, draw,
+tests/pkg_deb.rs            the package: architecture, contents, the binary runs
+tests/support/mod.rs        the pty harness: paths, key names, the index fixture,
+                            a real shell on a pty, Session/probe/Ghosts, the store reads
+tests/support/screen.rs     a terminal-screen model, so "which cell is selected" is askable
+tests/plugin_*.rs           the pty suites, one per theme (lookups, case, menu, draw,
                             isearch, storm, files, wide, index, units)
 tests/fakebin/              the PATH the golden and install tests pin, so the
                             installed-command bonus is decided by tools this
                             checkout carries and the bytes are the same everywhere
-scripts/parity_check.py     (kept in history) the migration harness that proved the
-                            Rust port against the Python implementation, byte for byte
 ```
 
 Rust unit tests live beside the code they hold (`src/typo.rs`, `src/paths.rs`,
 `src/store.rs`, `src/engine.rs`, `src/spool.rs`, `src/decisions.rs`,
 `src/helptext.rs`): the banded distance against a textbook matrix over four
 thousand pairs, the recordable gate, the import cursors, the spool framing,
-the shadow gates, the help-text shapes the Python regexes read.
+the shadow gates, the help-text shapes the index reads.
 ## Writing a pty assertion
 
 Every wait must end on something observable — a marker the shell printed, a
-file the editor wrote, output that stopped. Never `time.sleep`.
+file the editor wrote, output that stopped. Never a fixed sleep.
 
-- **Assemble markers inside the shell**, never in the Python that writes the
+- **Assemble markers inside the shell**, never in the test code that writes the
   command: the shell's own echo contains the literal text, so the marker can
   appear before the thing it marks has happened.
 - **Send a line and the key that triggers what you wait for in one write**, and
@@ -109,12 +106,12 @@ wrong about for the plugin to be innocent.
 
 ### The plugin index fixture
 
-Every plugin test reads an index `tests/plugin_env.py` builds. The fixture
-imports `WORD_KEY_MAX_DEPTH` and `WORD_CANDIDATE_CAP` from `tai.index` rather
-than restating them, and `test_fixture_matches_generator` asserts the two
-agree on the key set and the candidate lists — the fixture is the generator's
-own output, not a stand-in, because a stand-in once made wrapper transparency
-pass in CI while answering nothing on a real install.
+Every plugin test reads an index `tests/support/mod.rs` builds. The fixture
+uses the same `WORD_KEY_MAX_DEPTH` and `WORD_CANDIDATE_CAP` values the builder
+ships rather than restating them, and the golden suite asserts the two agree
+byte for byte — the fixture is the generator's own shape, not a stand-in,
+because a stand-in once made wrapper transparency pass in CI while answering
+nothing on a real install.
 
 ## Working on the shell plugins
 
@@ -126,7 +123,7 @@ ever pay.
 
 **A rule lives in three places and a test runs all three.** The file-root rule
 is `plugins/zsh/files.zsh`, `plugins/bash/files.bash`, `src/fresh.rs`; change
-one, change all three, and keep cases in `test_plugins_files.py` and the smoke
+one, change all three, and keep cases in `tests/plugin_files.rs` and the smoke
 suites.
 
 **Assert colour and geometry on an emulated screen, not on the plugin's
@@ -164,7 +161,7 @@ failure:
   over the same characters combine, so a selected directory is one block.
 
 Assert all four on an emulated screen that keeps attributes
-(`tests/plugin_screen.py`).
+(`tests/support/screen.rs`).
 
 ## What to verify
 
@@ -235,10 +232,10 @@ mtime — a new row invalidates it within the same write. `TAI_NO_ENGINE_CACHE=1
 turns it off. **The record path is a spool, not a process per command**: the
 plugins append one framed line with `print`/`printf` (measured ~0.01ms) and
 ask for `tai flush` when eight records or three idle seconds have piled up —
-one interpreter per batch, which drains, resolves repo/branch per distinct
+one binary per batch, which drains, resolves repo/branch per distinct
 cwd, and runs the same `is_recordable` gate `tai record` applies. `tai record`
 itself is the manual write path and the plugin's fallback when the spool file
-cannot be written; it hand-parses its five flags and never imports argparse.
+cannot be written; it hand-parses its five flags.
 Every `tai` command except `version` and `uninstall` drains a non-empty spool
 first, so no answer is ever behind the pending records. The knob names are
 read from their own public spellings (`TAI_SPOOL_MAX`, `TAI_SPOOL_SECONDS`) —

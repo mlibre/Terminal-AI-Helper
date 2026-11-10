@@ -66,17 +66,18 @@ the letter of the law, this file keeps the spirit. A rule broken is a red
 build. When a check fails, fix the product, never the check — and write the
 check before the fix lands, not after.
 
-- `tests/test_smoke*.py`, `tests/test_typo.py`, `tests/test_engcache.py`,
-  `tests/test_spool.py`, `tests/test_cli.py` — the engine, the store, the typo
-  tolerance, the engine cache, the spool and the CLI: what the history and the
-  filesystem promise, what a rebuild may publish, and what a store that cannot
-  be read is allowed to look like.
-- `tests/test_plugins*.py` — both shells, driven through a real pty and read
+- the unit tests beside the code (`src/typo.rs`, `src/store.rs`, `src/spool.rs`,
+  `src/engine.rs`) and `tests/cli_conversation.rs` — the engine, the store, the
+  typo tolerance, the engine cache, the spool and the CLI: what the history and
+  the filesystem promise, what a rebuild may publish, and what a store that
+  cannot be read is allowed to look like.
+- `tests/plugin_*.rs` — both shells, driven through a real pty and read
   off an emulated screen, so a rule that works in one shell and not the other
   is caught where it would be caught: on the screen.
-- `tests/test_rules.py` — the rules themselves, one by one, where this file
-  used to carry them as prose.
-- `tests/test_web.py` — the one server, and the page it serves.
+- `tests/install_smoke.rs` — the installer and the uninstaller, as
+  subprocesses with a redirected HOME, and the sequence and JEV rules with
+  them.
+- `tests/web_server.rs` — the one server, and the page it serves.
 
 ## Product promises
 

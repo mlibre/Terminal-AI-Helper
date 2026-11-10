@@ -5,11 +5,11 @@
 #     ./tests/test.sh              all suites
 #     ./tests/test.sh --fast       skip the pty suite, which is nearly all the time
 #
-# The program is Rust now: the engine, the store, the typo tolerance, the CLI
-# conversation, the dashboard and the golden index are `cargo test`, and the
-# shell plugins are driven through a real pty by the Python suites below — the
-# harness, not the product, is what Python does here. Each suite prints what it
-# found and fails loudly.
+# The program is Rust, and so is the test suite: the engine, the store, the
+# typo tolerance, the CLI conversation, the dashboard and the golden index are
+# `cargo test`; the shell plugins are driven through a real pty by the Rust
+# suites under tests/, each sharing the harness in tests/support/. There is no
+# Python anywhere in this tree. Each suite fails loudly.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -17,7 +17,7 @@ fast=0
 for arg in "$@"; do
   case "$arg" in
     --fast)    fast=1 ;;
-    -h|--help) sed -n '2,12p' "$0" | cut -c3-; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | cut -c3-; exit 0 ;;
     *) printf 'unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -58,22 +58,20 @@ step "syntax"        syntax_check
 
 # The compiled program: store, engine, typo, index goldens, CLI conversation,
 # dashboard. This also builds the release binary the later suites drive.
-step "cargo"         cargo test --release
+step "cargo"         cargo test --release \
+                          --bin tai --test cli_conversation \
+                          --test golden_index --test web_server
 
-step "install"       python3 tests/test_smoke_install.py
-step "npm"           python3 tests/test_npm.py
-step "deb"           python3 tests/test_deb.py
+step "install"       cargo test --release --test install_smoke
+step "npm"           cargo test --release --test pkg_npm
+step "deb"           cargo test --release --test pkg_deb
 if (( ! fast )); then
-  # One entry point per theme, all sharing plugin_env/plugin_screen/plugin_pty.
+  # One entry point per theme, all sharing the harness in tests/support/.
   # Order is cheapest-first: plain lookups, then the case rules and the menu,
   # then what is drawn, then the ^R search, then the filesystem, and last the
   # index lifecycle, which rebuilds fixtures.
   for part in lookups case menu draw isearch storm files wide index units; do
-    case "$part" in
-      lookups) entry=tests/test_plugins.py ;;
-      *)       entry="tests/test_plugins_$part.py" ;;
-    esac
-    step "plugins/$part" python3 "$entry"
+    step "plugins/$part" cargo test --release --test "plugin_$part"
   done
 fi
 
