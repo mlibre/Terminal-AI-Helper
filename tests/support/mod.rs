@@ -99,8 +99,14 @@ pub fn zsh_bin() -> Option<PathBuf> {
 }
 
 fn is_executable(path: &Path) -> bool {
-    path.is_file()
-        && unsafe { libc::access(path.to_string_lossy().as_ptr() as _, libc::X_OK) == 0 }
+    // Through the checked std API, not `access(2)`: the raw call wants a
+    // NUL-terminated C string, and a `String::as_ptr` is not one — a pointer
+    // read past its end answers whichever byte follows the path in memory,
+    // which made "is this executable" a coin toss on a churned heap.
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -525,10 +531,15 @@ pub fn write_index(commands: Option<&[&str]>, new_enough_than: Option<&Path>) {
 
 fn write_script(path: &Path, body: &str, mode: u32) {
     std::fs::write(path, body).unwrap();
-    let c = path.to_string_lossy().into_owned();
-    unsafe {
-        libc::chmod(c.as_ptr() as _, mode);
-    }
+    // Through the checked std API, not `chmod(2)`: the raw call wants a
+    // NUL-terminated C string, and a `String::as_ptr` is not one — the mode
+    // was set on whichever path the bytes after the string happened to name,
+    // which is how a dump editor the shell may not exec and menu scripts
+    // that came out 0644 were both possible from the same writer.
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(path).unwrap().permissions();
+    perm.set_mode(mode);
+    std::fs::set_permissions(path, perm).unwrap();
 }
 
 /// Build the scratch world: the fixture index, the menu directories, the fake

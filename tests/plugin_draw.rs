@@ -27,21 +27,21 @@ fn sug_head(s: &mut Session) -> String {
     got.split(" PD=").next().unwrap_or(&got).to_string()
 }
 
-/// Restore the executable bits the fixture is written with.
+/// Re-assert the executable bits the fixture is written with.
 ///
 /// The menu's PATH section takes command names from `$commands` and keeps only
 /// the ones that are executable, so `tzz_other` and friends must carry their
 /// 0755 or the menu loses entries and every width assertion is measured
-/// against the wrong cell. The harness's `write_script` hands `String::as_ptr`
-/// — not NUL-terminated — to `chmod`, so its mode set is unreliable (the dump
-/// editor kept its bit, the menu scripts came out 0644). Python's
-/// `pathlib.chmod` never had the problem. Re-apply the intended modes here,
-/// from this file, until the harness sets them itself.
+/// against the wrong cell. The harness's `write_script` once handed
+/// `String::as_ptr` — not NUL-terminated — to `chmod`, and the bits were set
+/// on whichever path the following bytes named; the harness sets its modes
+/// through the checked std API now, and this fixer remains as a cheap
+/// re-assertion on the files whose bits the assertions lean on.
 fn exec_bit(path: &Path) {
-    let c = std::ffi::CString::new(path.to_string_lossy().as_bytes()).unwrap();
-    unsafe {
-        assert_eq!(libc::chmod(c.as_ptr(), 0o755), 0, "chmod {}", path.display());
-    }
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(path).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(path, perm).unwrap();
 }
 
 fn exec_bits() {
@@ -59,15 +59,15 @@ fn setup_fix() {
     exec_bits();
 }
 
-/// A zsh session, tolerating the harness's flaky shell resolution.
+/// A zsh session, tolerating a transient shell resolution.
 ///
-/// `zsh_bin`/`which` decide through `is_executable`, which passes a
-/// non-NUL-terminated pointer to `access(2)`; whether the check passes depends
-/// on the byte that happens to sit after the path in memory, so on a churned
-/// heap a session start can fail with "no zsh on this machine" even though
-/// `tests/bin/zsh` is right there. `Session::new` panics before it spawns
-/// anything, so a failed attempt leaks nothing — retry until one lands.
-/// (Python resolved the shell with `shutil.which` and never had the problem.)
+/// The harness once resolved the shell through `access(2)` handed a
+/// non-NUL-terminated pointer, and a session start could then fail with "no
+/// zsh on this machine" even though `tests/bin/zsh` was right there; the
+/// harness resolves through `std::fs::metadata` now, so the failure is gone —
+/// the retry stays as cheap insurance against whatever else a loaded runner
+/// does to a stat. `Session::new` panics before it spawns anything, so a
+/// failed attempt leaks nothing.
 fn zsh_session() -> Session {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
