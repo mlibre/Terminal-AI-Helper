@@ -122,8 +122,30 @@ tai update      # newest version — GitHub for a checkout, npm for an npm insta
 tai version     # this install's release, and where the shell plugin is wired
 tai purge       # drop unusable rows, then rebuild
 tai forget git sta   # drop every stored row for a command, exactly as typed
+tai debug       # print the whole debug trail — see "When the shell misbehaves"
 tai uninstall   # remove everything tai added
 ```
 
 No restart is needed after any of them: the plugin re-reads the index at the
 next prompt.
+
+## When the shell misbehaves
+
+A hang, a redraw that lies, a shell that dies — reproduce it once with the
+debug trail on, then send one output:
+
+```sh
+tai-debug                  # inside the shell with the problem (or start it with TAI_DEBUG=1)
+# …reproduce the problem…
+tai debug                  # everything gathered, oldest first — paste this
+```
+
+The trail is one file, `$XDG_CACHE_HOME/tai/debug.log` by default and
+`TAI_DEBUG_FILE` to move it, and both halves of tai write it in realtime:
+every keystroke's redraw (`upd`, with the buffer as it stood), every lookup
+(`query`), every draw (`menu`, `paint`), one `alive` pulse a second, the
+moment the shell died (`shell gone`), and on the binary's side every command's
+argv, exit code and duration — plus a `panic` line if tai itself died. Nothing
+is buffered: a crash cannot take the evidence with it. The file rotates past
+8 MB, `tai debug --tail 200` keeps a paste short, and `tai debug --clear`
+empties it for the next run.

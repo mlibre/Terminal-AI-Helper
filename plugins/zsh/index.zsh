@@ -72,6 +72,7 @@ _tai_load_index() {
   # load runs before that variable exists.
   _TAI_LOOSE_GEN=$(( ${_TAI_LOOSE_GEN:-0} + 1 ))
   [[ -r "$_TAI_INDEX_FILE" ]] && _tai_index_readable && source "$_TAI_INDEX_FILE"
+  _tai_dbg index "loaded keys=${#_TAI_SCORE} file=$_TAI_INDEX_FILE"
   # The redirect is wrapped in a group whose stderr is redirected, because inside
   # a function zsh reports a failed redirect past the simple command's own
   # 2>/dev/null. The data directory may not exist yet, and a message on every

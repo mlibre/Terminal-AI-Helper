@@ -4,7 +4,9 @@
 //! indexes and never invokes this binary during typing. These commands are
 //! for learning, refreshing, updating, and diagnostics.
 
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const REPO_URL: &str = "https://github.com/mlibre/terminal-ai-helper";
 
@@ -970,6 +972,255 @@ pub fn cmd_jev(prefix: &str, candidates: &[String], cwd: &str, git: &str, branch
     }
 }
 
+// -- the debug trail ---------------------------------------------------------
+
+/// Wrap one command's body in begin/end trail lines. The trail is silent
+/// unless TAI_DEBUG=1, so when it is off this is two calls that return
+/// immediately; when it is on, every tai process the user or a plugin runs
+/// leaves its argv, its exit code and its duration on the same file the
+/// shell's half of the trail is writing — which is what turns "tai was slow"
+/// into a number and "tai crashed" into a last line.
+fn with_dbg(tag: &str, detail: String, f: impl FnOnce() -> i32) -> i32 {
+    if crate::dbg::enabled() {
+        crate::dbg::log(tag, &format!("begin {}", detail));
+    }
+    let t0 = std::time::Instant::now();
+    let code = f();
+    if crate::dbg::enabled() {
+        crate::dbg::log(
+            tag,
+            &format!("end code={} in {:.1}ms", code, t0.elapsed().as_secs_f64() * 1000.0),
+        );
+    }
+    code
+}
+
+/// A UTC timestamp, civil from days — no date library in the tree, and `tai
+/// debug` reads better with a date on it than with a bare epoch. Valid to
+/// 9999; good enough for a log header.
+fn utc_string(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        y,
+        m,
+        d,
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+/// `tai debug` — print everything the trail gathered.
+///
+/// The point of the command is one paste: run it, send the output. It prints
+/// the report — versions, the shell's plugin version, the paths and their
+/// sizes, the knobs that were set — and then the whole trail, oldest line
+/// first, so the crash is the last thing in the paste.
+///
+///   --clear    empty the trail (it starts again with the next event)
+///   --tail N   only the last N trail lines, when the whole file is too much
+///              for one paste
+pub fn cmd_debug(argv: &[String]) -> i32 {
+    let mut clear = false;
+    let mut tail: Option<usize> = None;
+    let mut i = 0;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--clear" => clear = true,
+            "--tail" | "-n" => {
+                i += 1;
+                if i < argv.len() {
+                    tail = argv[i].trim().parse::<usize>().ok();
+                }
+            }
+            "--help" | "-h" => {
+                println("usage: tai debug [--tail N] [--clear]");
+                println("       print everything the debug trail gathered, oldest first");
+                println("       --tail N  only the last N lines");
+                println("       --clear   empty the trail afterwards (or before: either order works)");
+                println("");
+                println("turn the trail on with TAI_DEBUG=1, or by running `tai-debug` inside a shell");
+                println("that has the plugin loaded — then reproduce the problem and run `tai debug`.");
+                return 0;
+            }
+            other => {
+                println(&format!("tai debug: unknown argument {} — try --help", py_repr(other)));
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    if clear {
+        let path = crate::dbg::file_path();
+        if std::fs::write(&path, b"").is_ok() {
+            println(&format!("tai: trail cleared — {}", path.display()));
+        }
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    println(&format!("tai debug report — {}", utc_string(now)));
+    println("");
+
+    // -- what is running ----------------------------------------------------
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "?".to_string());
+    println(&format!(
+        "binary      : {} ({}, {})",
+        exe,
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    println(&format!("version     : {}", env!("CARGO_PKG_VERSION")));
+    // The release the running shells sourced. The plugin writes this at every
+    // shell start; an old value beside a new binary is the classic “updated
+    // but the session predates it” answer, and it is one read.
+    let plugin_version_file = crate::paths::data_dir().join("plugin-version");
+    println(&format!(
+        "plugin      : {} ({})",
+        std::fs::read_to_string(&plugin_version_file)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "nothing recorded yet".to_string()),
+        plugin_version_file.display(),
+    ));
+    println(&format!(
+        "shell       : {} on {}",
+        std::env::var("SHELL").unwrap_or_else(|_| "?".to_string()),
+        std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
+    ));
+    println("");
+
+    // -- the knobs ----------------------------------------------------------
+    println("environment (what is set):");
+    let mut knobs = vec![
+        "TAI_DEBUG",
+        "TAI_DEBUG_FILE",
+        "TAI_BIN",
+        "TAI_DB",
+        "TAI_INDEX",
+        "TAI_SPOOL",
+        "TAI_SPOOL_MAX",
+        "TAI_SPOOL_SECONDS",
+        "TAI_HISTORY_FILES",
+        "TAI_NO_MENU",
+        "TAI_NO_LEARN",
+        "TAI_NO_AUTO_RECORD",
+        "TAI_JEV_TIMEOUT",
+        "TAI_RELEASE_URL",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+    ];
+    knobs.sort_unstable();
+    let mut any_knob = false;
+    for k in &knobs {
+        if let Ok(v) = std::env::var(k) {
+            if !v.trim().is_empty() {
+                any_knob = true;
+                println(&format!("  {}={}", k, py_repr(&v)));
+            }
+        }
+    }
+    if !any_knob {
+        println("  (none — every default in force, TAI_DEBUG off)");
+    }
+    println("");
+
+    // -- the files ----------------------------------------------------------
+    println("files (name, bytes, modified):");
+    let cache = crate::dbg::file_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/nonexistent"));
+    let mut listing: Vec<PathBuf> = vec![
+        crate::paths::db_path(),
+        PathBuf::from(crate::spool::spool_path()),
+        PathBuf::from(crate::paths::index_location()),
+        PathBuf::from(crate::paths::bash_index_location()),
+        cache.join("units-system.txt"),
+        cache.join("units-user.txt"),
+        plugin_version_file,
+    ];
+    listing.sort();
+    listing.dedup();
+    for f in &listing {
+        match std::fs::metadata(f) {
+            Ok(m) => {
+                let modified = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| utc_string(d.as_secs()))
+                    .unwrap_or_else(|| "?".to_string());
+                println(&format!(
+                    "  {:>12}  {}  {}",
+                    m.len(),
+                    modified,
+                    f.display()
+                ));
+            }
+            Err(_) => println(&format!("  {:>12}  {}", "-", f.display())),
+        }
+    }
+    println("");
+
+    // -- the trail ----------------------------------------------------------
+    let path = crate::dbg::file_path();
+    let body = std::fs::read(&path).unwrap_or_default();
+    let text = String::from_utf8_lossy(&body);
+    let lines: Vec<&str> = text.lines().collect();
+    println(&format!(
+        "trail: {} ({} lines) — {}",
+        path.display(),
+        lines.len(),
+        if crate::dbg::enabled() {
+            "TAI_DEBUG is on in THIS process"
+        } else {
+            "TAI_DEBUG is off in THIS process (the trail below was written by others)"
+        }
+    ));
+    if lines.is_empty() {
+        println("  (empty)");
+        println("");
+        println("Nothing on the trail yet. To gather a report from a shell that has the plugin:");
+        println("  1. inside that shell, run: tai-debug            (or start it with TAI_DEBUG=1)");
+        println("  2. reproduce the problem — the trail writes in realtime, a crash loses nothing;");
+        println("  3. run: tai debug                              (this command) and send the output.");
+        println("");
+        println("The shell's own events are one line each — 'upd' per keystroke redraw with the buffer,");
+        println("'query' per lookup, 'menu'/'paint' per draw, 'alive' once a second, and 'shell gone' the");
+        println("moment the shell died. The binary's events are 'cli', 'begin'/'end' per command, and");
+        println("'panic' if one died. Whatever killed zsh, its last keystroke is in here.");
+        return 0;
+    }
+    let start = match tail {
+        Some(n) if n < lines.len() => lines.len() - n,
+        _ => 0,
+    };
+    if start > 0 {
+        println(&format!("  (--tail {} — the {} earlier lines are in the file)", tail.unwrap(), start));
+    }
+    for l in &lines[start..] {
+        println(l);
+    }
+    0
+}
+
 // -- rc editing (the installer's text surgery) -------------------------------
 
 fn read_rc(path: &str) -> String {
@@ -1245,6 +1496,8 @@ commands:
   forget    drop every stored row for the named commands
   update    pull the latest version and reinstall (alias: upgrade)
   version   print the release this install is running
+  debug     print the whole debug trail — reproduce with TAI_DEBUG=1 or
+            `tai-debug` first, then run this and send the output
   bench     report load time, latency and memory
   tune      search the ranking weights against the history
   doctor    say what is indexed and what is held back
@@ -1257,6 +1510,25 @@ commands:
 
 /// Run one tai invocation. Returns the process exit code.
 pub fn run(argv: &[String]) -> i32 {
+    // The binary's first line on the trail. The argv is what the caller said;
+    // the env that follows is what shaped the run — the same knobs `tai debug`
+    // reports, written here so the trail of a single run is self-contained
+    // even when the user cannot run `tai debug` afterwards (a shell that died,
+    // a process another tool spawned).
+    crate::dbg::log(
+        "cli",
+        &format!(
+            "argv={:?} version={} home={} shell={} term={} TAI_DB={} TAI_INDEX={} TAI_SPOOL={}",
+            argv,
+            env!("CARGO_PKG_VERSION"),
+            crate::paths::home_dir(),
+            std::env::var("SHELL").unwrap_or_default(),
+            std::env::var("TERM").unwrap_or_default(),
+            std::env::var("TAI_DB").unwrap_or_default(),
+            std::env::var("TAI_INDEX").unwrap_or_default(),
+            std::env::var("TAI_SPOOL").unwrap_or_default(),
+        ),
+    );
     if argv.is_empty() {
         println(HELP);
         return 2;
@@ -1270,7 +1542,9 @@ pub fn run(argv: &[String]) -> i32 {
     if head == "record" && !argv.contains(&"--help".to_string()) && !argv.contains(&"-h".to_string())
     {
         let a = fast_record(&argv[1..]);
-        return cmd_record(&a.command, &a.cwd, &a.git, &a.branch, a.exit);
+        return with_dbg("record", format!("cmd={:?}", a.command), || {
+            cmd_record(&a.command, &a.cwd, &a.git, &a.branch, a.exit)
+        });
     }
     if argv.len() == 1 && head == "version" {
         return cmd_version();
@@ -1282,11 +1556,25 @@ pub fn run(argv: &[String]) -> i32 {
     // is the drain, and `version` stays lean; `uninstall` is about to delete
     // the store either way.
     if !matches!(head, "record" | "flush" | "version" | "uninstall") {
-        let _ = crate::spool::drain();
+        let t0 = std::time::Instant::now();
+        let drained = crate::spool::drain();
+        crate::dbg::log(
+            "flush",
+            &format!(
+                "drained ahead of `{}` in {:.1}ms",
+                head,
+                t0.elapsed().as_secs_f64() * 1000.0
+            ),
+        );
+        let _ = drained;
     }
     if head == "suggest" {
         if let Some(a) = fast_suggest(&argv[1..]) {
-            return cmd_suggest(&a.prefix, &a.cwd, &a.git, &a.branch, &a.last, a.limit, a.json, a.jev);
+            return with_dbg(
+                "suggest",
+                format!("prefix={:?} last={:?} json={} jev={}", a.prefix, a.last, a.json, a.jev),
+                || cmd_suggest(&a.prefix, &a.cwd, &a.git, &a.branch, &a.last, a.limit, a.json, a.jev),
+            );
         }
         // fall through to the structured parser for --help and errors
     }
@@ -1294,16 +1582,23 @@ pub fn run(argv: &[String]) -> i32 {
         "suggest" => parse_full_suggest(&argv[1..]),
         "record" => {
             let a = fast_record(&argv[1..]);
-            cmd_record(&a.command, &a.cwd, &a.git, &a.branch, a.exit)
+            with_dbg("record", format!("cmd={:?}", a.command), || {
+                cmd_record(&a.command, &a.cwd, &a.git, &a.branch, a.exit)
+            })
         }
-        "flush" => cmd_flush(),
+        "flush" => with_dbg("flush", String::new(), cmd_flush),
         "refresh" => {
             let quiet = argv.iter().skip(1).any(|a| a == "--quiet");
-            cmd_refresh(quiet)
+            with_dbg("refresh", format!("quiet={}", quiet), || cmd_refresh(quiet))
         }
-        "update" | "upgrade" => cmd_update(),
+        "update" | "upgrade" => with_dbg("update", String::new(), cmd_update),
         "version" => cmd_version(),
-        "discover" => cmd_discover(&argv[1..].iter().cloned().collect::<Vec<_>>()),
+        "debug" => cmd_debug(&argv[1..]),
+        "discover" => with_dbg(
+            "discover",
+            format!("args={:?}", &argv[1..]),
+            || cmd_discover(&argv[1..].iter().cloned().collect::<Vec<_>>()),
+        ),
         "purge" => {
             let mut stale = false;
             let mut rebuild = true;
@@ -1315,7 +1610,7 @@ pub fn run(argv: &[String]) -> i32 {
                     _ => {}
                 }
             }
-            cmd_purge(stale, rebuild)
+            with_dbg("purge", format!("stale={}", stale), || cmd_purge(stale, rebuild))
         }
         "forget" => {
             let mut commands = Vec::new();
@@ -1327,9 +1622,11 @@ pub fn run(argv: &[String]) -> i32 {
                     _ => commands.push(a.clone()),
                 }
             }
-            cmd_forget(&commands, rebuild)
+            with_dbg("forget", format!("commands={:?}", commands), || {
+                cmd_forget(&commands, rebuild)
+            })
         }
-        "uninstall" => cmd_uninstall(),
+        "uninstall" => with_dbg("uninstall", String::new(), cmd_uninstall),
         "bench" => {
             let mut limit = 5000;
             for pair in argv.windows(2) {
@@ -1339,7 +1636,7 @@ pub fn run(argv: &[String]) -> i32 {
                     }
                 }
             }
-            cmd_bench(limit)
+            with_dbg("bench", format!("limit={}", limit), || cmd_bench(limit))
         }
         "tune" => {
             let mut limit = 10000;
@@ -1356,9 +1653,11 @@ pub fn run(argv: &[String]) -> i32 {
                     }
                 }
             }
-            cmd_tune(limit, trials)
+            with_dbg("tune", format!("limit={} trials={}", limit, trials), || {
+                cmd_tune(limit, trials)
+            })
         }
-        "doctor" => cmd_doctor(),
+        "doctor" => with_dbg("doctor", String::new(), cmd_doctor),
         "web" | "dashboard" => {
             let mut port: u16 = 8247;
             let mut no_browser = false;
@@ -1373,10 +1672,10 @@ pub fn run(argv: &[String]) -> i32 {
             if args.iter().any(|a| a == "--no-browser") {
                 no_browser = true;
             }
-            cmd_web(port, no_browser)
+            with_dbg("web", format!("port={}", port), || cmd_web(port, no_browser))
         }
-        "eval" => cmd_eval(),
-        "eval-jev" => cmd_eval_jev(),
+        "eval" => with_dbg("eval", String::new(), cmd_eval),
+        "eval-jev" => with_dbg("eval-jev", String::new(), cmd_eval_jev),
         "jev" => {
             let mut prefix = String::new();
             let mut candidates: Vec<String> = Vec::new();
@@ -1432,7 +1731,15 @@ pub fn run(argv: &[String]) -> i32 {
                 println("usage: tai jev <prefix> [--candidate cmd ...]");
                 return 2;
             }
-            cmd_jev(&prefix, &candidates, &cwd, &git, &branch, &previous, json)
+            cmd_jev(
+                &prefix,
+                &candidates,
+                &cwd,
+                &git,
+                &branch,
+                &previous,
+                json,
+            )
         }
         "--help" | "-h" | "help" => {
             println(HELP);

@@ -76,6 +76,7 @@ _tai_units_kick() {
     (( _TAI_UNITS_KICKED )) && return 0
     _TAI_UNITS_KICKED=1
   fi
+  _tai_dbg units "kick detached load user=$user"
   ( ( _tai_units_load "$user" >/dev/null 2>&1 ) & )
   return 0
 }
@@ -109,6 +110,7 @@ _tai_units_load() {
       mv -f "$tmp" "$file" 2>/dev/null
   fi
   if (( user )); then _TAI_UNITS_USER=( "${list[@]}" ); else _TAI_UNITS=( "${list[@]}" ); fi
+  _tai_dbg units "load user=$user units=${#list[@]}"
   return 0
 }
 
@@ -176,6 +178,7 @@ _tai_unit_matches() {
   # return.
   setopt localoptions extendedglob
   _TAI_UNIT_MS=( "${(@M)list:#(#i)${(b)word}*}" )
+  (( ${#_TAI_UNIT_MS[@]} )) || _tai_dbg units "no unit extends ${(q)word}"
   (( ${#_TAI_UNIT_MS[@]} ))
 }
 
@@ -193,6 +196,7 @@ _tai_unit_best() {
   _tai_unit_word "$1" || return 1
   (( ${#_TAI_UNITS} || ${#_TAI_UNITS_USER} )) || return 1
   local word="$REPLY" headform
+  _tai_dbg units "best word=${(q)word} scope=$REPLY_USER line=${(q)1}"
   if [[ -z "$word" ]]; then
     headform="$1"
   else
@@ -200,6 +204,7 @@ _tai_unit_best() {
   fi
   _tai_unit_matches "$word" || return 1
   _TAI_UNIT_BEST="${headform}${_TAI_UNIT_MS[1]}"
+  _tai_dbg units "best answer=${(q)_TAI_UNIT_BEST} matches=${#_TAI_UNIT_MS[@]}"
   [[ "$_TAI_UNIT_BEST" == "$1"* && "$_TAI_UNIT_BEST" != "$1" ]]
 }
 
@@ -213,6 +218,7 @@ _tai_units_menu() {
   _tai_unit_word "$BUFFER" || return 1
   _tai_unit_matches "$REPLY" || return 0
   _TAI_UNITS_MENU=( "${_TAI_UNIT_MS[@]}" )
+  _tai_dbg units "menu candidates=${#_TAI_UNITS_MENU[@]}"
   (( ${#_TAI_UNITS_MENU[@]} > _TAI_PREFIX_KEYS )) && \
     _TAI_UNITS_MENU=( "${_TAI_UNITS_MENU[@]:0:_TAI_PREFIX_KEYS}" )
   return 0

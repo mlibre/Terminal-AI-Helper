@@ -12,9 +12,11 @@
 # Install: tai refresh && source this file
 # Refresh after learning more history: tai refresh
 #
-# This file is the entry point and nothing else. The plugin is six parts in
+# This file is the entry point and nothing else. The plugin is seven parts in
 # plugins/zsh/, sourced here in dependency order:
 #
+#   debug.zsh    the realtime trail. Defined first so every part after it can
+#                call _tai_dbg; silent unless TAI_DEBUG=1 or `tai-debug`.
 #   index.zsh    the index file, the state, every limit. The only part that does
 #                anything at source time.
 #   lookup.zsh   a line to candidates, and the one answer the ghost text shows.
@@ -49,7 +51,7 @@ if [[ -o errexit ]]; then
   _tai_errexit_was=1
   set +e
 fi
-for _tai_part in index lookup files units menu widgets; do
+for _tai_part in debug index lookup files units menu widgets; do
   if [[ -r "$_TAI_PLUGIN_DIR/zsh/$_tai_part.zsh" ]]; then
     source "$_TAI_PLUGIN_DIR/zsh/$_tai_part.zsh"
   else

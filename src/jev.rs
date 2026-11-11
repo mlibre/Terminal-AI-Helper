@@ -134,6 +134,23 @@ pub fn decide(
     }
     let url = format!("{}/v1/systemone", base_url());
     let body = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    // The network hop is the one thing on the AI path that can eat time, so
+    // it writes its own trail lines: the request when it starts, the answer
+    // or the error with its duration when it finishes. The timeout is logged
+    // with the request — a timeout that was 1.5s when the trail ran and 15s
+    // now is the difference between a diagnosis and a shrug.
+    let t0 = std::time::Instant::now();
+    crate::dbg::log(
+        "jev",
+        &format!(
+            "request url={} model={} timeout={:.2}s candidates={} bytes={}",
+            url,
+            model(),
+            timeout().max(0.05),
+            candidates.len(),
+            body.len()
+        ),
+    );
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs_f64(timeout().max(0.05)))
         .build();
@@ -142,16 +159,34 @@ pub fn decide(
         .set("Authorization", &format!("Bearer {}", key))
         .set("Content-Type", "application/json")
         .send_string(&body)
-        .map_err(|e| match e {
-            ureq::Error::Status(code, resp) => {
-                let detail = resp.into_string().unwrap_or_default();
-                let detail: String = detail.chars().take(300).collect();
-                format!("Jev HTTP {}: {}", code, detail)
-            }
-            other => format!("Jev unavailable: {}", other),
+        .map_err(|e| {
+            let err = match e {
+                ureq::Error::Status(code, resp) => {
+                    let detail = resp.into_string().unwrap_or_default();
+                    let detail: String = detail.chars().take(300).collect();
+                    format!("Jev HTTP {}: {}", code, detail)
+                }
+                other => format!("Jev unavailable: {}", other),
+            };
+            crate::dbg::log(
+                "jev",
+                &format!("error in {:.1}ms: {}", t0.elapsed().as_secs_f64() * 1000.0, err),
+            );
+            err
         })?
         .into_json()
-        .map_err(|e| format!("Jev unavailable: {}", e))?;
+        .map_err(|e| {
+            let err = format!("Jev unavailable: {}", e);
+            crate::dbg::log(
+                "jev",
+                &format!("error in {:.1}ms: {}", t0.elapsed().as_secs_f64() * 1000.0, err),
+            );
+            err
+        })?;
+    crate::dbg::log(
+        "jev",
+        &format!("answer in {:.1}ms", t0.elapsed().as_secs_f64() * 1000.0),
+    );
 
     let answers = raw.get("answers").cloned().unwrap_or(json!({}));
     let best = answers.get("best_candidate").cloned().unwrap_or(json!({}));

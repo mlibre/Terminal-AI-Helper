@@ -456,6 +456,7 @@ _tai_query() {
 
 _tai_query_do() {
   local prefix="$1" last="$2" first
+  _tai_dbg query "prefix=${(q)prefix} last=${(q)last}"
   _TAI_BEST_HELP=0; _TAI_BEST_Q=0
   _TAI_LOOSE_LINES=()
   if [[ -z "$prefix" ]]; then
@@ -469,10 +470,13 @@ _tai_query_do() {
     # exact-key lookup answers in.
     _TAI_VALUES_ONE=1
     _tai_best ""
+    _tai_dbg query "seq answer best=${(q)_TAI_BEST}"
     return
   fi
   _tai_lines "$prefix"
+  _tai_dbg query "lines=${#_TAI_LINES} lead=${(q)_TAI_LINES_LEAD}"
   _tai_best "$prefix"
+  _tai_dbg query "best=${(q)_TAI_BEST} help=$_TAI_BEST_HELP"
   # The word a file-argument line adds is unambiguously a path — the index
   # marked the line from what the command means — and a path is offered where
   # it exists. `cat .zh` on a history holding `cat .zhistory` used to hint the
@@ -495,6 +499,7 @@ _tai_query_do() {
   if _tai_file_answer "$prefix" && [[ -n "${_TAI_FILES[1]}" ]]; then
     _TAI_BEST="$_TAI_FILE_JOIN${_TAI_FILES[1]}"
     _TAI_BEST_Q=${_TAI_FILES_Q[1]:-0}
+    _tai_dbg query "file answer best=${(q)_TAI_BEST}"
   fi
   if [[ -z "$_TAI_BEST" ]]; then
     first="${prefix%% *}"
@@ -507,6 +512,7 @@ _tai_query_do() {
         && _tai_installed "$first"; then
       _TAI_BEST="$first --help"
       _TAI_BEST_HELP=1
+      _tai_dbg query "--help fallback best=${(q)_TAI_BEST}"
     fi
   fi
   # A systemctl line is answered by its units — `sudo systemctl restart her`
@@ -517,9 +523,11 @@ _tai_query_do() {
   # preload it.
   if [[ -z "$_TAI_BEST" ]] && _tai_unit_best "$prefix"; then
     _TAI_BEST="$_TAI_UNIT_BEST"
+    _tai_dbg query "unit answer best=${(q)_TAI_BEST}"
   fi
   if [[ -z "$_TAI_BEST" && "$prefix" != *$'\n'* && ${#prefix} -ge $_TAI_LOOSE_MIN_PREFIX ]]; then
     _tai_loose "$prefix"
+    _tai_dbg query "loose before-filter=${#_TAI_LOOSE_LINES}"
     # A cd line in the glimpse is a destination someone once stood in, and
     # "somewhere else" is exactly where it can stay: the loose list is filtered
     # here rather than inside _tai_loose because the glimpse cache outlives the
@@ -557,6 +565,7 @@ _tai_query_do() {
     done
     _TAI_LOOSE_LINES=( "${here_l[@]}" )
   fi
+  _tai_dbg query "loose kept=${#_TAI_LOOSE_LINES}"
 
   # A learned cd destination was judged for liveness where it was recorded,
   # and alive there. From the directory the user stands in now it can be

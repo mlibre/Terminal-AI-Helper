@@ -136,6 +136,7 @@ _tai_paste_state() {
 # any edit of one character — because the rule is about what arrived, not a
 # permanent mode.
 tai-bracketed-paste() {
+  _tai_dbg key "tai-bracketed-paste"
   _TAI_ISEARCH=0
   _TAI_PASTE_QUIET=1
   zle .bracketed-paste
@@ -147,6 +148,15 @@ if (( $+widgets[bracketed-paste] )) && \
 fi
 
 _tai_update() {
+  # The breadcrumb trail. When debug is off this is one `(( ))` test per
+  # keystroke — the same cost class as the state reads below it — and when it
+  # is on, this line is the most valuable one in the file: it names the widget
+  # that fired, the line as it stood, and where the cursor was, and it is
+  # written *before* any of the work below runs. A shell that dies inside this
+  # function therefore leaves a trail that ends at the exact buffer that killed
+  # it, and every log line between here and the end of the function narrows the
+  # stage further. `${(q)…}` keeps any buffer one log line.
+  _tai_dbg upd "widget=${LASTWIDGET:-} buffer=${(q)BUFFER} cursor=$CURSOR pending=${PENDING:-0} isearch=$_TAI_ISEARCH menu=$_TAI_MENU_IDX drew=$_TAI_DREW"
   # Inside incremental search (^R) the line is the search's, not the editor's.
   # Every step — a character into the pattern, ^R again stepping one match
   # older — redraws, and this hook fires for those redraws: measured on the
@@ -181,6 +191,7 @@ _tai_update() {
   # landed on is editing, and one typed or deleted character brings the ghost
   # and the glimpse back, exactly as on any line that was never searched for.
   if (( _TAI_ISEARCH )) || [[ "${ZLE_STATE:-}" == *isearch* ]]; then
+    _tai_dbg upd "stand-down isearch"
     _TAI_SUGGESTION=""
     (( _TAI_MENU_IDX )) && _tai_menu_close
     if (( _TAI_DREW )); then
@@ -201,6 +212,7 @@ _tai_update() {
   # tai drew goes down with the line it rode in on. line-init lowers the
   # flag with everything else it resets — the next line paints as usual.
   if (( _TAI_ACCEPT )); then
+    _tai_dbg upd "stand-down accept"
     _TAI_SUGGESTION=""
     (( _TAI_MENU_IDX )) && _tai_menu_close
     if (( _TAI_DREW )); then
@@ -224,6 +236,7 @@ _tai_update() {
   # The menu stands in for the ghost while it is open, and POSTDISPLAY holds one
   # of them at a time — the two cannot both be drawn.
   if _tai_menu_live; then
+    _tai_dbg upd "menu-live repaint"
     _tai_menu_paint
     return
   fi
@@ -234,6 +247,7 @@ _tai_update() {
     (( ours_was )) && POSTDISPLAY=""
   fi
   _tai_paste_state
+  _tai_dbg upd "paste quiet=$_TAI_PASTE_QUIET new=$_TAI_PASTE_NEW fast=$_TAI_PASTE_FAST owed=$_TAI_Q_OWED"
   # A paste is not a query — all of it, not only its menu. The redraw that
   # raised the quiet answers nothing: the line is still arriving, and a full
   # query on a real index for a line nobody has read is the cost the chunk
@@ -255,6 +269,7 @@ _tai_update() {
   elif (( ! _TAI_Q_OWED )); then
     _tai_query "$BUFFER" "$_TAI_LAST"
   fi
+  _tai_dbg upd "query done best=${(q)_TAI_BEST} lines=${#_TAI_LINES} loose=${#_TAI_LOOSE_LINES} files=${#_TAI_FILES}"
   # The extends test folds case — the lookup that filled _TAI_BEST does, and
   # `ls down` reaching `ls Downloads` is the point of it — and the strip is
   # positional: the head of the best line that matched is the buffer's own
@@ -271,6 +286,7 @@ _tai_update() {
     POSTDISPLAY="$shown"
     _TAI_DREW=1
     region_highlight+=("${#BUFFER} $((${#BUFFER} + ${#shown})) $_TAI_HIGHLIGHT_STYLE")
+    _tai_dbg paint "ghost shown=${(q)shown}"
   elif (( ours_was )); then
     # What tai drew last redraw is gone, so the slot is ours to clear — and only
     # ours. This is the branch that has to know what the *last* redraw put there,
@@ -301,8 +317,10 @@ _tai_update() {
      [[ -z "${_TAI_SCORE[$BUFFER]:-}" ]] && \
      [[ "$BUFFER" != "$_TAI_MENU_DISMISS" ]] && \
      [[ "${TAI_NO_MENU:-0}" != "1" ]]; then
+    _tai_dbg paint "loose glimpse opens"
     _tai_menu_open_loose && _tai_menu_paint
   fi
+  _tai_dbg upd "done drew=$_TAI_DREW post=${(q)POSTDISPLAY} regions=${#region_highlight}"
 }
 # 1 when POSTDISPLAY holds something tai drew: a hint or a menu. The one bit of
 # state that decides whether clearing the slot is cleaning up after ourselves or
@@ -342,6 +360,7 @@ typeset -g _TAI_HINT=""
 
 # Accept widgets.
 tai-accept() {
+  _tai_dbg key "tai-accept hint=${(q)${_TAI_HINT:-}}"
   _TAI_ISEARCH=0
   _tai_shown_hint || return
   # A name off the disk is quoted on the way in, or the line says `cat My
@@ -381,6 +400,7 @@ zle -N tai-accept
 # guessing at what you meant, from no evidence at all. It stays a hint — `→`
 # takes it — and Tab still lists the honest completion (`--help`) and the files.
 tai-tab() {
+  _tai_dbg key "tai-tab"
   _TAI_ISEARCH=0
   (( CURSOR == ${#BUFFER} )) || { zle expand-or-complete; return }
   tai-menu
@@ -408,6 +428,7 @@ zle -N tai-tab
 # history merely mentions the typed letters in, and those are never written by
 # this key — see the commit gate below.
 tai-menu() {
+  _tai_dbg key "tai-menu"
   _TAI_ISEARCH=0
   # The index is keyed on whole lines, so there is no history behind a word in
   # the middle of one, and replacing a word the cursor is not on is not a
@@ -471,6 +492,7 @@ zle -N tai-menu
 # what you are about to run. A second Enter runs it, and between the two the line
 # says exactly what it will do. With no menu open, Enter is Enter.
 tai-enter() {
+  _tai_dbg key "tai-enter"
   _TAI_ISEARCH=0
   if (( _TAI_MENU_IDX )) && (( _TAI_MENU_ARMED )); then
     _tai_menu_commit
@@ -497,6 +519,7 @@ zle -N tai-enter
 # before it calls accept-line by name, so the hook stands down either way.
 typeset -gi _TAI_ACCEPT=0
 tai-accept-line() {
+  _tai_dbg key "tai-accept-line"
   _TAI_ACCEPT=1
   zle .accept-line
 }
@@ -668,12 +691,14 @@ bindkey '^[OA' tai-arrow-up
 
 
 tai-accept-or-complete() {
+  _tai_dbg key "tai-accept-or-complete"
   _TAI_ISEARCH=0
   if [[ -n "$_TAI_SUGGESTION" ]]; then zle tai-accept; else zle expand-or-complete; fi
 }
 zle -N tai-accept-or-complete
 
 tai-accept-word() {
+  _tai_dbg key "tai-accept-word"
   _TAI_ISEARCH=0
   (( _TAI_MENU_IDX )) && _tai_menu_close
   # Whatever drew the hint, for the same reason the arrow does:
@@ -694,6 +719,7 @@ tai-accept-word() {
 zle -N tai-accept-word
 
 _tai_line_init() {
+  _tai_dbg init "new line"
   POSTDISPLAY=""
   _TAI_SUGGESTION=""
   _TAI_HINT=""
@@ -748,8 +774,8 @@ _tai_line_init() {
 # a function name and not a code string — the same reason _tai_line_init is
 # one.
 typeset -gi _TAI_ISEARCH=0
-_tai_isearch_update() { _TAI_ISEARCH=1 }
-_tai_isearch_exit() { _TAI_ISEARCH=0 }
+_tai_isearch_update() { _tai_dbg isearch "update pattern=${(q)PENDING:-}"; _TAI_ISEARCH=1 }
+_tai_isearch_exit() { _tai_dbg isearch "exit"; _TAI_ISEARCH=0 }
 
 # The flag's third leg, and the one no hook timing can miss: the search is
 # raised by its own widget. The report came back a second time with the
@@ -776,10 +802,12 @@ _tai_isearch_exit() { _TAI_ISEARCH=0 }
 # value in $widgets says `builtin` for the shell's own widget and `user:name`
 # for a wrapped one — the same array the bracketed-paste wrap above reads.
 tai-isearch-backward() {
+  _tai_dbg key "tai-isearch-backward"
   _TAI_ISEARCH=1
   zle .history-incremental-search-backward
 }
 tai-isearch-forward() {
+  _tai_dbg key "tai-isearch-forward"
   _TAI_ISEARCH=1
   zle .history-incremental-search-forward
 }
@@ -843,7 +871,8 @@ _tai_record() {
   cmd=${cmd//$'\x1e'/}; cmd=${cmd//$'\x1f'/}; cmd=${cmd[1,8192]}
   cwd=${cwd//$'\x1e'/}; cwd=${cwd//$'\x1f'/}
   { print -rn -- "$ts"$'\x1f'"$code"$'\x1f'"$cwd"$'\x1f'"$cmd"$'\x1e' >> "$_TAI_SPOOL_FILE" } 2>/dev/null \
-    || { ( ${(z)_TAI_BIN} record "$cmd" --cwd "$cwd" --exit "$code" >/dev/null 2>&1 & ); return 0 }
+    || { _tai_dbg record "spool append failed — falling back to a tai record fork"; ( ${(z)_TAI_BIN} record "$cmd" --cwd "$cwd" --exit "$code" >/dev/null 2>&1 & ); return 0 }
+  _tai_dbg record "spooled exit=$code cmd=${(q)cmd} pending=$_TAI_SPOOL_N"
   (( ++_TAI_SPOOL_N ))
   _tai_spool_due
 }
@@ -861,6 +890,7 @@ _tai_spool_due() {
 }
 
 _tai_spool_flush() {
+  _tai_dbg flush "forking tai flush for $_TAI_SPOOL_N pending"
   ( ${(z)_TAI_BIN} flush >/dev/null 2>&1 & )
   _TAI_SPOOL_N=0
   _TAI_FLUSH_AT=${EPOCHSECONDS:-0}
@@ -869,9 +899,10 @@ _tai_spool_flush() {
 # A shell that exits with anything pending flushes it on the way out — the
 # detached flush survives the shell that asked for it, which is the same
 # parenthesised-fork rule the record path has always used.
-_tai_spool_exit() { (( _TAI_SPOOL_N )) && _tai_spool_flush; return 0 }
+_tai_spool_exit() { _tai_dbg state "shell exit hook, spool pending=$_TAI_SPOOL_N"; (( _TAI_SPOOL_N )) && _tai_spool_flush; return 0 }
 
 _tai_preexec() {
+  _tai_dbg exec "cmd=${(q)1}"
   # The command only. Resolving the repo and branch costs four forks, and doing
   # it here put them on the critical path of every command the user runs — about
   # 5ms, measured. They are rank context for a background write, so they are
@@ -892,6 +923,7 @@ _tai_preexec() {
 }
 _tai_precmd() {
   local code=$?
+  _tai_dbg precmd "exit=$code"
   # Learn something, and the shell you are sitting in gets it now. A rebuild
   # replaces the file atomically, so this sees either the old index or the new
   # one and never a half-written file.
@@ -907,6 +939,7 @@ _tai_precmd() {
     # record fallback already follow, and a plain `&` here left the loader
     # where zsh reports it: `[3] 14436`, then `[3] + done ( ... )`.
     if [[ "$_TAI_CMD" == *systemctl* ]]; then
+      _tai_dbg units "preloading unit caches in the background"
       ( ( _tai_units_load 0 >/dev/null 2>&1; _tai_units_load 1 >/dev/null 2>&1 ) & )
     fi
     # TAI_NO_AUTO_RECORD=1 keeps the in-memory last command for predictions

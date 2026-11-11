@@ -557,6 +557,7 @@ _tai_menu_open() {
   (( ${#_TAI_MENU} )) || return 1
 
   _TAI_MENU_ARMED=1
+  _tai_dbg menu "open word=${(q)word} rows=${#_TAI_MENU[@]} whole=$learned_whole"
   # A menu holding whole learned lines lays out with no stem, the loose list's
   # rule: the line above shows only the typed `g`, and a stem cut from the
   # rows' common prefix (`go `) would leave rows reading `mod vendor` under a
@@ -612,6 +613,7 @@ _tai_menu_layout() {
   fi
   _TAI_MENU_IDX=1
   _TAI_MENU_LINE=$BUFFER
+  _tai_dbg menu "layout rows=${#_TAI_MENU[@]} cols=$_TAI_MENU_COLS width=$_TAI_MENU_WIDTH stem=${(q)_TAI_MENU_STEM}"
   return 0
 }
 
@@ -623,6 +625,7 @@ _tai_menu_layout() {
 _tai_menu_open_loose() {
   (( ${#_TAI_LOOSE_LINES} )) || return 1
   _TAI_MENU=( "${_TAI_LOOSE_LINES[@]}" )
+  _tai_dbg menu "open loose rows=${#_TAI_MENU[@]} line=${(q)BUFFER}"
   local c _
   _TAI_MENU_Q=()
   for c in "${_TAI_MENU[@]}"; do _TAI_MENU_Q+=( 0 ); done
@@ -644,6 +647,7 @@ _tai_menu_open_loose() {
 # the line and the whole post-display, and a column's start is only known once
 # the rows before it have been built.
 _tai_menu_paint() {
+  _tai_dbg menu "paint idx=$_TAI_MENU_IDX rows=${#_TAI_MENU[@]} cols=$_TAI_MENU_COLS width=$_TAI_MENU_WIDTH"
   POSTDISPLAY=""
   region_highlight=()
   (( _TAI_MENU_IDX )) || return
@@ -706,6 +710,7 @@ _tai_menu_paint() {
   if (( _TAI_MENU_ARMED )); then
     region_highlight+=("$lo[_TAI_MENU_IDX] $hi[_TAI_MENU_IDX] $_TAI_MENU_STYLE")
   fi
+  _tai_dbg menu "paint done post=${(q)POSTDISPLAY} regions=${#region_highlight}"
 }
 
 # Write into the line what every entry already shares, before the list is drawn.
@@ -782,6 +787,7 @@ _tai_menu_prefix() {
 # line is now `cd Movies/` with the cursor after it, which is the point — a
 # completion is not a decision to execute.
 _tai_menu_commit() {
+  _tai_dbg menu "commit idx=$_TAI_MENU_IDX entry=${(q)_TAI_MENU[_TAI_MENU_IDX]}"
   local entry="${_TAI_MENU[_TAI_MENU_IDX]}"
   # The whole entry, quoted when it is a name — and the entry, not the row that
   # was drawn for it, which is the rule that keeps a shared stem or a directory
