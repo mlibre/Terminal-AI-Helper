@@ -42,8 +42,49 @@ typeset -gi _TAI_DEBUG_TRAP=0
 # quoting keep a buffer with newlines in it one log line, and `(q)` at the
 # call sites does the rest; here, whatever arrives is written as given.
 _tai_dbg() {
-  (( _TAI_DEBUG_ON )) || return 0
+  # The arming check is the only per-call cost when debug is off, so it stays
+  # one integer test — but it is not the *only* trigger. The environment is
+  # read too, because the session with the bug in it does not always start
+  # with TAI_DEBUG set: `export TAI_DEBUG=1` typed mid-session armed only the
+  # binary's side of the trail before now, and the reporter's dump — binary
+  # lines, nothing from the shell that held the freeze — is what that one-way
+  # arming produced. So a call that finds the environment armed while the
+  # flag is not, arms here, mid-session, exactly where the next line was
+  # about to be dropped.
+  (( _TAI_DEBUG_ON )) || {
+    [[ "${TAI_DEBUG:-0}" == "1" ]] || return 0
+    _tai_debug_arm
+    _tai_dbg state "debug armed mid-session: the environment said TAI_DEBUG=1"
+  }
   { print -r -- "${EPOCHREALTIME:-0} tai zsh pid=$$ ${1}: ${*:2}" >> "$_TAI_DEBUG_FILE" } 2>/dev/null
+  return 0
+}
+
+# The stage clock. The trail already names what runs; these two name how LONG
+# it ran. _tai_tick marks the start of a stage, _tai_took closes it with one
+# line — `took t.loose 412ms` — and reticks. The marks stack, because stages
+# nest: the query ticks before it calls the loose scan, and the loose scan
+# ticks before each of its three passes, so the passes' lines answer "which
+# half of the scan" and the query's own `took t.loose` — popped after the
+# scan's marks are gone — answers "the whole scan". Both are silent (and
+# free) while debug is off: one integer test each, on a path that was already
+# paying that test to log. Milliseconds round the way printf rounds, so a
+# stage that never crosses a millisecond reads `0ms` and not a float dump.
+# A mark left behind by an early return is harmless for the rest of its own
+# query — _tai_query_do clears the stack when it starts, so nothing leaks
+# past the keystroke that left it.
+typeset -ga _TAI_TICKS=()
+_tai_tick() {
+  (( _TAI_DEBUG_ON )) && _TAI_TICKS+=( "${EPOCHREALTIME:-0}" )
+  return 0
+}
+_tai_took() {
+  (( _TAI_DEBUG_ON )) || return 0
+  local -i n=${#_TAI_TICKS[@]}
+  (( n )) || return 0
+  local now="${EPOCHREALTIME:-0}" t0="${_TAI_TICKS[n]}"
+  _TAI_TICKS[n]=()
+  _tai_dbg took "$1 $(printf '%.0f' $(( (now - t0) * 1000 )))ms"
   return 0
 }
 

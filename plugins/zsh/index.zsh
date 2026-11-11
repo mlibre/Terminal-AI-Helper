@@ -71,8 +71,9 @@ _tai_load_index() {
   # lookup that reads it is defined after this file; `:-0` because the first
   # load runs before that variable exists.
   _TAI_LOOSE_GEN=$(( ${_TAI_LOOSE_GEN:-0} + 1 ))
+  local _t0="${EPOCHREALTIME:-0}"
   [[ -r "$_TAI_INDEX_FILE" ]] && _tai_index_readable && source "$_TAI_INDEX_FILE"
-  _tai_dbg index "loaded keys=${#_TAI_SCORE} file=$_TAI_INDEX_FILE"
+  _tai_dbg index "loaded keys=${#_TAI_SCORE} file=$_TAI_INDEX_FILE load=$(printf '%.0f' $(( (${EPOCHREALTIME:-0} - _t0) * 1000 )))ms"
   # The redirect is wrapped in a group whose stderr is redirected, because inside
   # a function zsh reports a failed redirect past the simple command's own
   # 2>/dev/null. The data directory may not exist yet, and a message on every

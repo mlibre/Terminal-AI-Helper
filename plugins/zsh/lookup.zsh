@@ -457,6 +457,8 @@ _tai_query() {
 _tai_query_do() {
   local prefix="$1" last="$2" first
   _tai_dbg query "prefix=${(q)prefix} last=${(q)last}"
+  _TAI_TICKS=()
+  _tai_tick
   _TAI_BEST_HELP=0; _TAI_BEST_Q=0
   _TAI_LOOSE_LINES=()
   if [[ -z "$prefix" ]]; then
@@ -475,8 +477,10 @@ _tai_query_do() {
   fi
   _tai_lines "$prefix"
   _tai_dbg query "lines=${#_TAI_LINES} lead=${(q)_TAI_LINES_LEAD}"
+  _tai_took t.lines
   _tai_best "$prefix"
   _tai_dbg query "best=${(q)_TAI_BEST} help=$_TAI_BEST_HELP"
+  _tai_took t.best
   # The word a file-argument line adds is unambiguously a path — the index
   # marked the line from what the command means — and a path is offered where
   # it exists. `cat .zh` on a history holding `cat .zhistory` used to hint the
@@ -501,6 +505,7 @@ _tai_query_do() {
     _TAI_BEST_Q=${_TAI_FILES_Q[1]:-0}
     _tai_dbg query "file answer best=${(q)_TAI_BEST}"
   fi
+  _tai_took t.files
   if [[ -z "$_TAI_BEST" ]]; then
     first="${prefix%% *}"
     # Last resort, and only while the line is still just the command name or has
@@ -525,9 +530,12 @@ _tai_query_do() {
     _TAI_BEST="$_TAI_UNIT_BEST"
     _tai_dbg query "unit answer best=${(q)_TAI_BEST}"
   fi
+  _tai_took t.units
   if [[ -z "$_TAI_BEST" && "$prefix" != *$'\n'* && ${#prefix} -ge $_TAI_LOOSE_MIN_PREFIX ]]; then
+    _tai_tick
     _tai_loose "$prefix"
     _tai_dbg query "loose before-filter=${#_TAI_LOOSE_LINES}"
+    _tai_took t.loose
     # A cd line in the glimpse is a destination someone once stood in, and
     # "somewhere else" is exactly where it can stay: the loose list is filtered
     # here rather than inside _tai_loose because the glimpse cache outlives the
@@ -564,6 +572,7 @@ _tai_query_do() {
       here_l+=( "$gline" )
     done
     _TAI_LOOSE_LINES=( "${here_l[@]}" )
+    _tai_took t.loose.live
   fi
   _tai_dbg query "loose kept=${#_TAI_LOOSE_LINES}"
 
@@ -805,6 +814,7 @@ _tai_loose() {
   local -a want rxs_c exact_l var_l fuzz_l rest3 hits_lw scan_ll
   local w line ll ll_l rxc rxb ok
   local -i k n_exact=0
+  _tai_tick
   # The (#i) glob flags the three tier filters carry need extendedglob;
   # localoptions hands this shell its own options back on return.
   setopt localoptions extendedglob
@@ -953,6 +963,7 @@ _tai_loose() {
     exact_l=( "${(@M)exact_l:#*(#i)${(b)w}*}" )
   done
   n_exact=${#exact_l[@]}
+  _tai_took loose.exact
   # Pass two — the one-edit tier, over the lines pass one rejected, and only
   # when verbatim answered nothing at all: a word the history holds verbatim is
   # the answer, and a second tier of guesses under it is noise, not memory.
@@ -1011,6 +1022,7 @@ _tai_loose() {
       (( ok )) && var_l+=( "$ll" )
     done
   fi
+  _tai_took loose.oneedit
   # Everything the one-edit tier did not accept is what the gap tier reads —
   # one array subtraction, the same set the old loop built as it rejected,
   # and the whole set when the tier never ran or accepted nothing.
@@ -1076,6 +1088,7 @@ _tai_loose() {
       (( ok )) && fuzz_l+=( "$ll" )
     done
   fi
+  _tai_took loose.gap
   # Every tier's matches, back into the lines the user ran, ranked best first
   # within the tier. Three tiers, ranked in that order: a line holding every
   # typed word verbatim outranks one holding a one-letter-away spelling, which

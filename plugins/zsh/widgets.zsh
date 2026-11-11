@@ -148,6 +148,20 @@ if (( $+widgets[bracketed-paste] )) && \
 fi
 
 _tai_update() {
+  # The whole keystroke, timed. _tai_update_run below is the hook's body with
+  # its many returns; this wrapper is the one place that sees both ends of it,
+  # so debug on gets one line per keystroke saying what the whole thing cost —
+  # and a freeze says so by its absence: the last line on the trail is the
+  # breadcrumb of the stage that never came back, with the heartbeat's next
+  # `alive` marking how long the silence lasted.
+  local t0=""
+  (( _TAI_DEBUG_ON )) && t0="${EPOCHREALTIME:-0}"
+  _tai_update_run
+  [[ -n "$t0" ]] && _tai_dbg upd "end $(printf '%.0f' $(( (${EPOCHREALTIME:-0} - t0) * 1000 )))ms"
+  return 0
+}
+
+_tai_update_run() {
   # The breadcrumb trail. When debug is off this is one `(( ))` test per
   # keystroke — the same cost class as the state reads below it — and when it
   # is on, this line is the most valuable one in the file: it names the widget
