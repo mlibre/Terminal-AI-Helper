@@ -15,6 +15,15 @@ installer itself, and `tai update` knows an npm install and updates it from
 the registry — and retargets a plugin line an older install left behind,
 the mismatch `tai version` names.
 
+npm 11.16+ and 12 block install scripts unless allowed by name. The command
+works without the flag too — the package links a `tai` executable either
+way, the first `tai` fetches the binary for this machine, and the shell
+wiring is one line away:
+
+```sh
+bash "$(npm root -g)/terminal-ai-helper/install.sh"
+```
+
 The line downloads TAI to `~/.tai`, enables both shells, imports your
 history and builds the first index; run it again later and it updates in
 place. Open a new terminal afterwards — one that is already open keeps the

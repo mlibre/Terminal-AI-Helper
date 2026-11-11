@@ -1,6 +1,6 @@
 {
   "name": "terminal-ai-helper",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "The terminal that knows your next command Bash/Zsh suggestions that learn from your own history Offline and private with no account required",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,9 @@
     "LICENSE",
     "readme.md"
   ],
+  "bin": {
+    "tai": "bin/tai.js"
+  },
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",

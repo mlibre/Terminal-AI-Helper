@@ -40,8 +40,10 @@ Linux-aarch64 | Linux-arm64) rarch="aarch64" ;;
 esac
 
 staged=""
-for cand in "$here/bin/tai-linux-$rarch" "$here/bin/tai"; do
-  if [ -x "$cand" ]; then
+for cand in "$here/bin/tai-linux-$rarch/tai" "$here/bin/tai"; do
+  # -f as well as -x: a leftover tai-linux-<arch> directory from an earlier
+  # extraction is traversable and would otherwise pass the -x test alone.
+  if [ -f "$cand" ] && [ -x "$cand" ]; then
     staged="$cand"
     break
   fi
@@ -49,8 +51,8 @@ done
 
 if [ -z "$staged" ] && [ -n "$rarch" ]; then
   version="$(tr -d '[:space:]' < "$here/VERSION" 2>/dev/null || echo latest)"
-  url="https://github.com/mlibre/Terminal-AI-Helper/releases/download/v${version}/tai-linux-${rarch}.tar.gz"
-  [ "$version" = "latest" ] && url="https://github.com/mlibre/Terminal-AI-Helper/releases/latest/download/tai-linux-${rarch}.tar.gz"
+  url="${TAI_RELEASE_URL:-https://github.com/mlibre/Terminal-AI-Helper/releases/download/v${version}/tai-linux-${rarch}.tar.gz}"
+  [ -n "${TAI_RELEASE_URL:-}" ] || [ "$version" != "latest" ] || url="https://github.com/mlibre/Terminal-AI-Helper/releases/latest/download/tai-linux-${rarch}.tar.gz"
   echo "tai: fetching the binary for linux-$rarch…"
   tarball="$here/bin/tai.tar.gz"
   if command -v curl >/dev/null 2>&1; then
@@ -58,9 +60,26 @@ if [ -z "$staged" ] && [ -n "$rarch" ]; then
   elif command -v wget >/dev/null 2>&1; then
     wget -qO "$tarball" "$url" 2>/dev/null || true
   fi
+  # The release tarball unpacks a directory — tai-linux-<arch>/tai — so the
+  # binary the next step needs is one level down, not at bin/tai. Both shapes
+  # are accepted: a flat tai beside the hook, or the directory the tarball
+  # actually carries, which is then moved into place.
   if [ -s "$tarball" ]; then
-    tar -xzf "$tarball" -C "$here/bin" 2>/dev/null && staged="$here/bin/tai"
+    tar -xzf "$tarball" -C "$here/bin" 2>/dev/null || true
     rm -f "$tarball"
+    for cand in "$here/bin/tai" "$here/bin/tai-linux-$rarch/tai"; do
+      if [ -x "$cand" ]; then
+        staged="$cand"
+        break
+      fi
+    done
+    if [ -n "$staged" ] && [ "$staged" != "$here/bin/tai" ]; then
+      mv -f "$staged" "$here/bin/tai" && staged="$here/bin/tai"
+      # The directory the tarball carried has handed over its only file; an
+      # empty remnant beside bin/tai would read as a second tai to anything
+      # that lists the package.
+      rmdir "$here/bin/tai-linux-$rarch" 2>/dev/null || rm -rf "$here/bin/tai-linux-$rarch"
+    fi
   fi
 fi
 
@@ -69,7 +88,7 @@ if [ -z "$staged" ] && [ -f "$here/Cargo.toml" ] && command -v cargo >/dev/null 
   (cd "$here" && cargo build --release --quiet) && staged="$here/target/release/tai"
 fi
 
-if [ -z "$staged" ] || [ ! -x "$staged" ]; then
+if [ -z "$staged" ] || [ ! -f "$staged" ] || [ ! -x "$staged" ]; then
   # The package itself is on disk; a binary that could not be fetched or
   # built must not fail the npm install over it — that would roll the
   # package back and leave nothing at all. Say what the machine needs.

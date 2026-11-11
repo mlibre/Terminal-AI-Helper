@@ -56,9 +56,11 @@ mkdir -p "$BIN_DIR" "${XDG_DATA_HOME:-$HOME/.local/share}/tai"
 # -- the binary ---------------------------------------------------------------
 
 _tai_binary() {
-  # 1. Already built or already staged.
+  # 1. Already built or already staged. -f as well as -x: a leftover
+  #    tai-linux-<arch> directory from an extraction is traversable and would
+  #    otherwise pass a bare -x test.
   for cand in "$REPO_DIR/target/release/tai" "$REPO_DIR/bin/tai"; do
-    if [ -x "$cand" ]; then
+    if [ -f "$cand" ] && [ -x "$cand" ]; then
       echo "$cand"
       return 0
     fi
@@ -72,9 +74,12 @@ _tai_binary() {
     *) arch="" ;;
   esac
   if [ -n "$arch" ] && command -v tar >/dev/null 2>&1; then
-    url="https://github.com/mlibre/Terminal-AI-Helper/releases/latest/download/tai-linux-${arch}.tar.gz"
+    url="${TAI_RELEASE_URL:-https://github.com/mlibre/Terminal-AI-Helper/releases/latest/download/tai-linux-${arch}.tar.gz}"
     if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
-      echo "→ fetching the prebuilt binary for linux-$arch…"
+      # Progress lines go to stderr: the function's stdout is captured by the
+      # caller as TAI_SRC, and an echo on stdout would become the thing the
+      # installer tries to copy.
+      echo "→ fetching the prebuilt binary for linux-$arch…" >&2
       tarball="$REPO_DIR/bin/tai-linux-${arch}.tar.gz"
       mkdir -p "$REPO_DIR/bin"
       if command -v curl >/dev/null 2>&1; then
@@ -82,18 +87,27 @@ _tai_binary() {
       else
         wget -qO "$tarball" "$url" 2>/dev/null || true
       fi
+      # The release tarball unpacks a directory — tai-linux-<arch>/tai — so the
+      # executable is one level below where the old test looked for it. Both
+      # shapes are accepted, and the nested one is moved into place.
       if [ -s "$tarball" ]; then
         tar -xzf "$tarball" -C "$REPO_DIR/bin" 2>/dev/null || true
         rm -f "$tarball"
-        [ -x "$REPO_DIR/bin/tai" ] && { echo "$REPO_DIR/bin/tai"; return 0; }
+        for cand in "$REPO_DIR/bin/tai" "$REPO_DIR/bin/tai-linux-$arch/tai"; do
+          [ -f "$cand" ] && [ -x "$cand" ] || continue
+          if [ "$cand" != "$REPO_DIR/bin/tai" ]; then
+            mv -f "$cand" "$REPO_DIR/bin/tai"
+          fi
+          echo "$REPO_DIR/bin/tai"; return 0
+        done
       fi
-      echo "→ no prebuilt binary yet — building from source instead…"
+      echo "→ no prebuilt binary yet — building from source instead…" >&2
     fi
   fi
   # 3. Build it. A checkout carries the source; a machine with cargo makes
   #    this the same path the developer runs.
   if command -v cargo >/dev/null 2>&1; then
-    echo "→ building the binary (cargo, first time takes a minute)…"
+    echo "→ building the binary (cargo, first time takes a minute)…" >&2
     (cd "$REPO_DIR" && cargo build --release --quiet) || {
       echo "tai: cargo build failed — install Rust from https://rustup.rs and retry" >&2
       exit 1

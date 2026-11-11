@@ -48,6 +48,11 @@ npm is a door to the same install: `npm i -g terminal-ai-helper@latest
 installer itself, and `tai update` knows an npm install and updates it from
 the registry — and retargets a plugin line an older install left behind.
 
+npm 11.16+ and 12 block install scripts unless allowed by name, and the
+door holds without the flag too: the package links a `tai` executable on
+every install, the first `tai` fetches the binary for this machine, and the
+shell wiring is one line away — `bash "$(npm root -g)/terminal-ai-helper/install.sh"`.
+
 </div>
 
 Start with [the keys](/usage), or read [how it is built](/architecture). Your

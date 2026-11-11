@@ -59,6 +59,16 @@ npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper
 exec zsh
 ```
 
+The flag is the one-step door: it runs the installer, which wires both shells
+and builds the first index. npm 11.16+ and 12 block install scripts by
+default, and without the flag the command still works — the package links a
+`tai` executable either way, the first `tai` fetches the binary for this
+machine, and it then asks for one line if the shell wiring is still missing:
+
+```sh
+bash "$(npm root -g)/terminal-ai-helper/install.sh"
+```
+
 ## Commands
 
 ```sh
