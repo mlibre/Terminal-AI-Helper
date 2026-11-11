@@ -26,7 +26,14 @@ jobs:
           fetch-depth: 0   # the tag dedup compares against existing tags
 
       - name: Install shells
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        # A runner whose apt mirror is down must not hold a release: the
+        # suite itself treats a missing zsh the way it treats missing node —
+        # the pty suites say so and skip. Two tries, then the release runs
+        # without the pty coverage this step buys.
+        continue-on-error: true
+        run: |
+          sudo apt-get update || sudo apt-get update || true
+          sudo apt-get install -y zsh
 
       - name: Run all test suites
         run: tests/test.sh
