@@ -181,8 +181,10 @@ fn postinstall_guards() {
 
 #[test]
 fn postinstall_full_install() {
+    // Its own copy: this run stages a binary into bin/, and a copy is the
+    // only way the parallel runs cannot hand one another their leftovers.
     let pack_dir = prepare();
-    let pkg = pack_dir.join("pkg/package");
+    let pkg = own_pkg_copy(pack_dir, "full");
     // The Python original reused the guards' HOME; this test keeps its own so
     // the two can run in parallel without one's rc file confusing the other.
     let home = pack_dir.join("home_full");
@@ -238,11 +240,16 @@ fn postinstall_full_install() {
 
 /// The tests run in parallel over one packed package, and the runs below
 /// mutate it (they stage and fetch a binary into bin/). Each takes its own
-/// copy of the unpacked package so the runs cannot write under each other.
+/// copy of the unpacked package so the runs cannot write under each other,
+/// and the copy carries no binary another run may already have staged — the
+/// fetch and the full install must both meet the package as npm ships it.
 fn own_pkg_copy(pack_dir: &Path, name: &str) -> PathBuf {
     let src = pack_dir.join("pkg/package");
     let dst = pack_dir.join(format!("pkg_{name}/package"));
     copy_tree(&src, &dst);
+    let _ = fs::remove_file(dst.join("bin/tai"));
+    let _ = fs::remove_dir_all(dst.join("bin/tai-linux-x86_64"));
+    let _ = fs::remove_dir_all(dst.join("bin/tai-linux-aarch64"));
     dst
 }
 
