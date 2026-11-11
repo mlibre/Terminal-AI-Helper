@@ -67,4 +67,25 @@ done
 # Errexit back on before anything else, and only if the user had it: a guard that
 # quietly leaves `set -e` off would be a worse bug than the one it prevents.
 [[ -n "$_tai_errexit_was" ]] && set -e
-unset _tai_part _TAI_PART_MISSING _TAI_PLUGIN_DIR _tai_errexit_was
+
+# The release this shell sourced, recorded where `tai version` reads it. A shell
+# that started before an update keeps the old code in memory for its whole life:
+# the rc file can already name the new tree and the running session still runs
+# the old one, and nothing outside the shell can see the difference — the report
+# that found this was a freeze the current release had fixed two versions
+# earlier, still reproducible in a shell that had never re-sourced. One builtin
+# read and one builtin write per shell start, both silent on failure: the file
+# is a diagnostic, not a dependency.
+_tai_self_version=""
+if [[ -r "${_TAI_PLUGIN_DIR:h}/VERSION" ]]; then
+  _tai_self_version="$(<"${_TAI_PLUGIN_DIR:h}/VERSION")"
+fi
+if [[ -n "$_tai_self_version" ]]; then
+  # Inside an if, not a bare statement: a data directory that does not exist
+  # yet fails the redirect, and a shell running `set -e` must not fall over a
+  # diagnostic.
+  if { print -r -- "zsh $_tai_self_version" >| "${XDG_DATA_HOME:-$HOME/.local/share}/tai/plugin-version"; } 2>/dev/null; then
+    :
+  fi
+fi
+unset _tai_part _TAI_PART_MISSING _TAI_PLUGIN_DIR _tai_errexit_was _tai_self_version

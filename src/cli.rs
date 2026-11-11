@@ -726,7 +726,50 @@ pub fn cmd_version() -> i32 {
         }
         println(&format!("{} plugin {}{}", shell, wired, note));
     }
+    // What the running shells say they sourced. The rc file names a tree, but a
+    // shell started before an update keeps the old code in memory for its whole
+    // life — the freeze the current release had fixed kept reproducible in a
+    // session that had never re-sourced, with `tai version` reporting the new
+    // release and nothing able to say otherwise. The plugin leaves one line
+    // here at source time ("zsh 3.1.1"); any version but this binary's own is
+    // the difference between a bug report about the current code and one about
+    // code this release already replaced.
+    let marker = format!("{}/plugin-version", crate::paths::data_location());
+    if let Ok(text) = std::fs::read_to_string(&marker) {
+        let text = text.trim();
+        if let Some((shell, plugin_version)) = text.split_once(' ') {
+            if plugin_version != version {
+                if ver_older(plugin_version, &version) {
+                    println(&format!(
+                        "the running {} shell still holds plugin {} — open a new shell (exec {}) to load {}",
+                        shell, plugin_version, shell, version
+                    ));
+                } else {
+                    println(&format!(
+                        "the running {} shell holds plugin {} while this binary is {} — the tai on PATH is stale; update it",
+                        shell, plugin_version, version
+                    ));
+                }
+            }
+        }
+    }
     0
+}
+
+/// True when the running shell's plugin version sorts before the binary's —
+/// the "your session predates the fix" shape. A non-release plugin version
+/// (empty, "unknown") counts as older: the advice is the same either way.
+fn ver_older(plugin: &str, binary: &str) -> bool {
+    let (p, b) = (plugin.trim(), binary.trim());
+    if p.is_empty() || b.is_empty() {
+        return true;
+    }
+    let nums = |s: &str| -> Vec<u64> {
+        s.split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    nums(p) < nums(b)
 }
 
 // -- uninstall --------------------------------------------------------------

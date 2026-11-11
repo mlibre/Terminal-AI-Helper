@@ -36,4 +36,18 @@ done
 # that stopped early has attached nothing: the prompt looks like a shell without
 # the plugin, not like half of one.
 [[ -n "$_TAI_PART_MISSING" ]] && echo "tai: cannot read plugins/${_TAI_PART_MISSING} — the install is incomplete" >&2
-unset _tai_part _TAI_PART_MISSING _TAI_PLUGIN_DIR
+
+# The release this shell sourced, recorded where `tai version` reads it. A shell
+# that started before an update keeps the old code in memory for its whole life:
+# the rc file can already name the new tree and the running session still runs
+# the old one, and nothing outside the shell can see the difference. One builtin
+# read and one builtin write per shell start, both silent on failure: the file
+# is a diagnostic, not a dependency. Inside an if, not a bare statement — a data
+# directory that does not exist yet fails the redirect, and a shell running
+# `set -e` must not fall over a diagnostic.
+_tai_self_version=""
+[[ -r "$_TAI_PLUGIN_DIR/../VERSION" ]] && _tai_self_version="$(<"$_TAI_PLUGIN_DIR/../VERSION")"
+if [[ -n "$_tai_self_version" ]] && { echo "bash $_tai_self_version" >| "${XDG_DATA_HOME:-$HOME/.local/share}/tai/plugin-version"; } 2>/dev/null; then
+  :
+fi
+unset _tai_part _TAI_PART_MISSING _TAI_PLUGIN_DIR _tai_self_version
