@@ -9,6 +9,11 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const REPO_URL: &str = "https://github.com/mlibre/terminal-ai-helper";
+/// The installer the readme leads with, fetched fresh every time it runs —
+/// the door `tai update` walks when the door this install came through has
+/// lost its tool (npm gone, npm unfindable, npm refusing).
+pub const INSTALLER_URL: &str =
+    "https://raw.githubusercontent.com/mlibre/Terminal-AI-Helper/main/install.sh";
 
 /// The two knobs of the record path's self-refresh, named where the web page
 /// can quote them: a rebuild at most once per this many seconds (bursts of
@@ -518,13 +523,83 @@ fn npm_configured() -> bool {
     true
 }
 
-fn update_npm(repo: &std::path::Path) -> i32 {
-    let npm = match crate::util::which("npm") {
+/// npm is on PATH in the shell that installed tai, but `tai update` runs in
+/// whatever shell is open now — and a node version manager adds its bin dir
+/// late, or only in a login shell. Before anything gives up, the usual homes
+/// are asked one by one; the first npm that exists and executes wins.
+fn npm_anywhere() -> Option<String> {
+    let home = crate::paths::home_dir();
+    let mut cands: Vec<String> = Vec::new();
+    // A node on PATH carries npm beside it, even when npm itself was missed.
+    if let Some(node) = crate::util::which("node") {
+        if let Some(dir) = std::path::Path::new(&node).parent() {
+            cands.push(format!("{}/npm", dir.display()));
+        }
+    }
+    // One bin directory per installed node, under each version manager.
+    let mut versioned = |parent: String| {
+        if let Ok(entries) = std::fs::read_dir(&parent) {
+            for e in entries.flatten() {
+                cands.push(format!("{}/bin/npm", e.path().display()));
+            }
+        }
+    };
+    versioned(format!("{}/.nvm/versions/node", home));
+    versioned(format!("{}/.local/share/fnm/node-versions", home));
+    versioned(format!("{}/.fnm/node-versions", home));
+    versioned(format!("{}/.volta/tools/image/node", home));
+    for fixed in [
+        format!("{}/.volta/bin", home),
+        format!("{}/.local/bin", home),
+        "/usr/local/bin".into(),
+        "/usr/bin".into(),
+        "/snap/bin".into(),
+        "/opt/homebrew/bin".into(),
+        "/usr/local/opt/node/bin".into(),
+    ] {
+        cands.push(format!("{}/npm", fixed));
+    }
+    // which() accepts a path with a slash and tests it in place, so each
+    // candidate rides the same executable test PATH entries get.
+    cands.iter().map(|c| c.as_str()).find_map(crate::util::which)
+}
+
+/// The door with no prerequisites beyond a downloader: the readme one-liner,
+/// piped the way the readme pipes it, so the installer sees an empty
+/// BASH_SOURCE, fetches the repository to its checkout, and installs from
+/// there — rc files rewired, install method rewritten. Every later `tai
+/// update` then walks the git door, which needs nothing but git.
+fn update_one_liner() -> i32 {
+    let fetched = match crate::util::which("curl") {
+        Some(c) => format!("{} -fsSL '{}'", c, INSTALLER_URL),
+        None => match crate::util::which("wget") {
+            Some(w) => format!("{} -qO- '{}'", w, INSTALLER_URL),
+            None => {
+                println("tai: neither npm nor curl nor wget is installed, so there is nothing to update with");
+                println(&format!("     fetch {} and run it with bash", INSTALLER_URL));
+                return 1;
+            }
+        },
+    };
+    // A test points TAI_INSTALLER_URL at its own copy; everyone else gets the
+    // line the readme prints.
+    let url = std::env::var("TAI_INSTALLER_URL").unwrap_or_else(|_| INSTALLER_URL.to_string());
+    let script = format!("{} '{}' | bash", fetched, url);
+    Command::new("bash")
+        .arg("-c")
+        .arg(&script)
+        .status()
+        .map(|s| s.code().unwrap_or(1))
+        .unwrap_or(1)
+}
+
+fn update_npm(repo: Option<&std::path::Path>) -> i32 {
+    let npm = match crate::util::which("npm").or_else(npm_anywhere) {
         Some(n) => n,
         None => {
-            println("tai: npm is not installed, so there is nothing to update from");
-            println("     reinstall with: npm i -g terminal-ai-helper@latest --allow-scripts=terminal-ai-helper");
-            return 1;
+            println("tai: npm is not installed, so the npm door cannot run");
+            println("     updating through the release installer instead…");
+            return update_one_liner();
         }
     };
     let before = read_version();
@@ -532,8 +607,8 @@ fn update_npm(repo: &std::path::Path) -> i32 {
         .args(["install", "-g", "terminal-ai-helper@latest", "--allow-scripts=terminal-ai-helper"])
         .status();
     if status.map(|s| !s.success()).unwrap_or(true) {
-        println("tai: npm install failed — the previous version is still installed");
-        return 1;
+        println("tai: npm install failed — updating through the release installer instead…");
+        return update_one_liner();
     }
     let after = read_version();
     // Flushed before anything else prints: npm's own output above is the
@@ -547,30 +622,31 @@ fn update_npm(repo: &std::path::Path) -> i32 {
     if npm_configured() {
         return 0;
     }
-    let installer = repo.join("install.sh");
-    if !installer.exists() {
-        println(&format!("tai: {} is missing, so the new code was not installed", installer.display()));
-        return 1;
+    match repo {
+        Some(repo) => {
+            let installer = repo.join("install.sh");
+            if !installer.exists() {
+                println(&format!("tai: {} is missing, so the new code was not installed", installer.display()));
+                return 1;
+            }
+            // A subprocess, not a re-entrant call: the install just replaced the
+            // files this process was loaded from.
+            Command::new("bash")
+                .arg(&installer)
+                .status()
+                .map(|s| s.code().unwrap_or(1))
+                .unwrap_or(1)
+        }
+        // The npm tree updated but wired nothing, and there is no checkout to
+        // install from: the release door finishes what npm started.
+        None => update_one_liner(),
     }
-    // A subprocess, not a re-entrant call: the install just replaced the
-    // files this process was loaded from.
-    Command::new("bash")
-        .arg(&installer)
-        .status()
-        .map(|s| s.code().unwrap_or(1))
-        .unwrap_or(1)
 }
 
 pub fn cmd_update() -> i32 {
     let repo = repo_dir();
     if install_method(repo.as_deref()) == "npm" {
-        return match repo {
-            Some(r) => update_npm(&r),
-            None => {
-                println("tai: npm is not installed, so there is nothing to update from");
-                1
-            }
-        };
+        return update_npm(repo.as_deref());
     }
     let git = match crate::util::which("git") {
         Some(g) => g,
@@ -1825,4 +1901,21 @@ fn parse_full_suggest(args: &[String]) -> i32 {
         i += 1;
     }
     cmd_suggest(&prefix, &cwd, &git, &branch, &last, limit, json, jev)
+}
+
+#[cfg(test)]
+mod tests {
+    /// A PATH with no npm in it is the ordinary state for `tai update`: the
+    /// shell that had it was the one npm was installed from. The probe exists
+    /// for exactly that, and the fixed homes answer where PATH did not.
+    #[test]
+    fn npm_found_beyond_path() {
+        if !std::path::Path::new("/usr/bin/npm").is_file() {
+            // A machine that keeps npm elsewhere still probes it; this check
+            // only names one home the probe must reach.
+            return;
+        }
+        std::env::set_var("PATH", "/nonexistent-tai-test");
+        assert_eq!(super::npm_anywhere().as_deref(), Some("/usr/bin/npm"));
+    }
 }

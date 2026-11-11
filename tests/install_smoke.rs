@@ -526,3 +526,126 @@ fn jev_gate() {
         "the rerank was recorded, not hidden"
     );
 }
+
+// -- update: the door that lost its tool walks the release door ----------------
+//
+// `tai update` decides by where the code it runs came from. An install the
+// npm door made keeps its marker after npm itself has gone — removed, or
+// living in a version manager this shell never loaded — and the old answer,
+// a refusal, left the user with no way forward at all. The release door asks
+// for nothing but a downloader, so the fallback is the readme one-liner run
+// from here: installer fetched, checkout cloned or refetched, rc files
+// rewired, and from then on the install is a git install that updates
+// through the git door.
+
+/// A release tarball on this machine, shaped the way the release workflow
+/// ships one — a tai-linux-<arch>/ directory with the binary inside — so the
+/// installer's fetch of the prebuilt binary never leaves the sandbox.
+fn release_tarball(home: &Path) -> String {
+    let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let dir = home.join("release");
+    let pkg = dir.join(format!("tai-linux-{}", arch));
+    fs::create_dir_all(&pkg).unwrap();
+    fs::copy(bin(), pkg.join("tai")).unwrap();
+    let tarball = dir.join(format!("tai-linux-{}.tar.gz", arch));
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(&tarball)
+            .arg("-C")
+            .arg(&dir)
+            .arg(format!("tai-linux-{}", arch))
+            .status()
+            .expect("tar runs")
+            .success(),
+        "tarball built"
+    );
+    format!("file://{}", tarball.display())
+}
+
+/// `tai update` with its doors pointed at this machine: the installer URL,
+/// the clone remote and the release tarball are all files this test made.
+fn run_update(home: &Path, extra_env: &[(&str, String)]) -> Output {
+    let mut cmd = Command::new(home.join(".local/bin/tai"));
+    cmd.arg("update")
+        .env("HOME", home)
+        .env("BIN_DIR", home.join(".local/bin"))
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("ZDOTDIR", home)
+        .env("TAI_DIR", home.join(".tai"))
+        .env("TAI_REMOTE", format!("file://{}", repo().display()))
+        .env(
+            "TAI_INSTALLER_URL",
+            format!("file://{}/install.sh", repo().display()),
+        )
+        .env("TAI_RELEASE_URL", release_tarball(home));
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    cmd.output().expect("failed to run tai update")
+}
+
+#[test]
+fn update_without_npm_walks_the_release_door() {
+    let home = world("update_npm");
+    // What an npm door leaves behind once npm itself has gone missing: the
+    // binary, the marker, and nothing else to update from.
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    fs::copy(bin(), home.join(".local/bin/tai")).unwrap();
+    fs::create_dir_all(home.join("data/tai")).unwrap();
+    fs::write(home.join("data/tai/install-method"), "npm\n").unwrap();
+
+    // npm is on PATH and it fails — the package will not install. The update
+    // does not stop there.
+    let fake = home.join("fakebin");
+    fs::create_dir_all(&fake).unwrap();
+    let npm = fake.join("npm");
+    fs::write(&npm, "#!/bin/sh\necho 'npm: simulated failure' >&2\nexit 1\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}/tests/bin:/usr/bin:/bin", fake.display(), repo().display());
+    let got = run_update(&home, &[("PATH", path)]);
+
+    let out = stdout(&got);
+    assert!(
+        out.contains("updating through the release installer instead"),
+        "the failure named the door that took over:\n{}",
+        out
+    );
+    assert_eq!(
+        got.status.code(),
+        Some(0),
+        "the release door installed:\n{}",
+        out
+    );
+    assert!(out.contains("✓ zsh installed"), "zsh wired:\n{}", out);
+    assert!(out.contains("✓ bash installed"), "bash wired:\n{}", out);
+    assert!(
+        home.join(".tai/.git").exists(),
+        "the installer left a checkout later updates can pull"
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("data/tai/install-method"))
+            .unwrap()
+            .trim(),
+        "git",
+        "the install is a git install now, and says so"
+    );
+    let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(
+        zshrc.contains(&format!("{}/plugins/tai.zsh", home.join(".tai").display())),
+        "the rc line names the checkout, not the dead npm tree:\n{}",
+        zshrc
+    );
+
+    // The next update walks the git door: fetch, reset, reinstall — no npm,
+    // no tarball, nothing but git in the story.
+    let got = run_update(&home, &[]);
+    let out = stdout(&got);
+    assert_eq!(got.status.code(), Some(0), "the git door updated:\n{}", out);
+    assert!(
+        out.contains("already up to date"),
+        "same head, said plainly:\n{}",
+        out
+    );
+}
