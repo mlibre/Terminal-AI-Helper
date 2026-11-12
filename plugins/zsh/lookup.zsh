@@ -640,6 +640,29 @@ typeset -gi _TAI_LOOSE_MAX_WORD=32
 # and lines the cap cuts were offered to it by coincidence of letters, not by
 # anything the user remembered.
 typeset -gi _TAI_LOOSE_FLOOD=400
+# The gap tier's input cap, set before the letters-in-order globs run. The
+# flood cap above bounds the tier's regex tests; this one bounds the globs
+# themselves, which are the tier's first cost and its unbounded one. The
+# report that named it: a pasted line the history held nothing of — six
+# words, every tier silent — ran six letter-order globs, one star per
+# letter, over eight thousand long lines, and the prompt stood still for
+# twenty-one seconds (`upd: end 20875ms` in the trail the debug file kept).
+# The globs had no cap in front of them; the flood cap behind them never got
+# to speak. Four hundred lines is the head of the index's own ranking —
+# the scan set is built best-first — against answers the tier caps at
+# _TAI_LOOSE_CAP: the glimpse keeps the memory, the arithmetic loses the
+# vote.
+typeset -gi _TAI_LOOSE_GAP_INPUT=400
+# The whole scan's wall-clock budget, in milliseconds, measured from the
+# call's first line. The caps above bound the work in lines; a slow machine
+# multiplies every bound by its own cost per line, and the report's machine
+# turned four hundred globs into a prompt that will not answer a keystroke.
+# The budget is the bound that does not care how slow the machine is: past
+# it, the gap tier stands down and returns what the tiers above it found —
+# which, for every prefix that ever froze, is nothing. The exact and
+# one-edit tiers are C-level filters and keep their answers regardless; the
+# budget gates the tier whose cost was the freeze.
+typeset -gi _TAI_LOOSE_BUDGET_MS=150
 
 # The in-order check for one word, as a regex: its letters joined by a bounded
 # gap, each escaped so a word holding `-`, `/` or `[` is letters and not syntax.
@@ -812,8 +835,13 @@ _tai_word_order_glob() {
 _tai_loose() {
   local prefix="${1:l}"
   local -a want rxs_c exact_l var_l fuzz_l rest3 hits_lw scan_ll
-  local w line ll ll_l rxc rxb ok
+  local w line ll ll_l rxc rxb ok t0 now
   local -i k n_exact=0
+  # The budget's clock starts here, before any tier runs: a slow machine's
+  # passes one and two count against it too, and the gap tier reads what is
+  # left. EPOCHREALTIME is the plugin's own clock (debug.zsh loads it); a
+  # shell without one reads both times as 0 and the budget never trips.
+  t0="${EPOCHREALTIME:-0}"
   _tai_tick
   # The (#i) glob flags the three tier filters carry need extendedglob;
   # localoptions hands this shell its own options back on return.
@@ -1058,8 +1086,22 @@ _tai_loose() {
     # the flood cap was measured into it.
     local -a gap_l
     gap_l=( "${rest3[@]}" )
+    # The input cap, before the globs: the cost the report paid was the globs
+    # themselves, over the whole surviving set, and the flood cap below only
+    # bounds what the globs leave. Four hundred best-ranked lines in, the
+    # globs are one twentieth of the report's cost; the answers the tier
+    # gives are capped at sixteen either way.
+    (( ${#gap_l[@]} > _TAI_LOOSE_GAP_INPUT )) && \
+      gap_l=( "${gap_l[@]:0:_TAI_LOOSE_GAP_INPUT}" )
     for (( k = 1; k <= ${#want}; k++ )); do
       (( ${#gap_l[@]} )) || break
+      # The budget, checked between globs: one glob over four hundred long
+      # lines is the report's machine at ~0.2s, and the tier has six words to
+      # serve. Past the budget the tier stands down — the answer it was
+      # building was arithmetic's memory, and the keystroke it was spending
+      # belongs to the user.
+      now="${EPOCHREALTIME:-0}"
+      (( (now - t0) * 1000 >= _TAI_LOOSE_BUDGET_MS )) && break
       _tai_word_order_glob "${want[k]}"
       gap_l=( "${(@M)gap_l:#*(#i)${~_TAI_RE_OUT}*}" )
     done
@@ -1075,6 +1117,11 @@ _tai_loose() {
       gap_l=( "${gap_l[@]:0:_TAI_LOOSE_FLOOD}" )
     for ll in "${gap_l[@]}"; do
       (( ${#fuzz_l[@]} >= _TAI_LOOSE_CAP )) && break
+      # The budget again, per line: the survivors' tests are the tier's last
+      # cost, and a budget that only gated the globs would leave the loop the
+      # very spend it exists to stop.
+      now="${EPOCHREALTIME:-0}"
+      (( (now - t0) * 1000 >= _TAI_LOOSE_BUDGET_MS )) && break
       [[ -z "${_TAI_LOOSE_CLAIMED[$ll]:-}" ]] || continue
       ll_l="${ll:l}"
       ok=1

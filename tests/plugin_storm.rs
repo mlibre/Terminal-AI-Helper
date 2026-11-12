@@ -289,3 +289,132 @@ fn reported_dead_line_is_bounded() {
     s.close();
     check_fixture_intact("the run");
 }
+
+// -- the reported freeze: the gap tier's input cap and the scan's budget -------
+//
+// The report: a pasted line the history held nothing of — six words, every
+// tier silent — stood the prompt still for twenty-one seconds. The trail the
+// debug file kept showed the scan alive between its own marks and the gap
+// tier's mark never closing: the letters-in-order globs, one star per
+// letter, ran over eight thousand long lines with no cap in front of them,
+// on every keystroke of the edit that followed, because a dead parent never
+// narrows the next scan. Two bounds answer it: the input cap that gives the
+// globs four hundred best-ranked lines instead of the whole index, and the
+// wall-clock budget that does not care how slow the machine is.
+
+#[test]
+fn gap_input_cap_keeps_the_best_answer() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    if !zsh_available() {
+        return;
+    }
+    let mut s = Session::new("zsh");
+    // The cap bounds the globs' input; it does not gate the tier. One line in,
+    // the word `opnc` — nothing holds it verbatim, and a four-letter word is
+    // below the one-edit tier's floor — reads across `opencode` at gaps the
+    // bounded regex accepts, and the glimpse keeps its answer.
+    s.run(&format!(
+        "_TAI_SCORE=( 'opencode serve --host 0.0.0.0' 50 ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _TAI_LOOSE_GAP_INPUT=1; \
+         _tai_loose \"opnc\"; \
+         print -r -- \"LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    let got = field(&text, "LOOSE", ".*");
+    assert!(
+        got.contains("opencode serve"),
+        "the gap tier answers from a capped input: [{}]",
+        got
+    );
+    s.close();
+    check_fixture_intact("the run");
+}
+
+#[test]
+fn budget_gates_the_gap_tier_only() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    if !zsh_available() {
+        return;
+    }
+    let mut s = Session::new("zsh");
+    // A budget of zero is the stand-down: the gap tier returns nothing rather
+    // than spend, and the same word that answered above now answers empty.
+    s.run(&format!(
+        "_TAI_LOOSE_BUDGET_MS=0; \
+         _TAI_SCORE=( 'opencode serve --host 0.0.0.0' 50 ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_loose \"opnc\"; \
+         print -r -- \"LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    assert_eq!(
+        field(&text, "LOOSE", ".*"),
+        "",
+        "the budget stands the gap tier down"
+    );
+    // The tiers above the gap tier are C-level filters with their own bounds;
+    // the budget never speaks to them, and their answers survive a budget of
+    // zero. The scan set is rebuilt, because the index is this test's own.
+    s.run(&format!(
+        "_TAI_SCORE=( 'git status --short' 50 ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_loose \"git statu\"; \
+         print -r -- \"LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    let got = field(&text, "LOOSE", ".*");
+    assert!(
+        got.contains("git status"),
+        "the exact tier answers regardless of the budget: [{}]",
+        got
+    );
+    s.close();
+    check_fixture_intact("the run");
+}
+
+#[test]
+fn reported_paste_is_bounded_on_a_big_index() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    if !zsh_available() {
+        return;
+    }
+    let mut s = Session::new("zsh");
+    // The report's shape: eight thousand long learned lines, a pasted line
+    // nothing in them holds, six words. The scan the report paid 20.8
+    // seconds for is bounded here by the input cap and the budget — the
+    // ceiling below is a runner-loaded machine's room, an order of magnitude
+    // past what the bounds allow and a tenth of what the report paid.
+    s.run(&format!(
+        "_tai_pairs=(); \
+         for (( _tai_i = 0; _tai_i < 8000; _tai_i++ )); do \
+           _tai_pairs+=( \"systemctl --user restart unit$_tai_i.service --quiet --job-mode=replace-irreversible --no-block && journalctl --user -u unit$_tai_i.service --no-pager --since '5 minutes ago' | grep -c systemd || true\" 1 ); \
+         done; \
+         _TAI_SCORE=( \"${{_tai_pairs[@]}}\" ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_t0=$EPOCHREALTIME; \
+         _tai_loose \"dsh plugin --profile web add open-sea-skin\"; \
+         print -r -- \"MS=[$(( (EPOCHREALTIME - _tai_t0) * 1000 ))] LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    let ms: f64 = field(&text, "MS", r"[\d.]+").parse().unwrap();
+    assert!(
+        ms < 2000.0,
+        "the reported paste answers in {}ms, not 20875",
+        ms
+    );
+    assert_eq!(
+        field(&text, "LOOSE", ".*"),
+        "",
+        "the dead paste stays dead"
+    );
+    s.close();
+    check_fixture_intact("the run");
+}
