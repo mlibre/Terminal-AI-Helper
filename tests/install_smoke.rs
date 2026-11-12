@@ -649,3 +649,181 @@ fn update_without_npm_walks_the_release_door() {
         out
     );
 }
+
+/// The npm door must install from the tree npm just unpacked, never from the
+/// checkout the rc may still name — a checkout is whatever some earlier door
+/// left there, and the report that found this ran plugin files 3.2.3 under a
+/// 3.2.5 binary: the freeze two releases had fixed, back in a fresh shell.
+#[test]
+fn npm_door_installs_from_the_package_not_a_stale_checkout() {
+    let home = world("update_npm_pkg");
+    // What the rc sources, and the tree it names is old on purpose: a VERSION
+    // two releases back, so the only fresh plugins in the story are the ones
+    // npm's package carries.
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    fs::copy(bin(), home.join(".local/bin/tai")).unwrap();
+    fs::create_dir_all(home.join(".tai/plugins")).unwrap();
+    fs::write(home.join(".tai/VERSION"), "0.0.1\n").unwrap();
+    fs::write(home.join(".tai/plugins/tai.zsh"), "# the stale checkout plugin\n").unwrap();
+    fs::write(
+        home.join(".zshrc"),
+        format!("source {}/.tai/plugins/tai.zsh\n", home.display()),
+    )
+    .unwrap();
+    fs::write(
+        home.join(".bashrc"),
+        format!("source {}/.tai/plugins/tai.bash\n", home.display()),
+    )
+    .unwrap();
+    fs::create_dir_all(home.join("data/tai")).unwrap();
+    fs::write(home.join("data/tai/install-method"), "npm\n").unwrap();
+
+    // The package npm has just fetched, staged beside the sandbox with the
+    // real installer, plugins and binary inside — and a VERSION a release
+    // ahead of the binary, so the verdict can only come from reading it.
+    let pkg_src = home.join("npm-pkg/terminal-ai-helper");
+    fs::create_dir_all(pkg_src.join("bin")).unwrap();
+    fs::copy(repo().join("install.sh"), pkg_src.join("install.sh")).unwrap();
+    fs::write(pkg_src.join("VERSION"), "9.9.9\n").unwrap();
+    let _ = fs_extra_copy(&repo().join("plugins"), &pkg_src.join("plugins"));
+    fs::copy(bin(), pkg_src.join("bin/tai")).unwrap();
+
+    // A fake npm: `install -g` puts the package in the global tree, `root -g`
+    // names that tree — the two things the update asks a real npm for.
+    let npm_root = home.join(".npm-global/lib/node_modules");
+    fs::create_dir_all(&npm_root).unwrap();
+    let fake = home.join("fakebin");
+    fs::create_dir_all(&fake).unwrap();
+    let npm = fake.join("npm");
+    fs::write(
+        &npm,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"root\" ]; then\n  echo \"$TAI_TEST_NPM_ROOT\"\n  exit 0\nfi\nrm -rf \"$TAI_TEST_NPM_ROOT/terminal-ai-helper\"\ncp -r \"$TAI_TEST_PKG_SRC\" \"$TAI_TEST_NPM_ROOT/terminal-ai-helper\"\necho \"added 1 package in 1s\"\nexit 0\n"
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}/tests/bin:/usr/bin:/bin",
+        fake.display(),
+        repo().display()
+    );
+
+    let got = run_update(
+        &home,
+        &[
+            ("PATH", path),
+            ("TAI_TEST_NPM_ROOT", npm_root.display().to_string()),
+            ("TAI_TEST_PKG_SRC", pkg_src.display().to_string()),
+        ],
+    );
+    let out = stdout(&got);
+    assert_eq!(got.status.code(), Some(0), "the npm door updated:\n{}", out);
+    assert!(
+        out.contains("✓ updated to 9.9.9"),
+        "the verdict names the package's release, not the binary's:\n{}",
+        out
+    );
+    let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(
+        zshrc.contains("node_modules/terminal-ai-helper/plugins/tai.zsh"),
+        "the installer ran from npm's tree and rewired the rc there:\n{}",
+        zshrc
+    );
+    assert!(
+        !zshrc.contains("/.tai/plugins/"),
+        "the stale checkout is out of the rc:\n{}",
+        zshrc
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("data/tai/install-method"))
+            .unwrap()
+            .trim(),
+        "npm",
+        "the npm door kept ownership of the install"
+    );
+    assert!(
+        !out.contains("are still version"),
+        "fresh plugins, so no stale-tree warning:\n{}",
+        out
+    );
+
+    // `tai version` agrees: the wiring names npm's tree and nothing else.
+    let got = run_tai(&home, &["version"]);
+    let out = stdout(&got);
+    assert!(
+        out.contains("node_modules/terminal-ai-helper/plugins/tai.zsh"),
+        "version reports the wired tree:\n{}",
+        out
+    );
+    assert!(
+        !out.contains("another install"),
+        "npm's own wiring is not the stray-tree shape:\n{}",
+        out
+    );
+}
+
+/// A stale session is one of two shapes, and the two need different advice:
+/// files on disk are this release already (exec zsh fixes it), or the tree
+/// the rc sources is old too — exec zsh would reload the same bug, the shape
+/// the freeze report carried. `tai version` tells the two apart.
+#[test]
+fn version_command_names_a_plugin_tree_the_update_never_reached() {
+    let home = world("version_stale_tree");
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    fs::copy(bin(), home.join(".local/bin/tai")).unwrap();
+    fs::create_dir_all(home.join(".tai/plugins")).unwrap();
+    fs::write(home.join(".tai/VERSION"), "0.0.1\n").unwrap();
+    fs::write(home.join(".tai/plugins/tai.zsh"), "# old\n").unwrap();
+    fs::write(
+        home.join(".zshrc"),
+        format!("source {}/.tai/plugins/tai.zsh\n", home.display()),
+    )
+    .unwrap();
+    fs::create_dir_all(home.join("data/tai")).unwrap();
+    fs::write(home.join("data/tai/plugin-version"), "zsh 0.0.1\n").unwrap();
+
+    // Disk old, session old: the exec zsh advice would reload the same code.
+    let out = stdout(&run_tai(&home, &["version"]));
+    assert!(
+        out.contains("is old too"),
+        "the stale tree is named:\n{}",
+        out
+    );
+    assert!(
+        out.contains("run 'tai update'"),
+        "the remedy is the command that refreshes the files:\n{}",
+        out
+    );
+
+    // Disk fresh, session old: the plain exec zsh advice is the right one.
+    fs::write(home.join(".tai/VERSION"), format!("{}\n", version())).unwrap();
+    let out = stdout(&run_tai(&home, &["version"]));
+    assert!(
+        out.contains("open a new shell (exec zsh)"),
+        "a fresh tree asks only for a reload:\n{}",
+        out
+    );
+    assert!(
+        !out.contains("is old too"),
+        "no stale-tree accusation when the tree is fresh:\n{}",
+        out
+    );
+}
+
+/// Copy a directory tree the way the staged npm package needs it — a helper
+/// for the one place above, because std has directories only as entries.
+fn fs_extra_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst).unwrap();
+    for entry in fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            fs_extra_copy(&entry.path(), &to).unwrap();
+        } else {
+            fs::copy(entry.path(), to).unwrap();
+        }
+    }
+    Ok(())
+}

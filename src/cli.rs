@@ -564,6 +564,98 @@ fn npm_anywhere() -> Option<String> {
     cands.iter().map(|c| c.as_str()).find_map(crate::util::which)
 }
 
+/// The tree npm just unpacked, found the way npm names it: `npm root -g` is
+/// the parent of every global package, and this one carries install.sh, the
+/// plugins and a VERSION beside the binary. It matters because the npm door
+/// updates *the package*, while the tree named by `repo` may be a checkout
+/// some other door left behind — and running the old checkout's installer is
+/// how a 3.2.5 binary left 3.2.3 plugin files on disk, the freeze two
+/// releases had fixed, still reproducible in a brand-new shell.
+fn npm_package_dir(npm: &str) -> Option<std::path::PathBuf> {
+    let out = Command::new(npm).args(["root", "-g"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if root.is_empty() {
+        return None;
+    }
+    let pkg = std::path::PathBuf::from(root).join("terminal-ai-helper");
+    if pkg.join("install.sh").exists() && pkg.join("plugins").is_dir() {
+        Some(pkg)
+    } else {
+        None
+    }
+}
+
+/// The plugin file the rc actually sources, when it can be named: the first
+/// uncommented `source …/tai.zsh` line wins, the same line `tai version`
+/// reports.
+fn wired_plugin(home: &str, rc_name: &str, plugin: &str) -> Option<String> {
+    let text = std::fs::read_to_string(format!("{}/{}", home, rc_name)).ok()?;
+    for line in text.lines() {
+        if line.trim_start().starts_with('#') || !line.contains("source") || !line.contains(plugin)
+        {
+            continue;
+        }
+        let tokens: Vec<&str> = line
+            .split_whitespace()
+            .filter(|t| t.contains(plugin))
+            .collect();
+        if let Some(t) = tokens.last() {
+            return Some(t.trim_matches('"').trim_matches('\'').to_string());
+        }
+    }
+    None
+}
+
+/// The release the wired plugin's tree ships: a plugin lives at
+/// <tree>/plugins/tai.zsh, and the VERSION the plugin itself reads at source
+/// time sits at <tree>/VERSION — the same file, so the number here is the
+/// number a fresh shell would report.
+fn tree_version_of(wired: &str) -> Option<String> {
+    let plugins = std::path::Path::new(wired).parent()?;
+    let tree = plugins.parent()?;
+    std::fs::read_to_string(tree.join("VERSION"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// Every door can still leave the files the rc sources old: the npm door
+/// updates a package while the rc names a checkout, a checkout some other
+/// door last refreshed. The report that found this had `tai version` saying
+/// 3.2.5 while the shell kept freezing on plugin code 3.2.3 — the gap-layer
+/// fix, two releases old, never on disk. One check after a door succeeds,
+/// naming the tree that lost and the one line that refreshes it.
+fn warn_stale_plugins() {
+    let home = crate::paths::home_dir();
+    let version = read_version();
+    for (shell, rc_name, plugin) in
+        [("zsh", ".zshrc", "tai.zsh"), ("bash", ".bashrc", "tai.bash")]
+    {
+        let wired = match wired_plugin(&home, rc_name, plugin) {
+            Some(w) => w,
+            None => continue,
+        };
+        let expanded = crate::paths::expanduser(&wired);
+        let v = match tree_version_of(&expanded) {
+            Some(v) => v,
+            None => continue,
+        };
+        if ver_older(&v, &version) {
+            println(&format!(
+                "tai: the {} plugin files at {} are still version {} — this update did not reach them",
+                shell, expanded, v
+            ));
+            println(&format!(
+                "     refresh them with: curl -fsSL {} | bash",
+                INSTALLER_URL
+            ));
+        }
+    }
+}
+
 /// The door with no prerequisites beyond a downloader: the readme one-liner,
 /// piped the way the readme pipes it, so the installer sees an empty
 /// BASH_SOURCE, fetches the repository to its checkout, and installs from
@@ -610,7 +702,18 @@ fn update_npm(repo: Option<&std::path::Path>) -> i32 {
         println("tai: npm install failed — updating through the release installer instead…");
         return update_one_liner();
     }
-    let after = read_version();
+    // The tree npm just unpacked is the only tree that certainly holds the new
+    // release — installer and plugins beside the binary. `repo` may be a
+    // checkout the npm door never touched, and installing from it would
+    // rewrite the rc lines with old code: the 3.2.5 binary over 3.2.3 plugin
+    // files that kept the gap-layer freeze alive in a fresh shell.
+    let pkg = npm_package_dir(&npm);
+    let after = pkg
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p.join("VERSION")).ok())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(read_version);
     // Flushed before anything else prints: npm's own output above is the
     // progress, and this line is the verdict.
     let verdict = if after == before {
@@ -622,32 +725,50 @@ fn update_npm(repo: Option<&std::path::Path>) -> i32 {
     if npm_configured() {
         return 0;
     }
-    match repo {
-        Some(repo) => {
-            let installer = repo.join("install.sh");
+    let installer = match pkg {
+        Some(pkg) => {
+            let installer = pkg.join("install.sh");
             if !installer.exists() {
-                println(&format!("tai: {} is missing, so the new code was not installed", installer.display()));
+                println(&format!(
+                    "tai: {} is missing, so the new code was not installed",
+                    installer.display()
+                ));
                 return 1;
             }
-            // A subprocess, not a re-entrant call: the install just replaced the
-            // files this process was loaded from.
-            Command::new("bash")
-                .arg(&installer)
-                .status()
-                .map(|s| s.code().unwrap_or(1))
-                .unwrap_or(1)
+            // The npm door owns this install: the marker says so, so the next
+            // update walks the same door instead of falling to the checkout.
+            std::env::set_var("TAI_INSTALL_METHOD", "npm");
+            installer
         }
-        // The npm tree updated but wired nothing, and there is no checkout to
-        // install from: the release door finishes what npm started.
-        None => update_one_liner(),
-    }
+        None => match repo {
+            Some(repo) => {
+                let installer = repo.join("install.sh");
+                if !installer.exists() {
+                    println(&format!(
+                        "tai: {} is missing, so the new code was not installed",
+                        installer.display()
+                    ));
+                    return 1;
+                }
+                installer
+            }
+            // The npm tree updated but wired nothing, and there is no checkout
+            // to install from: the release door finishes what npm started.
+            None => return update_one_liner(),
+        },
+    };
+    // A subprocess, not a re-entrant call: the install just replaced the
+    // files this process was loaded from.
+    Command::new("bash")
+        .arg(&installer)
+        .status()
+        .map(|s| s.code().unwrap_or(1))
+        .unwrap_or(1)
 }
 
-pub fn cmd_update() -> i32 {
-    let repo = repo_dir();
-    if install_method(repo.as_deref()) == "npm" {
-        return update_npm(repo.as_deref());
-    }
+/// The door behind the git marker: fetch and reinstall, one way for the
+/// checkout this install owns and the careful pull for anybody else's tree.
+fn update_git(repo: Option<&std::path::Path>) -> i32 {
     let git = match crate::util::which("git") {
         Some(g) => g,
         None => {
@@ -763,6 +884,22 @@ pub fn cmd_update() -> i32 {
         .unwrap_or(1)
 }
 
+pub fn cmd_update() -> i32 {
+    let repo = repo_dir();
+    let code = if install_method(repo.as_deref()) == "npm" {
+        update_npm(repo.as_deref())
+    } else {
+        update_git(repo.as_deref())
+    };
+    // The door can succeed and still leave the rc's plugin files old — the
+    // one shape `✓ updated to` cannot see. Name them before the shell is
+    // sent off to reload the same bug.
+    if code == 0 {
+        warn_stale_plugins();
+    }
+    code
+}
+
 pub fn cmd_version() -> i32 {
     /// Which release this is, and where the shell's plugin line points. The
     /// second half exists because the two can disagree: an install that
@@ -775,31 +912,24 @@ pub fn cmd_version() -> i32 {
     for (shell, rc_name, plugin) in
         [("zsh", ".zshrc", "tai.zsh"), ("bash", ".bashrc", "tai.bash")]
     {
-        let mut wired = String::new();
-        if let Ok(text) = std::fs::read_to_string(format!("{}/{}", home, rc_name)) {
-            for line in text.lines() {
-                if line.trim_start().starts_with('#') || !line.contains("source") || !line.contains(plugin) {
-                    continue;
-                }
-                let tokens: Vec<&str> =
-                    line.split_whitespace().filter(|t| t.contains(plugin)).collect();
-                if let Some(t) = tokens.last() {
-                    wired = t.trim_matches('"').trim_matches('\'').to_string();
-                    break;
-                }
+        let wired = match wired_plugin(&home, rc_name, plugin) {
+            Some(w) => w,
+            None => {
+                println(&format!("{} plugin not wired", shell));
+                continue;
             }
-        }
-        if wired.is_empty() {
-            println(&format!("{} plugin not wired", shell));
-            continue;
-        }
+        };
         let mut note = String::new();
         if let Some(ref repo) = repo {
-            let expanded = crate::paths::expanduser(&wired);
-            let ours = std::fs::canonicalize(&expanded).ok();
-            let theirs = std::fs::canonicalize(repo.join("plugins").join(plugin)).ok();
-            if ours.is_some() && ours != theirs {
-                note = " — another install; 'tai update' rewires it here".to_string();
+            // The npm door wires the rc into its own package on purpose; that
+            // is not the stray-tree shape this note exists for.
+            if !wired.contains("node_modules/terminal-ai-helper") {
+                let expanded = crate::paths::expanduser(&wired);
+                let ours = std::fs::canonicalize(&expanded).ok();
+                let theirs = std::fs::canonicalize(repo.join("plugins").join(plugin)).ok();
+                if ours.is_some() && ours != theirs {
+                    note = " — another install; 'tai update' rewires it here".to_string();
+                }
             }
         }
         println(&format!("{} plugin {}{}", shell, wired, note));
@@ -818,10 +948,48 @@ pub fn cmd_version() -> i32 {
         if let Some((shell, plugin_version)) = text.split_once(' ') {
             if plugin_version != version {
                 if ver_older(plugin_version, &version) {
-                    println(&format!(
-                        "the running {} shell still holds plugin {} — open a new shell (exec {}) to load {}",
-                        shell, plugin_version, shell, version
-                    ));
+                    // Two ways a session can predate the binary: the files on
+                    // disk are this release already and only the shell is old
+                    // (exec zsh fixes it), or the tree the rc sources is old
+                    // too — exec zsh would reload the same bug. The report
+                    // that found this was the freeze two releases had fixed,
+                    // still reproducible with `tai version` naming 3.2.5
+                    // while the tree it sourced still said 3.2.3.
+                    let (rc_name, plugin) = if shell == "zsh" {
+                        (".zshrc", "tai.zsh")
+                    } else {
+                        (".bashrc", "tai.bash")
+                    };
+                    let wired = wired_plugin(&home, rc_name, plugin);
+                    let disk = wired
+                        .as_deref()
+                        .map(crate::paths::expanduser)
+                        .and_then(|w| tree_version_of(&w));
+                    let fresh = disk
+                        .as_deref()
+                        .map(|v| !ver_older(v, &version))
+                        .unwrap_or(false);
+                    // No rc line to read, or the tree it names is this
+                    // release already: only the session is old, and the one
+                    // command that fixes that is a reload.
+                    if fresh || wired.is_none() {
+                        println(&format!(
+                            "the running {} shell still holds plugin {} — open a new shell (exec {}) to load {}",
+                            shell, plugin_version, shell, version
+                        ));
+                    } else {
+                        let w = wired.unwrap();
+                        let where_ = match disk {
+                            Some(v) => format!("is still {}", v),
+                            None => "has no VERSION to read".to_string(),
+                        };
+                        println(&format!(
+                            "the {} plugin tree the shell would reload is old too — {} ({}) — run 'tai update' again, then open a new shell",
+                            shell,
+                            crate::paths::expanduser(&w),
+                            where_
+                        ));
+                    }
                 } else {
                     println(&format!(
                         "the running {} shell holds plugin {} while this binary is {} — the tai on PATH is stale; update it",
