@@ -467,3 +467,64 @@ fn reported_edit_crash_shape_survives_on_a_big_index() {
     s.close();
     check_fixture_intact("the run");
 }
+
+// -- the third freeze: the word count is the gate the caps could not be -------
+//
+// The report: the same five-word line, pasted and edited, on the machine the
+// first two reports came from — `tai version` naming 3.2.6, so the input cap
+// and the budget were in place — and the trail still stopped right after
+// `took: loose.oneedit`, `upd: end` never written, the shell gone thirteen
+// seconds later. That trail is the one that proves a cap in front of a
+// statement is not a bound on the statement: the budget stands *between* the
+// tier's statements, and one C-level match — the letters-in-order glob, the
+// bounded-gap regex — runs to completion once started, whatever the machine
+// makes of the letters it was handed. What bounds it now is that the tier
+// never runs at all for the shape every report has carried: a five- and
+// six-word line is a command being composed, not a memory being recalled,
+// and the tiers above it (C-level filters, measured 17ms and 31ms in the
+// very trail that froze) are the answer it deserves. Recall — one or two
+// distinctive words — is what the tier is for, and it keeps that.
+#[test]
+fn word_count_gates_the_gap_tier_and_keeps_recall() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    if !zsh_available() {
+        return;
+    }
+    let mut s = Session::new("zsh");
+    // Two words, nothing verbatim, no one-deletion spelling in the line: the
+    // recall shape the tier exists for, and it answers from the letters in
+    // order — `dsmrkt` reads across `dshmarket` at gaps the bounded regex
+    // accepts.
+    s.run(&format!(
+        "_TAI_SCORE=( 'dsh plugin add dshmarket' 50 ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_loose \"dsh dsmrkt\"; \
+         print -r -- \"LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    let got = field(&text, "LOOSE", ".*");
+    assert!(
+        got.contains("dsh plugin add dshmarket"),
+        "a two-word recall is still served: [{}]",
+        got
+    );
+    // The same words plus two more: past the gate the tier stands down before
+    // any matcher runs, and the answer is nothing — instantly, on any machine,
+    // whatever its matcher makes of the letters it never receives.
+    s.run(&format!(
+        "_TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_loose \"dsh dsmrkt --profile web\"; \
+         print -r -- \"LOOSE=[${{_TAI_LOOSE_LINES[*]}}]\" > \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    assert_eq!(
+        field(&text, "LOOSE", ".*"),
+        "",
+        "a four-word prefix is not a recall; the tier stands down"
+    );
+    s.close();
+    check_fixture_intact("the run");
+}

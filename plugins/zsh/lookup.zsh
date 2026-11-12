@@ -1074,6 +1074,11 @@ _tai_loose() {
   for w in "${want[@]}"; do
     (( ${#w} > _TAI_LOOSE_MAX_GAP_WORD )) && { gap_ok=0; break }
   done
+  # A prefix of whole-command length is not a recall: the third freeze's
+  # report was five words, the first two were six, and every one of them was
+  # a paste or an edit. Past three words the tier stands down before any
+  # matcher runs — the tiers above keep their answers.
+  (( ${#want[@]} > _TAI_LOOSE_MAX_WORDS )) && gap_ok=0
   if (( gap_ok && n_exact == 0 && ${#var_l[@]} == 0 && ${#rest3[@]} > 0 )); then
     typeset -gA _TAI_LOOSE_CLAIMED
     _TAI_LOOSE_CLAIMED=()
@@ -1085,7 +1090,17 @@ _tai_loose() {
     # match. The loop's cost is its survivors' count — bounded below, once
     # the flood cap was measured into it.
     local -a gap_l
-    gap_l=( "${rest3[@]}" )
+    gap_l=()
+    # The line cap, before the globs: a statement that is already running is
+    # the one cost the budget cannot stop, so every statement the tier runs
+    # gets an input its matcher's worst case is proportional to. Long lines
+    # are whole commands — not fragment memories — and the answers are the
+    # same sixteen either way. The walk stops at the input cap, so a flood
+    # of long lines cannot turn this loop into the scan it bounds.
+    for ll in "${rest3[@]}"; do
+      (( ${#gap_l[@]} >= _TAI_LOOSE_GAP_INPUT )) && break
+      (( ${#ll} <= _TAI_LOOSE_TEST_LINE )) && gap_l+=( "$ll" )
+    done
     # The input cap, before the globs: the cost the report paid was the globs
     # themselves, over the whole surviving set, and the flood cap below only
     # bounds what the globs leave. Four hundred best-ranked lines in, the
@@ -1315,6 +1330,32 @@ typeset -gi _TAI_LOOSE_MAX_GAP=3
 # that found the freeze typed twenty-seven of them — and the verbatim and
 # one-edit tiers above it are the memory worth offering for a word that long.
 typeset -gi _TAI_LOOSE_MAX_GAP_WORD=16
+# The most words a prefix the scatter tier will serve may hold. The three
+# freezes this tier paid for were all the same shape the debug trail kept:
+# a pasted or edited *command* — five, six words — nothing in the history
+# held, and the tier's matchers ran anyway. The third report (`upd: end`
+# never written, the trail stopping right after `took: loose.oneedit`, the
+# shell gone thirteen seconds later) is the one that proved the caps in
+# front of the matchers are not the whole answer: the budget stands between
+# statements, and one C-level match — the letters-in-order glob, the
+# bounded-gap regex — can outrun it in flight on a machine whose matcher
+# turns that combination of letters into arithmetic. A five-word prefix is
+# not a memory being recalled; it is a line being composed, and the exact
+# and one-edit tiers above answer what is worth answering about it. Recall
+# is one or two distinctive words — `gst`, `forestt` — and stays served.
+typeset -gi _TAI_LOOSE_MAX_WORDS=3
+# The longest line the scatter tier's matchers ever meet. The two costs that
+# remain after the word and word-count caps are single statements — one glob
+# filter per word, one regex test per line — and the budget cannot stop a
+# statement that is already running, only refuse to start the next one. The
+# statement's own cost is the word's letters times the line's length, so the
+# line cap is the bound that makes every statement finite even on a matcher
+# that blows up: a sixteen-letter word over a one-hundred-twenty-character
+# line is the whole worst case, measured in microseconds on the slowest
+# machine that reported. Lines longer than this are whole commands being
+# composed or pasted — the exact tier's answers, not a fragment memory —
+# and the tier is capped at sixteen answers either way.
+typeset -gi _TAI_LOOSE_TEST_LINE=120
 # The most lines a scan hands the prefix that extends it. The set rides in the
 # memo as one joined string per slot, so a flood-level word's whole-index set
 # was megabytes per slot and a full rescan for the next letter; capped, it is
