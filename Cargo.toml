@@ -1,6 +1,6 @@
 [package]
 name = "tai"
-version = "3.2.4"
+version = "3.2.5"
 edition = "2021"
 description = "Terminal AI Helper — learns the commands you run and suggests them as you type"
 license = "MIT"

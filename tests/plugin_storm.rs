@@ -418,3 +418,52 @@ fn reported_paste_is_bounded_on_a_big_index() {
     s.close();
     check_fixture_intact("the run");
 }
+
+#[test]
+fn reported_edit_crash_shape_survives_on_a_big_index() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    if !zsh_available() {
+        return;
+    }
+    let mut s = Session::new("zsh");
+    // The report's second half: the same index, the pasted line edited — one
+    // word typed over into `reopen-sea-skin` — stood the shell for thirty-
+    // eight seconds and took /bin/zsh down with it (`shell gone` in the
+    // trail, then Konsole's crash warning). The shape that reaches the gap
+    // tier is this one, not the paste: the first words sit verbatim in the
+    // index and only the edited word is new, so the tiers above are silent
+    // and the letters-in-order globs run; the last word is fifteen letters,
+    // one below the word cap, so nothing here skips them. What bounds them
+    // is the input cap and the budget — and a crash needs the window the
+    // unbounded scan gave it, which the bounds do not leave.
+    s.run(&format!(
+        "_tai_pairs=(); \
+         for (( _tai_i = 0; _tai_i < 8000; _tai_i++ )); do \
+           _tai_pairs+=( \"dsh plugin --profile web add dshmarket$_tai_i --option=value$_tai_i --quiet && echo unit$_tai_i done\" 1 ); \
+         done; \
+         _TAI_SCORE=( \"${{_tai_pairs[@]}}\" ); \
+         _TAI_LOOSE_SCAN_GEN=-1; \
+         _tai_t0=$EPOCHREALTIME; \
+         _tai_loose \"dsh plugin --profile web reopen-sea-skin\"; \
+         print -r -- \"MS=[$(( (EPOCHREALTIME - _tai_t0) * 1000 ))]\" > \"{st}\"; \
+         print -r -- \"ALIVE=[yes]\" >> \"{st}\"",
+        st = state_path()
+    ));
+    let text = std::fs::read_to_string(state_path()).unwrap();
+    let ms: f64 = field(&text, "MS", r"[\d.]+").parse().unwrap();
+    assert!(
+        ms < 2000.0,
+        "the reported edit answers in {}ms, not the 38.5s the crash paid",
+        ms
+    );
+    // The second line is written by the same zsh that ran the scan: a shell
+    // that took the crash's path never reaches it.
+    assert_eq!(
+        field(&text, "ALIVE", ".*"),
+        "yes",
+        "the shell outlived the scan"
+    );
+    s.close();
+    check_fixture_intact("the run");
+}
