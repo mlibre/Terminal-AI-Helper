@@ -395,3 +395,211 @@ fn units_cache_survives_corruption() {
         assert!(noise.is_empty(), "{shell} corrupt-cache runs clean: {noise:?}");
     }
 }
+
+/// The reported freeze: a `systemctl --user …` line that ran once, then the
+/// same line retyped by hand with a typo growing in it, and zsh stopped
+/// taking keystrokes until Ctrl+C came to the rescue. Every step here is a
+/// keystroke — no tai process answers a redraw — so a hang is a hang in the
+/// plugin's own zsh, and the realtime trail names the widget it hung in.
+#[test]
+fn zsh_unit_line_typing_storm_does_not_hang() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    setup_units();
+    if !have("zsh") {
+        return;
+    }
+    // The history side of the report: `systemctl --user restart dsh.service`
+    // ran once and its verb-siblings live beside it in the index.
+    write_index(
+        Some(&[
+            "systemctl --user restart dsh.service",
+            "systemctl --user status dsh.service",
+            "systemctl --user stop dsh.service",
+            "systemctl --user disable dsh.service",
+            "systemctl --user start dsh.service",
+        ]),
+        None,
+    );
+    let log = PathBuf::from(format!(
+        "/tmp/tai/tai_units_storm_{}.log",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&log);
+    let mut env = units_env();
+    env.push(("TAI_DEBUG".to_string(), "1".to_string()));
+    env.push(("TAI_DEBUG_FILE".to_string(), log.to_string_lossy().into_owned()));
+    let mut s = Session::new_with("zsh", &env_refs(&env), true);
+
+    // The line runs once, the way the report's session began.
+    s.send("systemctl --user restart dsh.service");
+    s.write(ENTER);
+    s.settle();
+
+    // Then the line is retyped by hand, one character per keystroke, with
+    // the typo growing in it — `stat…`, `std…`, the exact buffers of the
+    // report. Every keystroke is settled on, so a hang names itself by
+    // timing out with the buffer it died on.
+    s.write(CTRL_U);
+    for ch in "systemctl --user s".chars() {
+        s.send(&ch.to_string());
+    }
+    for ch in "tatcdsh.service".chars() {
+        s.send(&ch.to_string());
+    }
+    s.settle();
+    s.write(CTRL_U);
+    for ch in "systemctl --user stdsh.service".chars() {
+        s.send(&ch.to_string());
+    }
+    s.settle();
+    s.write(CTRL_U);
+    for ch in "systemctl --user statcdsh.service".chars() {
+        s.send(&ch.to_string());
+    }
+    s.settle();
+
+    // Alive at the end of it, and the last redraw answered like every other.
+    let line = s.line();
+    assert_eq!(
+        line, "systemctl --user statcdsh.service",
+        "the storm of keystrokes all landed"
+    );
+    s.close();
+
+    // The trail names what ran: the storm is on record, the shell lived
+    // through it, and no widget is left mid-flight. `${(q)…}` escapes the
+    // trail's buffer field, so the spaces the line holds arrive as `\ `.
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        text.contains(r"buffer=systemctl\ --user\ statcdsh.service"),
+        "the final buffer made it onto the trail:\n{}",
+        text
+    );
+    assert!(
+        !text.contains("shell gone"),
+        "the shell outlived the storm:\n{}",
+        text
+    );
+}
+
+
+/// The reported freeze at the scale it was reported at: the reporter's index
+/// is megabytes of `dsh` and `systemctl` lines, the typed word is a typo
+/// growing letter by letter through `stat…`, and every dead prefix pays the
+/// glimpse's three tiers. One keystroke per send, and the trail's own
+/// timestamps are the measure: no single keystroke may take a second.
+#[test]
+fn zsh_unit_typing_storm_at_history_scale_is_fast() {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    setup();
+    setup_units();
+    if !have("zsh") {
+        return;
+    }
+    // A stand-in for the reporter's index: the same shape — a systemctl verb
+    // fan-out over one unit, the dsh tool the name comes from, env-prefixed
+    // lines, and long URL lines near the tier caps — at the same scale.
+    let mut commands: Vec<String> = Vec::new();
+    let verbs = [
+        "restart", "status", "stop", "start", "enable", "disable", "reload",
+        "mask", "unmask", "cat", "show", "kill", "freeze", "thaw", "clean",
+    ];
+    for v in verbs {
+        commands.push(format!("systemctl --user {v} dsh.service"));
+        commands.push(format!("systemctl {v} dsh.service"));
+        commands.push(format!("sudo systemctl --user {v} 9router.service"));
+    }
+    for i in 0..40 {
+        commands.push(format!("dsh session list --limit {i}"));
+        commands.push(format!("dsh session delete --id {i} --force"));
+        commands.push(format!("DSH_DELETE_SESSIONS_DEBUG=1 dsh session run {i}"));
+        commands.push(format!("dsh config set session.{i}.debug 1"));
+        commands.push(format!("systemctl --user restart dsh-worker-{i}.service"));
+    }
+    // Long lines near the caps, so the tiers' regexes meet real rows.
+    for i in 0..60 {
+        commands.push(format!(
+            "curl -fsSL https://example.invalid/frames/{i}/pack?align=statdsh --compressed -o frame-{i}.bin"
+        ));
+    }
+    // Bulk: thousands of ordinary commands, the way a real history reads.
+    let fillers = [
+        "git status", "git push origin main", "cargo build --release",
+        "npm test", "docker compose up -d", "tail -f /var/log/syslog",
+        "grep -rn TODO src/", "ls -la", "cd ~/work", "vim notes.md",
+    ];
+    let mut i = 0;
+    while commands.len() < 7600 {
+        let f = &fillers[i % fillers.len()];
+        commands.push(format!("{f} #{} ", i));
+        i += 1;
+    }
+    let refs: Vec<&str> = commands.iter().map(|s| s.as_str()).collect();
+    write_index(Some(&refs), None);
+
+    let log = PathBuf::from(format!(
+        "/tmp/tai/tai_units_scale_{}.log",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&log);
+    let mut env = units_env();
+    env.push(("TAI_DEBUG".to_string(), "1".to_string()));
+    env.push(("TAI_DEBUG_FILE".to_string(), log.to_string_lossy().into_owned()));
+    let mut s = Session::new_with("zsh", &env_refs(&env), true);
+
+    // The report's session: the line runs once, then the same line is
+    // retyped by hand, the typo growing one letter at a time.
+    s.send("systemctl --user restart dsh.service");
+    s.write(ENTER);
+    s.settle();
+    s.write(CTRL_U);
+    for ch in "systemctl --user s".chars() {
+        s.send(&ch.to_string());
+    }
+    for ch in "tatcdsh.service".chars() {
+        s.send(&ch.to_string());
+    }
+    for ch in "systemctl --user stdsh".chars() {
+        s.send_pause(&ch.to_string(), 60);
+    }
+    s.settle();
+    s.write(CTRL_U);
+    for ch in "systemctl --user statcdsh.service".chars() {
+        s.send_pause(&ch.to_string(), 60);
+    }
+    s.settle();
+    s.close();
+
+    // The verdict is the trail's own clock: the gap between one keystroke's
+    // redraw and the next is what the hands felt. A second at any keystroke
+    // is the freeze the report describes, whatever the total.
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let mut worst: (f64, String) = (0.0, String::new());
+    let mut prev: Option<(f64, String)> = None;
+    for line in text.lines() {
+        let (ts, rest) = match line.split_once(' ') {
+            Some(p) => p,
+            None => continue,
+        };
+        let ts: f64 = match ts.parse() { Ok(t) => t, Err(_) => continue };
+        if rest.contains("upd: widget=self-insert") {
+            if let Some((pt, _)) = &prev {
+                let d = ts - *pt;
+                if d > worst.0 {
+                    worst = (d, rest.to_string());
+                }
+            }
+            prev = Some((ts, rest.to_string()));
+        } else if !rest.contains("alive") {
+            // heartbeats must not count toward a keystroke's cost
+        }
+    }
+    assert!(
+        worst.0 < 1.0,
+        "one keystroke took {:.3}s at history scale: {}\n(trail: {})",
+        worst.0,
+        worst.1,
+        log.display()
+    );
+}

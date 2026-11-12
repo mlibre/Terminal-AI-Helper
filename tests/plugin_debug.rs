@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use support::Session;
+use support::{ENTER, Session};
 
 // Tests in one binary share /tmp/tai, so they run one at a time — the same
 // rule plugin_menu and the other pty suites run under.
@@ -310,5 +310,46 @@ fn a_crashed_shells_trail_reads_back() {
     assert!(
         text.contains("shell gone"),
         "a hand-written trail reads back through tai debug: {text}"
+    );
+}
+
+#[test]
+fn a_trail_armed_mid_session_catches_the_keystrokes() {
+    // The report that asked for this: the shell was already open when debug
+    // was wanted, and `export TAI_DEBUG=1` reached the binary's subprocesses
+    // — every `tai flush` grew the trail — and never reached the shell that
+    // was freezing, which had read the switch once at source time. The
+    // keystroke path arms itself now: the first redraw after the variable
+    // exists turns the whole trail on.
+    if support::zsh_bin().is_none() {
+        return;
+    }
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    support::setup();
+    let log = trail("midsession");
+    let _ = fs::remove_file(&log);
+    let mut s = Session::new_with(
+        "zsh",
+        &[("TAI_DEBUG_FILE", log.to_str().unwrap())],
+        true,
+    );
+    // The shell is running with no trail. The variable arrives mid-session,
+    // the way it does in a repro: an export at the prompt.
+    s.run("export TAI_DEBUG=1");
+    s.send("echo mid");
+    s.write(ENTER);
+    s.settle();
+    // One keystroke more, so the trail's keystroke half is the armed kind.
+    s.send("x");
+    s.settle();
+    s.close();
+    let text = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        text.contains("upd: widget=self-insert"),
+        "a shell armed mid-session logs its keystrokes:\n{text}"
+    );
+    assert!(
+        text.contains("tai zsh pid="),
+        "the shell-side lines name their writer:\n{text}"
     );
 }

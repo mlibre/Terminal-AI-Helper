@@ -1270,6 +1270,19 @@ pub fn cmd_debug(argv: &[String]) -> i32 {
             "TAI_DEBUG is off in THIS process (the trail below was written by others)"
         }
     ));
+    // The trap this report was built to close: the env var exported into a
+    // shell that sourced the plugin before it existed armed the binary's
+    // subprocesses and never the shell that is freezing — the trail then
+    // fills with flush lines while the keystrokes write nothing. A trail
+    // with binary lines and no shell lines under a report about typing is
+    // that trap, named while the reader is looking at it.
+    if !lines.is_empty() && !lines.iter().any(|l| l.contains("tai zsh pid=")) {
+        println("");
+        println("  the trail holds no shell-side lines — the shell that froze armed nothing.");
+        println("  in the shell where it happens, run: tai-debug");
+        println("  (or: export TAI_DEBUG=1 and press Enter once — the first keystroke after");
+        println("   that arms it too) — then reproduce, and run `tai debug` again.");
+    }
     if lines.is_empty() {
         println("  (empty)");
         println("");
